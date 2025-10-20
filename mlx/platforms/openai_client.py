@@ -1,31 +1,44 @@
 from openai import OpenAI
+from rich.console import Console
+from rich.table import Table
+from rich.panel import Panel
+
+console = Console()
 
 def openai_chat_session(
     model: str,
     temperature: float,
     top_p: float,
-    top_k: int
+    top_k: int,
+    initial_content: str = "You are an expert AI assistant for general inquiries"
 ):
     client = OpenAI()
 
     messages = [
         {
             "role": "system",
-            "content": "You are an expert AI assistant for general inquiries"
+            "content": initial_content
         }
     ]
 
-    print(f"OpenAI Chat Session ({model})")
-    print(f"Temperature: {temperature}")
-    print(f"Top K: {top_k}")
-    print(f"Top P: {top_p}")
-    print(f"Type 'exit' or 'quit' to end.\n")
+    console.print(Panel.fit(f"[bold cyan]OpenAI Chat Session[/bold cyan]\nModel: [green]{model}[/green]"))
+    table = Table(show_header=True, header_style="bold magenta")
+    table.add_column("Parameter", justify="left", style="bold white")
+    table.add_column("Value", justify="center", style="cyan")
+
+    table.add_row("Temperature (creativity)", f"{temperature}")
+    table.add_row("Top P (nucleus sampling)", f"{top_p}")
+    table.add_row("Top K (cutoff, ignored)", f"{top_k} [dim](ignored for OpenAI)[/dim]")
+
+    console.print(table)
+    console.print("[dim]Type 'exit' or 'quit' to end.[/dim]\n")
 
     while True:
-        user_input = input("You: ").strip()
+        user_input = console.input("[bold green]You: [/bold green]").strip()
 
         if user_input.lower() in { "exit", "quit" }:
-            print("Goodbye!")
+            console.print("\n[bold yellow]Goodbye![/bold yellow]")
+
             break
 
         messages.append({
@@ -43,11 +56,11 @@ def openai_chat_session(
 
             reply = response.choices[0].message.content
 
-            print(f"MLX: {reply}\n")
+            console.print(f"[bold cyan]MLX: [/bold cyan]{reply}\n")
             messages.append({
                 "role": "assistant",
                 "content": reply
             })
 
         except Exception as e:
-            print(f"Error: {e}")
+            console.print(f"[bold red]Error: {e}[/bold red]")

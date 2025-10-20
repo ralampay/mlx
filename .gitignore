@@ -1,0 +1,65 @@
+# Byte-compiled / optimized / DLL files
+__pycache__/
+*.py[cod]
+*$py.class
+
+# Virtual environments
+.env
+.venv
+env/
+venv/
+ENV/
+
+# Build and distribution artifacts
+build/
+dist/
+*.egg-info/
+.eggs/
+
+# Installer logs
+pip-log.txt
+pip-delete-this-directory.txt
+
+# IDE and editor settings
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# macOS and Linux
+.DS_Store
+.AppleDouble
+.LSOverride
+Thumbs.db
+.Trash-*
+
+# Python caches and logs
+*.log
+*.tmp
+*.bak
+*.orig
+
+# Jupyter checkpoints (if ever used)
+.ipynb_checkpoints/
+
+# Coverage and test artifacts
+.coverage
+.coverage.*
+htmlcov/
+.tox/
+.nox/
+.pytest_cache/
+
+# Local configuration
+config.yaml
+mlx_config.yaml
+*.env
+
+# API keys or credentials
+.env.local
+.env.production
+.env.development
+
+# Custom ignores
+*.sqlite3
+__test_output__/

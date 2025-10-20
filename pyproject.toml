@@ -1,0 +1,19 @@
+[project]
+name = "mlx"
+version = "0.1.0"
+description = "MLX: A command-line AI assistant."
+authors = [{ name = "Your Name", email = "raphael.alampay@gmail.com" }]
+readme = "README.md"
+license = { text = "MIT" }
+requires-python = ">=3.9"
+dependencies = [
+    "openai>=1.40.0",
+    "click>=8.1.3"
+]
+
+[project.scripts]
+mlx = "mlx.cli:main"
+
+[build-system]
+requires = ["setuptools", "wheel"]
+build-backend = "setuptools.build_meta"

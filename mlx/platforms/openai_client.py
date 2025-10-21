@@ -2,6 +2,7 @@ from openai import OpenAI
 from rich.console import Console
 from rich.table import Table
 from rich.panel import Panel
+from rich.live import Live
 
 console = Console()
 
@@ -47,20 +48,34 @@ def openai_chat_session(
         })
 
         try:
-            response = client.chat.completions.create(
+            console.print("[bold cyan]MLX:[/bold cyan] ", end="")
+            partial_content = ""
+
+            # Stream the response
+            with client.chat.completions.stream(
                 model=model,
                 messages=messages,
                 temperature=temperature,
                 top_p=top_p
-            )
+            ) as stream:
+                for event in stream:
+                    # The new SDK sends different event types
+                    if event.type == "content.delta":
+                        # This is the actual streamed text
+                        content_piece = event.delta
+                        console.print(content_piece, end="", style="white")
+                        partial_content += content_piece
+                    elif event.type == "message.stop":
+                        console.print("\n")
+                        break
+                    elif event.type == "error":
+                        console.print(f"[red]{event.error}[/red]")
+                        break
 
-            reply = response.choices[0].message.content
-
-            console.print(f"[bold cyan]MLX: [/bold cyan]{reply}\n")
-            messages.append({
-                "role": "assistant",
-                "content": reply
-            })
-
+                # Ensure the stream finishes before moving on
+                stream.until_done()
+           
+            console.print()
+            messages.append({"role": "assistant", "content": partial_content})
         except Exception as e:
             console.print(f"[bold red]Error: {e}[/bold red]")

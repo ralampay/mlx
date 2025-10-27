@@ -2,7 +2,7 @@ import typer
 from mlx.modules.chat import run_chat
 
 app = typer.Typer(
-    help="MLX - Machine Learning eXector"
+    help="MLX - Machine Learning eXecutor"
 )
 
 @app.command()

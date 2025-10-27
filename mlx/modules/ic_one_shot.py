@@ -61,7 +61,7 @@ def _test_model(net, config):
     out = net(x1, x2)
 
     typer.secho("\nTest completed successfully!", fg=typer.colors.BRIGHT_GREEN, bold=True)
-    typer.echo(f"Output tensor shape: {list(out.shape)}\n")
+    typer.secho(f"Output tensor shape: {list(out.shape)}\n", fg=typer.colors.BRIGHT_GREEN)
 
     # Display output in compact table
     table = Table(title="Model Output", show_header=True)

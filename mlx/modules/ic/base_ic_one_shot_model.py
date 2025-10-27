@@ -7,7 +7,7 @@ class BaseICOneShotModel(ABC, nn.Module):
         super().__init__()
 
     @abstractmethod
-    def forward(self, x1, x2):
+    def forward(self, x1: torch.Tensor, x2: torch.Tensor) -> torch.Tensor:
         """ Forward pass comparing two input tensors """
         pass
 

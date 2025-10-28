@@ -19,7 +19,8 @@ def main(
     device: str = typer.Option("cpu", help="Device to load model and data on"),
     action: str = typer.Option("test", help="Action for model to take (default: test)"),
     embedding_size: int = typer.Option(4096, help="Embedding size (default: 4096"),
-    batch_size: int = typer.Option(1, help="Batch size")
+    batch_size: int = typer.Option(1, help="Batch size"),
+    dataset_path: str = typer.Option("./tmp/dataset", help="Path for dataset")
 ):
     typer.echo(f"MLX starting [module={module}] [platform={platform}] [model={model}]")
 
@@ -31,7 +32,8 @@ def main(
             device=device,
             input_size=(width, height),
             embedding_size=embedding_size,
-            batch_size=batch_size
+            batch_size=batch_size,
+            dataset_path=dataset_path
         )
     else:
         typer.echo(f"Unkown module: {module}")

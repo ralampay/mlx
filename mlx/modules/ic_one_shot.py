@@ -3,6 +3,7 @@ import typer
 from rich.table import Table
 from rich.console import Console
 from mlx.modules.ic.siamese_le_net import SiameseLeNet
+from mlx.modules.data_builder import build_ic_one_shot
 
 console = Console()
 
@@ -12,7 +13,8 @@ def run_ic_one_shot(model, **kwargs):
         "device": "cpu",
         "embedding_size": 4096,
         "input_size": (105, 105),
-        "batch_size": 1
+        "batch_size": 1,
+        "dataset_path": ""
     }
 
      # Merge defaults with kwargs (user overrides)
@@ -28,6 +30,8 @@ def run_ic_one_shot(model, **kwargs):
 
     if config["action"] == "test":
         _test_model(net, config)
+    elif config["action"] == "build-dataset":
+        build_ic_one_shot(config["dataset_path"])
     else:
         raise ValueError(f"Unsupported action {config['action']}")
 

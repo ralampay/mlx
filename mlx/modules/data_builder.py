@@ -3,10 +3,53 @@ import random
 import shutil
 import typer
 from pathlib import Path
+from PIL import Image
+from torch.utils.data import Dataset
 from rich.table import Table
 from rich.console import Console
+from torchvision import transforms, datasets
+from mlx.modules.datasets.one_shot_pair_dataset import OneShotPairDataset
 
 console = Console()
+
+def load_ic_one_shot_dataset(dataset_path, input_size=(105, 105), colored=True, n_pairs_per_class=100):
+    """
+    Load train and validation datasets for one-shot learning.
+
+    Args:
+        dataset_path (str): Base dataset directory with subfolders: 'train', 'val'
+        input_size (tuple): (height, width) for resizing images
+        colored (bool): Whether to load RGB images (True) or grayscale (False)
+        n_pairs_per_class (int): Number of random pairs to generate per class
+
+    Returns:
+        (train_dataset, val_dataset)
+    """
+    train_dir = os.path.join(dataset_path, "train")
+    val_dir = os.path.join(dataset_path, "val")
+
+    if not os.path.exists(train_dir) or not os.path.exists(val_dir):
+        raise FileNotFoundError(
+            f"Expected dataset structure:\n"
+            f"{dataset_path}/train/<class_name>/img.png\n"
+            f"{dataset_path}/val/<class_name>/img.png"
+        )
+
+    train_dataset = OneShotPairDataset(
+        train_dir,
+        input_size=input_size,
+        colored=colored,
+        n_pairs_per_class=n_pairs_per_class,
+    )
+
+    val_dataset = OneShotPairDataset(
+        val_dir,
+        input_size=input_size,
+        colored=colored,
+        n_pairs_per_class=n_pairs_per_class,
+    )
+
+    return train_dataset, val_dataset
 
 def build_ic_one_shot(dataset_path: str):
     """

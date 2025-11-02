@@ -36,7 +36,8 @@ def run_ic_one_shot(model, **kwargs):
         "dataset_path": "",
         "epochs": 100,
         "refresh_per_second": 2,
-        "colored": True
+        "colored": True,
+        "num_pairs": 100
     }
 
      # Merge defaults with kwargs (user overrides)
@@ -76,14 +77,14 @@ def _print_config_summary(model: str, config: dict):
     console.print(table)
 
 def _train_model(net, config):
-    device = config["device"]
-    dataset_path = config["dataset_path"]
-    batch_size = config.get("batch_size", 4)
-    epochs = config.get("epochs", 20)
-    lr = config.get("lr", 1e-4)
-    input_size = config.get("input_size", (105, 105))
-    colored = config.get("colored", True)
-    refresh_rate = config.get("refresh_per_second", 2)
+    device          = config["device"]
+    dataset_path    = config["dataset_path"]
+    batch_size      = config.get("batch_size", 4)
+    epochs          = config.get("epochs", 20)
+    lr              = config.get("lr", 1e-4)
+    input_size      = config.get("input_size", (105, 105))
+    colored         = config.get("colored", True)
+    refresh_rate    = config.get("refresh_per_second", 2)
 
     checkpoint_dir = os.path.join(dataset_path, "checkpoints")
     os.makedirs(checkpoint_dir, exist_ok=True)
@@ -263,14 +264,14 @@ def _benchmark_model(model, config):
     console.rule("[bold blue]Benchmarking Model[/bold blue]")
 
     # --- Load config values ---
-    device = config.get("device", "cpu")
-    test_path = config["dataset_path"] # use dataset_path pointing to test folder
-    model_path = config["model_path"]
-    batch_size = config.get("batch_size", 2)
-    img_size = config.get("img_size", (105, 105))
-    colored = config.get("colored", True)
-    embedding_size = config.get("embedding_size", 4096)
-    num_pairs = config.get("num_pairs", 2000)
+    device          = config.get("device", "cpu")
+    test_path       = config["dataset_path"] # use dataset_path pointing to test folder
+    model_path      = config["model_path"]
+    batch_size      = config.get("batch_size", 2)
+    img_size        = config.get("img_size", (105, 105))
+    colored         = config.get("colored", True)
+    embedding_size  = config.get("embedding_size", 4096)
+    num_pairs       = config.get("num_pairs", 2000)
 
     # --- Instantiate and load model ---
     console.print(f"[cyan]Loading model from[/cyan] [bold]{model_path}[/bold] ...")
@@ -297,14 +298,14 @@ def _benchmark_model(model, config):
     pairs_loader = torch.utils.data.DataLoader(dataset, batch_size=1, shuffle=False)
 
     # --- Evaluate pairs ---
-    preds, probs, targets_all = [], [], []
+    preds, probs, targets = [], [], []
     with torch.no_grad():
         for img1, img2, target in tqdm(pairs_loader, desc="Evaluating pairs"):
             img1, img2, target = img1.to(device), img2.to(device), target.to(device)
             out = net(img1, img2)
             prob = torch.sigmoid(out).item()
             preds.append(1 if prob > 0.5 else 0)
-            targets_all.append(target.item())
+            targets.append(target.item())
 
 
     # --- Metrics ---

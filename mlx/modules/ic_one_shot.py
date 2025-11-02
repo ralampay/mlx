@@ -7,6 +7,7 @@ from torch.utils.data import DataLoader
 from torch import nn, optim
 import typer
 from torchvision import transforms, datasets
+import torchvision.transforms.v2 as T
 import torch.nn.functional as F
 from sklearn.metrics import f1_score, precision_score, recall_score, accuracy_score
 
@@ -21,6 +22,7 @@ from mlx.modules.data_builder import load_ic_one_shot_dataset
 from mlx.modules.ic.siamese_le_net import SiameseLeNet
 from mlx.modules.data_builder import build_ic_one_shot
 from mlx.utils import render_loss_plot
+from mlx.modules.datasets.one_shot_pair_dataset import OneShotPairDataset
 
 console = Console()
 
@@ -86,8 +88,10 @@ def _train_model(net, config):
     checkpoint_dir = os.path.join(dataset_path, "checkpoints")
     os.makedirs(checkpoint_dir, exist_ok=True)
 
-    typer.secho(f"Starting training on device={device} for {epochs} epochs",
-                fg=typer.colors.BRIGHT_YELLOW, bold=True)
+    typer.secho(
+        f"Starting training on device={device} for {epochs} epochs",
+        fg=typer.colors.BRIGHT_YELLOW, bold=True
+    )
 
     net = net.to(device)
     criterion = nn.BCEWithLogitsLoss()
@@ -277,56 +281,29 @@ def _benchmark_model(model, config):
         net.load_state_dict(checkpoint)
     net.eval()
 
-    # --- Prepare dataset ---
-    compose_pipeline = []
-
-    if not colored:
-        compose_pipeline.append(
-            transforms.Grayscale()
-        )
-
-    compose_pipeline.append(transforms.Resize(img_size))
-    compose_pipeline.append(transforms.ToTensor())
-    
-
-    transform = transforms.Compose(compose_pipeline)
-
-    dataset = datasets.ImageFolder(test_path, transform=transform)
+    #dataset = datasets.ImageFolder(test_path, transform=transform)
+    dataset = OneShotPairDataset(
+        test_path,
+        input_size=img_size,
+        colored=colored,
+        n_pairs_per_class=num_pairs
+    )
 
     console.print(f"[green]Loaded {len(dataset)} test images from {test_path}[/green]")
 
-    # --- Build label index for pairing ---
-    label_to_indices = {}
-    for idx, (_, label) in enumerate(dataset.samples):
-        label_to_indices.setdefault(label, []).append(idx)
-
-    # --- Generate positive and negative pairs ---
-    pairs, targets = [], []
-    labels = list(label_to_indices.keys())
-    for _ in range(num_pairs):
-        # positive
-        c = random.choice(labels)
-        i1, i2 = random.sample(label_to_indices[c], 2)
-        pairs.append((i1, i2))
-        targets.append(1)
-        # negative
-        c1, c2 = random.sample(labels, 2)
-        i1 = random.choice(label_to_indices[c1])
-        i2 = random.choice(label_to_indices[c2])
-        pairs.append((i1, i2))
-        targets.append(0)
+    # Dataset already provides pairs
+    pairs_loader = torch.utils.data.DataLoader(dataset, batch_size=1, shuffle=False)
 
     # --- Evaluate pairs ---
-    preds, probs = [], []
+    preds, probs, targets_all = [], [], []
     with torch.no_grad():
-        for (i1, i2), target in tqdm(zip(pairs, targets), total=len(pairs), desc="Evaluating pairs"):
-            img1, _ = dataset[i1]
-            img2, _ = dataset[i2]
-            img1, img2 = img1.unsqueeze(0).to(device), img2.unsqueeze(0).to(device)
+        for img1, img2, target in tqdm(pairs_loader, desc="Evaluating pairs"):
+            img1, img2, target = img1.to(device), img2.to(device), target.to(device)
             out = net(img1, img2)
             prob = torch.sigmoid(out).item()
             preds.append(1 if prob > 0.5 else 0)
-            probs.append(prob)
+            targets_all.append(target.item())
+
 
     # --- Metrics ---
     acc = accuracy_score(targets, preds)

@@ -13,7 +13,12 @@ class OneShotPairDataset(Dataset):
       - label = 1 → same class
       - label = 0 → different classes
     """
-    def __init__(self, root_dir, input_size=(105, 105), colored=True, n_pairs_per_class=100):
+    def __init__(self, 
+        root_dir,
+        input_size=(105, 105), 
+        colored=True, 
+        n_pairs_per_class=100
+    ):
         self.root_dir = root_dir
         self.input_size = input_size
         self.colored = colored

@@ -218,6 +218,7 @@ def _test_model(net, config):
     batch   = config["batch_size"]
     h, w    = config["input_size"]
     device  = config["device"]
+    colored = config["colored"]
 
     typer.secho(
         f"Running test on device={device} | input={h}x{w} | batch={batch}",
@@ -226,8 +227,9 @@ def _test_model(net, config):
     )
 
     # Assume colored
-    x1 = torch.randn(batch, 3, h, w).to(device)
-    x2 = torch.randn(batch, 3, h, w).to(device)
+    input_channel_size = 3 if colored else 1
+    x1 = torch.randn(batch, input_channel_size, h, w).to(device)
+    x2 = torch.randn(batch, input_channel_size, h, w).to(device)
 
     out = net(x1, x2)
 

@@ -1,5 +1,9 @@
 import os
 import random
+import math
+
+import numpy as np
+import cv2
 from tqdm import tqdm
 
 import torch
@@ -60,6 +64,8 @@ def run_ic_one_shot(model, **kwargs):
         _train_model(net, config)
     elif config["action"] == "benchmark":
         _benchmark_model(net, config)
+    elif config["action"] == "infer-image":
+        _infer_image(net, config)
     elif config["action"] == "build-dataset":
         build_ic_one_shot(config["dataset_path"])
     else:
@@ -327,3 +333,231 @@ def _benchmark_model(model, config):
     console.rule("[green]Benchmarking Complete[/green]")
 
     return {"accuracy": acc, "precision": prec, "recall": rec, "f1": f1}
+
+def _infer_image(model, config):
+    """
+    Perform inference for a given input image against a reference dataset using OpenCV.
+    Consistent preprocessing with OneShotPairDataset.
+    """
+    model.eval()
+
+    device          = config.get("device", "cpu")
+    img_size        = config.get("img_size", (105, 105))
+    colored         = config.get("colored", True)
+    input_img_path  = config["input_img"]
+    dataset_path    = config["dataset_path"]
+
+    # --- helper to preprocess like OneShotPairDataset
+    def preprocess(img_path):
+        img = cv2.imread(img_path)
+
+        if img is None:
+            raise ValueError(f"Cannot read image: {img_path}")
+
+        if not colored:
+            img = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
+            img = cv2.resize(img, img_size)
+            img = np.expand_dims(img, axis=0)  # (1, H, W)
+        else:
+            img = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
+            img = cv2.resize(img, img_size)
+            img = np.transpose(img, (2, 0, 1))  # (C, H, W)
+
+        # Normalize to [0,1]
+        img = img.astype(np.float32) / 255.0
+        tensor = torch.from_numpy(img).unsqueeze(0).to(device)  # (1, C, H, W)
+        return tensor
+
+    def get_embedding(img_path):
+        with torch.no_grad():
+            tensor = preprocess(img_path)
+            emb = model.embedding(tensor)
+        return emb
+
+    # --- get embedding of input image
+    input_emb = get_embedding(input_img_path)
+
+    # --- iterate over dataset images
+    best_match = None
+    min_distance = float("inf")
+    all_scores = []
+
+    for root, _, files in os.walk(dataset_path):
+        for fname in files:
+            if fname.lower().endswith((".jpg", ".jpeg", ".png", ".bmp", ".JPEG", ".PNG")):
+                ref_path = os.path.join(root, fname)
+                try:
+                    ref_emb = get_embedding(ref_path)
+                except Exception as e:
+                    print(f"Skipping {ref_path}: {e}")
+                    continue
+
+                dist = F.pairwise_distance(input_emb, ref_emb).item()
+
+                # --- determine label name
+                if os.path.basename(root) != "" and root != dataset_path:
+                    label = os.path.basename(root)
+                else:
+                    # fallback: try to infer from filename (before extension)
+                    label = os.path.splitext(fname)[0]
+
+                all_scores.append((label, ref_path, dist))
+
+                if dist < min_distance:
+                    min_distance = dist
+                    best_match = (label, ref_path)
+
+    # --- sort matches
+    all_scores.sort(key=lambda x: x[2])
+
+    # --- format result
+    result = {
+        "input_image": input_img_path,
+        "best_match_label": best_match[0] if best_match else None,
+        "best_match_path": best_match[1] if best_match else None,
+        "distance": min_distance,
+        "top_matches": all_scores[:10],
+    }
+
+    # --- Display results
+    _display_inference_results(result)
+
+    return result
+
+def _display_inference_results(result):
+    """
+    Display inference results as:
+    1. A composite grid of all matches (sorted by distance)
+    2. A side-by-side window showing input vs best match
+    """
+
+    input_img = result["input_image"]
+    all_matches = result["top_matches"]
+    best_label = result["best_match_label"]
+    best_path = result["best_match_path"]
+    best_distance = result["distance"]
+
+    # --- Rich Table
+    table = Table(title="🔍 Inference Results (All Samples)", show_lines=True)
+    table.add_column("Rank", justify="center", style="cyan")
+    table.add_column("Label", justify="center", style="magenta")
+    table.add_column("Image Path", justify="left")
+    table.add_column("Distance", justify="center", style="green")
+
+    for i, (label, path, dist) in enumerate(all_matches, start=1):
+        table.add_row(str(i), label, path, f"{dist:.4f}")
+
+    console.print(table)
+    typer.echo(f"\n✅ Best match: {best_label} (distance={best_distance:.4f})")
+
+    # --- Helper for header bar
+    def draw_header_bar(img, text):
+        """
+        Draw a black header bar with white text on top of the image.
+        Ensures text is always visible and fully rendered.
+        """
+        if img is None:
+            return img
+
+        # --- Ensure image is in 3-channel BGR
+        if len(img.shape) == 2 or img.shape[2] == 1:
+            img = cv2.cvtColor(img, cv2.COLOR_GRAY2BGR)
+
+        font = cv2.FONT_HERSHEY_SIMPLEX
+
+        # --- Dynamic scaling (adjusted empirically for small Omniglot-like images)
+        font_scale = max(0.5, min(1.0, img.shape[1] / 250.0))
+        thickness = max(1, int(img.shape[1] / 400))
+
+        # --- Compute text size
+        (text_w, text_h), baseline = cv2.getTextSize(text, font, font_scale, thickness)
+
+        # --- Define bar height with padding above/below
+        top_padding = 8
+        bottom_padding = 6
+        bar_height = text_h + baseline + top_padding + bottom_padding
+
+        # --- Create black bar
+        bar = np.zeros((bar_height, img.shape[1], 3), dtype=np.uint8)
+
+        # --- Text position (x: 10 px from left, y: baseline + padding + text height)
+        y = top_padding + text_h
+
+        # --- Draw text clearly on the bar
+        cv2.putText(
+            bar,
+            text,
+            (10, y),
+            font,
+            font_scale,
+            (255, 255, 255),  # white text
+            thickness,
+            cv2.LINE_AA,
+        )
+
+        # --- Combine vertically
+        combined = np.vstack((bar, img))
+        return combined
+
+    # --- Load all images
+    imgs = []
+    input_display = cv2.imread(input_img)
+    if input_display is not None:
+        input_display = draw_header_bar(input_display, "INPUT")
+        imgs.append(input_display)
+
+    for label, ref_path, dist in all_matches:
+        ref_display = cv2.imread(ref_path)
+        if ref_display is None:
+            continue
+        caption = f"{label} - dist {dist:.4f}"
+        ref_display = draw_header_bar(ref_display, caption)
+        imgs.append(ref_display)
+
+    if not imgs:
+        typer.echo("⚠️ No images to display.")
+        return
+
+    # --- Resize to consistent height
+    target_height = 200
+    resized_imgs = []
+    for img in imgs:
+        h, w = img.shape[:2]
+        scale = target_height / h
+        resized = cv2.resize(img, (int(w * scale), target_height + 40))
+        resized_imgs.append(resized)
+
+    # --- Make grid of all results
+    num_cols = 5
+    num_rows = math.ceil(len(resized_imgs) / num_cols)
+    row_imgs = []
+    for i in range(num_rows):
+        row = resized_imgs[i * num_cols:(i + 1) * num_cols]
+        while len(row) < num_cols:
+            row.append(np.zeros_like(resized_imgs[0]))
+        row_imgs.append(np.hstack(row))
+    grid = np.vstack(row_imgs)
+
+    cv2.imshow("Inference Comparison (All Samples)", grid)
+
+    # --- Separate window: input vs best match
+    input_full = cv2.imread(input_img)
+    best_full = cv2.imread(best_path)
+
+    if input_full is not None and best_full is not None:
+        input_full = draw_header_bar(input_full, "INPUT")
+        best_full = draw_header_bar(best_full, f"{best_label} - dist {best_distance:.4f}")
+
+        # Resize both to same height for side-by-side view
+        h1, w1 = input_full.shape[:2]
+        h2, w2 = best_full.shape[:2]
+        target_height = min(400, max(h1, h2))
+        input_resized = cv2.resize(input_full, (int(w1 * target_height / h1), target_height))
+        best_resized = cv2.resize(best_full, (int(w2 * target_height / h2), target_height))
+
+        side_by_side = np.hstack((input_resized, best_resized))
+        cv2.imshow("Best Match Comparison", side_by_side)
+
+    typer.echo("\nPress any key on an image window to close...")
+    cv2.waitKey(0)
+    cv2.destroyAllWindows()

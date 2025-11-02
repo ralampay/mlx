@@ -73,7 +73,10 @@ def build_ic_one_shot(dataset_path: str):
 
     label_counts = {}
     for label in label_dirs:
-        count = len(list(label.glob("*.png")))
+        files = []
+        for ext in ["*.jpg", "*.jpeg", "*.png", "*.JPG", "*.JPEG", "*.PNG"]:
+            files.extend(label.glob(ext))
+        count = len(files)
         label_counts[label.name] = count
         table.add_row(label.name, str(count))
 
@@ -106,7 +109,10 @@ def build_ic_one_shot(dataset_path: str):
     # Split each label
     typer.secho("Splitting dataset...", fg=typer.colors.BLUE, bold=True)
     for label in label_dirs:
-        images = sorted(list(label.glob("*.png")))
+        images = []
+        for ext in ["*.jpg", "*.jpeg", "*.png", "*.JPG", "*.JPEG", "*.PNG"]:
+            images.extend(label.glob(ext))
+        images = sorted(images)
         random.shuffle(images)
 
         splits = {

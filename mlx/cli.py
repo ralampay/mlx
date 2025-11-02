@@ -22,7 +22,9 @@ def main(
     batch_size: int = typer.Option(1, help="Batch size"),
     dataset_path: str = typer.Option("./tmp/dataset", help="Path for dataset"),
     epochs: int = typer.Option(100, help="Number of epochs"),
-    model_path: str = typer.Option("/tmp/sample.pt", help="Path to .pt model")
+    model_path: str = typer.Option("/tmp/sample.pt", help="Path to .pt model"),
+    input_img: str = typer.Option("/tmp/image.jpg", help="Input image for inference"),
+
 ):
     typer.echo(f"MLX starting [module={module}] [platform={platform}] [model={model}]")
 
@@ -37,7 +39,8 @@ def main(
             batch_size=batch_size,
             dataset_path=dataset_path,
             epochs=epochs,
-            model_path=model_path
+            model_path=model_path,
+            input_img=input_img
         )
     else:
         typer.echo(f"Unkown module: {module}")

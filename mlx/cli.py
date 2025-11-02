@@ -21,7 +21,8 @@ def main(
     embedding_size: int = typer.Option(4096, help="Embedding size (default: 4096"),
     batch_size: int = typer.Option(1, help="Batch size"),
     dataset_path: str = typer.Option("./tmp/dataset", help="Path for dataset"),
-    epochs: int = typer.Option(100, help="Number of epochs")
+    epochs: int = typer.Option(100, help="Number of epochs"),
+    model_path: str = typer.Option("/tmp/sample.pt", help="Path to .pt model")
 ):
     typer.echo(f"MLX starting [module={module}] [platform={platform}] [model={model}]")
 
@@ -35,7 +36,8 @@ def main(
             embedding_size=embedding_size,
             batch_size=batch_size,
             dataset_path=dataset_path,
-            epochs=epochs
+            epochs=epochs,
+            model_path=model_path
         )
     else:
         typer.echo(f"Unkown module: {module}")

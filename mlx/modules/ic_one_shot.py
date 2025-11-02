@@ -1,10 +1,14 @@
 import os
+import random
+from tqdm import tqdm
 
 import torch
 from torch.utils.data import DataLoader
 from torch import nn, optim
 import typer
-
+from torchvision import transforms, datasets
+import torch.nn.functional as F
+from sklearn.metrics import f1_score, precision_score, recall_score, accuracy_score
 
 from rich.table import Table
 from rich.console import Console, Group
@@ -29,7 +33,8 @@ def run_ic_one_shot(model, **kwargs):
         "batch_size": 1,
         "dataset_path": "",
         "epochs": 100,
-        "refresh_per_second": 2
+        "refresh_per_second": 2,
+        "colored": True
     }
 
      # Merge defaults with kwargs (user overrides)
@@ -39,7 +44,10 @@ def run_ic_one_shot(model, **kwargs):
     _print_config_summary(model, config)
 
     if model == "siamese-le-net":
-        net = SiameseLeNet(colored=True, embedding_size=config["embedding_size"])
+        net = SiameseLeNet(
+            colored=config["colored"], 
+            embedding_size=config["embedding_size"]
+        )
     else:
         raise ValueError(f"Invalid model {model}")
 
@@ -47,6 +55,8 @@ def run_ic_one_shot(model, **kwargs):
         _test_model(net, config)
     elif config["action"] == "train":
         _train_model(net, config)
+    elif config["action"] == "benchmark":
+        _benchmark_model(net, config)
     elif config["action"] == "build-dataset":
         build_ic_one_shot(config["dataset_path"])
     else:
@@ -229,3 +239,111 @@ def _test_model(net, config):
         table.add_row(str(i), f"{val:.6f}")
 
     console.print(table)
+
+def _benchmark_model(model, config):
+    """
+    Benchmarks a trained one-shot model using embeddings and cosine similarity.
+
+    Args:
+        model: The model class to instantiate (e.g., SiameseLeNet)
+        config (dict): Must include:
+            - "model_path": path to the saved .pt file
+            - "test_path": path to test dataset
+            - "device": "cuda" or "cpu"
+            - Optional: "batch_size", "embedding_size", "img_size"
+    """
+
+    console = Console()
+    console.rule("[bold blue]Benchmarking Model[/bold blue]")
+
+    # --- Load config values ---
+    device = config.get("device", "cpu")
+    test_path = config["dataset_path"] # use dataset_path pointing to test folder
+    model_path = config["model_path"]
+    batch_size = config.get("batch_size", 2)
+    img_size = config.get("img_size", (105, 105))
+    colored = config.get("colored", True)
+    embedding_size = config.get("embedding_size", 4096)
+    num_pairs = config.get("num_pairs", 2000)
+
+    # --- Instantiate and load model ---
+    console.print(f"[cyan]Loading model from[/cyan] [bold]{model_path}[/bold] ...")
+    net = model.to(device)
+    checkpoint = torch.load(model_path, map_location=device)
+
+    if "state_dict" in checkpoint:
+        net.load_state_dict(checkpoint["state_dict"])
+    else:
+        net.load_state_dict(checkpoint)
+    net.eval()
+
+    # --- Prepare dataset ---
+    compose_pipeline = []
+
+    if not colored:
+        compose_pipeline.append(
+            transforms.Grayscale()
+        )
+
+    compose_pipeline.append(transforms.Resize(img_size))
+    compose_pipeline.append(transforms.ToTensor())
+    
+
+    transform = transforms.Compose(compose_pipeline)
+
+    dataset = datasets.ImageFolder(test_path, transform=transform)
+
+    console.print(f"[green]Loaded {len(dataset)} test images from {test_path}[/green]")
+
+    # --- Build label index for pairing ---
+    label_to_indices = {}
+    for idx, (_, label) in enumerate(dataset.samples):
+        label_to_indices.setdefault(label, []).append(idx)
+
+    # --- Generate positive and negative pairs ---
+    pairs, targets = [], []
+    labels = list(label_to_indices.keys())
+    for _ in range(num_pairs):
+        # positive
+        c = random.choice(labels)
+        i1, i2 = random.sample(label_to_indices[c], 2)
+        pairs.append((i1, i2))
+        targets.append(1)
+        # negative
+        c1, c2 = random.sample(labels, 2)
+        i1 = random.choice(label_to_indices[c1])
+        i2 = random.choice(label_to_indices[c2])
+        pairs.append((i1, i2))
+        targets.append(0)
+
+    # --- Evaluate pairs ---
+    preds, probs = [], []
+    with torch.no_grad():
+        for (i1, i2), target in tqdm(zip(pairs, targets), total=len(pairs), desc="Evaluating pairs"):
+            img1, _ = dataset[i1]
+            img2, _ = dataset[i2]
+            img1, img2 = img1.unsqueeze(0).to(device), img2.unsqueeze(0).to(device)
+            out = net(img1, img2)
+            prob = torch.sigmoid(out).item()
+            preds.append(1 if prob > 0.5 else 0)
+            probs.append(prob)
+
+    # --- Metrics ---
+    acc = accuracy_score(targets, preds)
+    prec = precision_score(targets, preds)
+    rec = recall_score(targets, preds)
+    f1 = f1_score(targets, preds)
+
+    # --- Display ---
+    table = Table(title="Benchmark Results", show_header=True, header_style="bold magenta")
+    table.add_column("Metric", style="dim", width=20)
+    table.add_column("Score", justify="right")
+    table.add_row("Accuracy", f"{acc:.4f}")
+    table.add_row("Precision", f"{prec:.4f}")
+    table.add_row("Recall", f"{rec:.4f}")
+    table.add_row("F1-score", f"{f1:.4f}")
+
+    console.print(table)
+    console.rule("[green]Benchmarking Complete[/green]")
+
+    return {"accuracy": acc, "precision": prec, "recall": rec, "f1": f1}

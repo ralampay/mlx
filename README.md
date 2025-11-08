@@ -80,3 +80,12 @@ For more options, run:
 ```bash
 mlx --help
 ```
+
+## Environment Variables
+
+Some integrations expect API credentials to be present in your shell environment:
+
+- `OPENAI_API_KEY`: Required for chat sessions via the OpenAI platform. Generate a key from the OpenAI dashboard and export it, e.g. `export OPENAI_API_KEY=sk-...`.
+- `ROBOFLOW_API_KEY`: Needed when building or downloading datasets from Roboflow for the one-shot and object-detection workflows. Set it with `export ROBOFLOW_API_KEY=...`.
+
+Ensure these are configured (or provided through your secrets manager) before invoking the corresponding modules.

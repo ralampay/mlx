@@ -30,7 +30,7 @@ from mlx.modules.datasets.one_shot_pair_dataset import OneShotPairDataset
 
 console = Console()
 
-def run_ic_one_shot(model, **kwargs):
+def run_ic_one_shot(module_config):
     defaults = {
         "action": "test",
         "device": "cpu",
@@ -44,19 +44,20 @@ def run_ic_one_shot(model, **kwargs):
         "num_pairs": 100
     }
 
-     # Merge defaults with kwargs (user overrides)
-    config = {**defaults, **kwargs}
+    overrides = {k: v for k, v in module_config.items() if k != "model"}
+    config = {**defaults, **overrides}
+    model_name = module_config.get("model", "siamese-le-net")
 
     # Display configuration summary
-    _print_config_summary(model, config)
+    _print_config_summary(model_name, config)
 
-    if model == "siamese-le-net":
+    if model_name == "siamese-le-net":
         net = SiameseLeNet(
             colored=config["colored"], 
             embedding_size=config["embedding_size"]
         )
     else:
-        raise ValueError(f"Invalid model {model}")
+        raise ValueError(f"Invalid model {model_name}")
 
     if config["action"] == "test":
         _test_model(net, config)

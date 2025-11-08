@@ -4,3 +4,4 @@
 
 * Chat (LLM)
 * Image Classification
+* Object Detection

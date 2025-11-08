@@ -2,17 +2,18 @@ from openai import OpenAI
 from rich.console import Console
 from rich.table import Table
 from rich.panel import Panel
-from rich.live import Live
 
 console = Console()
 
-def openai_chat_session(
-    model: str,
-    temperature: float,
-    top_p: float,
-    top_k: int,
-    initial_content: str = "You are an expert AI assistant for general inquiries"
-):
+def run_chat(config):
+    model = config.get("model", "")
+    temperature = config.get("temperature", 0.7)
+    top_p = config.get("top_p", 0.7)
+    top_k = config.get("top_k", 50)
+    initial_content = config.get(
+        "initial_content",
+        "You are an expert AI assistant for general inquiries",
+    )
     client = OpenAI()
 
     messages = [

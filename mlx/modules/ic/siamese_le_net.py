@@ -25,6 +25,7 @@ class SiameseLeNet(BaseICOneShotModel):
 
             nn.Conv2d(128, 256, kernel_size=4),
             nn.ReLU(),
+            nn.AdaptiveAvgPool2d((6, 6)),
             nn.Flatten(),
 
             nn.Linear(256 * 6 * 6, 4096),

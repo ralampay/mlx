@@ -63,3 +63,6 @@ mlx_config.yaml
 # Custom ignores
 *.sqlite3
 __test_output__/
+
+# Ignore pt files in root directory
+*.pt

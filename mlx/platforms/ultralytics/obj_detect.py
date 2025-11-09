@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Dict, Any, Union
+from typing import Dict, Any, Optional, Union
 
 import typer
 from rich.console import Console
@@ -28,7 +28,6 @@ def run_obj_detect(config: Dict[str, Any]):
 
 
 def _train_obj_detect(config: Dict[str, Any]):
-
     dataset_dir = Path(config.get("dataset_path", "")).expanduser()
     if not dataset_dir.exists():
         raise typer.BadParameter(f"Dataset path does not exist: {dataset_dir}")
@@ -37,8 +36,16 @@ def _train_obj_detect(config: Dict[str, Any]):
     if not data_yaml.exists():
         raise typer.BadParameter(f"Expected YOLO data.yaml at: {data_yaml}")
 
-    weights_source = config.get("model_path") or config.get("model") or "yolo11n.pt"
-    resolved_weights = _resolve_weights_source(weights_source)
+    weights_source = config.get("model_path")
+    resolved_weights = _resolve_weights_source(weights_source) if weights_source else None
+    if isinstance(resolved_weights, (str, Path)):
+        resolved_weights = Path(resolved_weights)
+        if not resolved_weights.exists():
+            raise typer.BadParameter(f"Model weights not found: {resolved_weights}")
+    model_config = config.get("model")
+    resolved_cfg = Path(_resolve_weights_source(model_config)) if model_config else None
+    if resolved_cfg and not resolved_cfg.exists():
+        raise typer.BadParameter(f"Model YAML not found: {resolved_cfg}")
     epochs = config.get("epochs", 100)
     batch_size = config.get("batch_size", 16)
     device = config.get("device", "cpu")
@@ -52,7 +59,8 @@ def _train_obj_detect(config: Dict[str, Any]):
     summary = Table(title="Training Configuration", show_lines=True)
     summary.add_column("Key", justify="right", style="cyan", no_wrap=True)
     summary.add_column("Value", style="magenta")
-    summary.add_row("Weights", str(resolved_weights))
+    summary.add_row("Init Weights", str(resolved_weights) if resolved_weights else "random init")
+    summary.add_row("Model YAML", str(resolved_cfg) if resolved_cfg else "not set")
     summary.add_row("Dataset", str(dataset_dir))
     summary.add_row("Data YAML", str(data_yaml))
     summary.add_row("Epochs", str(epochs))
@@ -61,10 +69,52 @@ def _train_obj_detect(config: Dict[str, Any]):
     summary.add_row("Image Size", f"{imgsz}")
     summary.add_row("Project", str(project_dir))
     summary.add_row("Run Name", run_name)
+    summary.add_row("Pretrained", str(bool(config.get("pretrained", False))))
+    lr0 = config.get("lr0")
+    summary.add_row("lr0", str(lr0) if lr0 is not None else "default")
+    summary.add_row("Optimizer", config.get("optimizer", "auto"))
+    summary.add_row("nbs", str(config.get("nbs", 64)))
+    summary.add_row("Warmup Epochs", str(config.get("warmup_epochs", 3.0)))
+    summary.add_row("AMP", str(bool(config.get("amp", True))))
+    loss_clip = config.get("loss_clip")
+    summary.add_row("Loss Clip", str(loss_clip) if loss_clip is not None else "disabled")
     console.print(summary)
 
     typer.echo("Loading Ultralytics model...")
-    model = YOLO(str(resolved_weights))
+    if not model_config and not resolved_weights:
+        raise typer.BadParameter("Provide --model (YAML) and/or --model-path (.pt) to define the detector.")
+
+    model: Optional[YOLO] = None
+
+    if resolved_cfg:
+        model = YOLO(str(resolved_cfg))
+
+    if resolved_weights:
+        typer.echo(f"Loading weights from: {resolved_weights}")
+        if model is None:
+            model = YOLO(str(resolved_weights))
+        else:
+            load_result = getattr(model, "load", None)
+            if callable(load_result):
+                loaded = model.load(str(resolved_weights))
+                if loaded is not None:
+                    model = loaded
+            else:
+                model = YOLO(str(resolved_weights))
+
+    if model is None:
+        raise RuntimeError("Failed to initialize the YOLO model. Check --model and --model-path arguments.")
+
+    overrides = getattr(model, "overrides", {})
+    overrides["pretrained"] = bool(config.get("pretrained", False))
+    overrides["model"] = str(resolved_cfg) if resolved_cfg else overrides.get("model")
+    overrides.pop("weights", None)
+    overrides["optimizer"] = config.get("optimizer", overrides.get("optimizer", "auto"))
+    overrides["nbs"] = int(config.get("nbs", overrides.get("nbs", 64)))
+    overrides["warmup_epochs"] = float(config.get("warmup_epochs", overrides.get("warmup_epochs", 3.0)))
+    overrides["amp"] = bool(config.get("amp", overrides.get("amp", True)))
+    model.overrides = overrides
+    model.ckpt_path = str(resolved_weights) if resolved_weights else None
 
     train_kwargs = {
         "data": str(data_yaml),
@@ -75,7 +125,13 @@ def _train_obj_detect(config: Dict[str, Any]):
         "project": str(project_dir),
         "name": run_name,
         "exist_ok": True,
+        "pretrained": overrides["pretrained"],
     }
+    if lr0 is not None:
+        train_kwargs["lr0"] = float(lr0)
+    loss_clip = config.get("loss_clip")
+    if loss_clip is not None:
+        train_kwargs["loss_clip"] = float(loss_clip)
 
     typer.echo("Starting training loop...")
     results = model.train(**train_kwargs)
@@ -196,8 +252,11 @@ def _annotate_detections(frame, result):
     return annotated
 
 
-def _resolve_weights_source(weights_source: Union[str, Path]) -> Union[str, Path]:
+def _resolve_weights_source(weights_source: Union[str, Path, None]) -> Union[str, Path, None]:
     """Allow passing either weight names, local files, or ultralytics package YAML definitions."""
+    if weights_source is None:
+        return None
+
     if isinstance(weights_source, Path):
         return weights_source
 

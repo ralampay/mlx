@@ -1,4 +1,4 @@
-from typing import Dict, Any
+from typing import Dict, Any, Optional
 
 import typer
 
@@ -24,10 +24,45 @@ def main(
     batch_size: int = typer.Option(1, help="Batch size"),
     dataset_path: str = typer.Option("./tmp/dataset", help="Path for dataset"),
     epochs: int = typer.Option(100, help="Number of epochs"),
-    model_path: str = typer.Option("/tmp/sample.pt", help="Path to .pt model"),
+    model_path: Optional[str] = typer.Option(
+        None,
+        help="Path to .pt model. Optional for training; required for camera inference.",
+    ),
     input_img: str = typer.Option("/tmp/image.jpg", help="Input image for inference"),
     confidence: float = typer.Option(0.25, help="Confidence threshold for detection"),
     camera_index: int = typer.Option(0, help="Camera index for infer-camera action"),
+    pretrained: bool = typer.Option(
+        False,
+        "--pretrained/--no-pretrained",
+        help="Allow Ultralytics to load pretrained weights when only a YAML is provided.",
+        show_default=True,
+    ),
+    lr0: Optional[float] = typer.Option(
+        None,
+        help="Initial learning rate for Ultralytics training (overrides default when provided).",
+    ),
+    optimizer: str = typer.Option(
+        "auto",
+        help="Optimizer to use (auto, sgd, adam, adamw, rmsprop).",
+    ),
+    nbs: int = typer.Option(
+        64,
+        help="Nominal batch size used for learning-rate scaling inside Ultralytics.",
+    ),
+    warmup_epochs: float = typer.Option(
+        3.0,
+        help="Number of warmup epochs before switching to the main schedule.",
+    ),
+    amp: bool = typer.Option(
+        True,
+        "--amp/--no-amp",
+        help="Enable mixed-precision (AMP) training inside Ultralytics.",
+        show_default=True,
+    ),
+    loss_clip: Optional[float] = typer.Option(
+        None,
+        help="Optional gradient clipping value for Ultralytics training (None disables).",
+    ),
 
 ):
     typer.echo(f"MLX starting [module={module}] [platform={platform}] [model={model}]")
@@ -51,6 +86,13 @@ def main(
         "input_size": (width, height),
         "confidence": confidence,
         "camera_index": camera_index,
+        "pretrained": pretrained,
+        "lr0": lr0,
+        "optimizer": optimizer,
+        "nbs": nbs,
+        "warmup_epochs": warmup_epochs,
+        "amp": amp,
+        "loss_clip": loss_clip,
     }
 
     try:

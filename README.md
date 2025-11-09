@@ -61,7 +61,7 @@ mlx --module obj-detect \
     --platform ultralytics \
     --action train \
     --dataset-path ~/datasets/roboflow-yolo \
-    --model-path ultralytics/cfg/models/ext/cad_yolo12.yaml \
+    --model ultralytics/cfg/models/ext/cad_yolo12.yaml \
     --epochs 100 \
     --batch-size 16 \
     --device cuda:0
@@ -71,7 +71,15 @@ mlx --module obj-detect \
 - `--platform ultralytics`: Uses the `ralampay/ultralytics` fork.
 - `--action`: Currently supports `train`.
 - `--dataset-path`: Directory containing the YOLO-formatted dataset (`data.yaml`, images, labels).
-- `--model-path`: Weights or YAML config (resolves local files or package paths).
+- `--model`: Architecture YAML to instantiate the network (required when starting from scratch).
+- `--model-path`: Optional weights (`.pt`) to warm start training; omit to train from random init.
+- `--pretrained/--no-pretrained`: Whether Ultralytics should fetch pretrained weights for the provided YAML (default: disabled).
+- `--lr0`: (Optional) Override the initial learning rate if the default is too high when training from scratch.
+- `--optimizer`: Optimizer selection (`auto`, `adamw`, `sgd`, `adam`, `rmsprop`, etc.).
+- `--nbs`: Nominal batch size used for Ultralytics’ LR scaling (default `64`).
+- `--warmup-epochs`: Control the length of the LR warmup phase (default `3`).
+- `--amp/--no-amp`: Toggle mixed-precision training.
+- `--loss-clip`: Optional gradient clipping threshold.
 - `--epochs`, `--batch-size`, `--device`: Standard training controls.
 - `--height`, `--width`: Influence the YOLO `imgsz` (largest dimension wins).
 

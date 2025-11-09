@@ -75,6 +75,24 @@ mlx --module obj-detect \
 - `--epochs`, `--batch-size`, `--device`: Standard training controls.
 - `--height`, `--width`: Influence the YOLO `imgsz` (largest dimension wins).
 
+For live camera inference with trained weights:
+
+```bash
+mlx --module obj-detect \
+    --platform ultralytics \
+    --action infer-camera \
+    --model ultralytics/cfg/models/ext/cad_yolo12.yaml \
+    --model-path ./runs/train/weights/best.pt \
+    --device cpu \
+    --confidence 0.35 \
+    --camera-index 0
+```
+
+- `--model`: Path to the model YAML (architecture definition).
+- `--model-path`: Trained weights (`.pt`) to load.
+- `--confidence`: Detection confidence threshold.
+- `--camera-index`: OpenCV camera index (`0` for default webcam).
+
 For more options, run:
 
 ```bash

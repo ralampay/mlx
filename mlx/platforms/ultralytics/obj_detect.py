@@ -20,8 +20,14 @@ console = Console()
 
 def run_obj_detect(config: Dict[str, Any]):
     action = config.get("action", "train")
-    if action != "train":
-        raise ValueError(f"Unsupported action '{action}' for obj-detect. Only 'train' is implemented.")
+    if action == "train":
+        return _train_obj_detect(config)
+    if action == "infer-camera":
+        return _infer_camera(config)
+    raise ValueError(f"Unsupported action '{action}' for obj-detect. Supported actions: train, infer-camera.")
+
+
+def _train_obj_detect(config: Dict[str, Any]):
 
     dataset_dir = Path(config.get("dataset_path", "")).expanduser()
     if not dataset_dir.exists():
@@ -76,6 +82,118 @@ def run_obj_detect(config: Dict[str, Any]):
     typer.secho("Training complete!", fg=typer.colors.GREEN, bold=True)
 
     return results
+
+
+def _infer_camera(config: Dict[str, Any]):
+    try:
+        import cv2
+    except ImportError as exc:  # pragma: no cover - optional dependency
+        raise ImportError(
+            "OpenCV is required for --action infer-camera. Install it with 'pip install opencv-python'."
+        ) from exc
+
+    weights_path = config.get("model_path")
+    if not weights_path:
+        raise typer.BadParameter("Camera inference requires --model-path pointing to trained YOLO weights (.pt).")
+
+    resolved_weights = Path(weights_path).expanduser()
+    if not resolved_weights.exists():
+        raise typer.BadParameter(f"Model weights not found: {resolved_weights}")
+
+    model_cfg = config.get("model")
+    if not model_cfg:
+        raise typer.BadParameter("Camera inference requires --model pointing to the YOLO model YAML.")
+
+    resolved_cfg = Path(_resolve_weights_source(model_cfg))
+    if not resolved_cfg.exists():
+        raise typer.BadParameter(f"Model YAML not found: {resolved_cfg}")
+
+    device = config.get("device", "cpu")
+    imgsz = max(config.get("height", 640), config.get("width", 640))
+    confidence = float(config.get("confidence", 0.25))
+    camera_index = int(config.get("camera_index", 0))
+
+    typer.secho("Ultralytics Object Detection - Camera Inference", fg=typer.colors.BRIGHT_CYAN, bold=True)
+    typer.echo(f"Loading model architecture from: {resolved_cfg}")
+    model = YOLO(str(resolved_cfg))
+
+    typer.echo(f"Loading weights from: {resolved_weights}")
+    load_result = getattr(model, "load", None)
+    if callable(load_result):
+        loaded = model.load(str(resolved_weights))
+        if loaded is not None:
+            model = loaded
+    else:  # fallback: re-instantiate straight from weights
+        model = YOLO(str(resolved_weights))
+
+    typer.echo(f"Using device: {device} | Image size: {imgsz} | Confidence: {confidence}")
+    typer.secho("Press 'q' or 'Esc' to exit the camera feed.", fg=typer.colors.YELLOW)
+
+    cap = cv2.VideoCapture(camera_index)
+    if not cap.isOpened():
+        raise RuntimeError(f"Unable to open camera index {camera_index}.")
+
+    window_title = "MLX Object Detection"
+
+    try:
+        while True:
+            ret, frame = cap.read()
+            if not ret:
+                typer.echo("Failed to read frame from camera. Exiting.")
+                break
+
+            results = model.predict(
+                source=frame,
+                imgsz=imgsz,
+                conf=confidence,
+                device=device,
+                verbose=False,
+                stream=False,
+            )
+
+            annotated = _annotate_detections(frame, results[0])
+            cv2.imshow(window_title, annotated)
+
+            key = cv2.waitKey(1) & 0xFF
+            if key in (ord("q"), 27):  # 'q' or ESC
+                typer.echo("Exiting camera inference.")
+                break
+    finally:
+        cap.release()
+        cv2.destroyAllWindows()
+
+
+def _annotate_detections(frame, result):
+    import cv2
+    import numpy as np
+
+    annotated = frame.copy()
+    if result is None or result.boxes is None or len(result.boxes) == 0:
+        return annotated
+
+    names = result.names or {}
+    boxes = result.boxes
+    xyxy = boxes.xyxy.cpu().numpy()
+    confs = boxes.conf.cpu().numpy() if boxes.conf is not None else np.zeros(len(xyxy))
+    clses = boxes.cls.cpu().numpy().astype(int) if boxes.cls is not None else np.zeros(len(xyxy), dtype=int)
+
+    for (x1, y1, x2, y2), conf, cls in zip(xyxy, confs, clses):
+        x1, y1, x2, y2 = map(int, [x1, y1, x2, y2])
+        label = names.get(int(cls), str(int(cls)))
+        text = f"{label}: {conf:.2f}"
+        cv2.rectangle(annotated, (x1, y1), (x2, y2), (0, 255, 0), 2)
+        cv2.putText(
+            annotated,
+            text,
+            (x1, max(y1 - 10, 0)),
+            cv2.FONT_HERSHEY_SIMPLEX,
+            0.6,
+            (0, 255, 0),
+            2,
+            cv2.LINE_AA,
+        )
+
+    return annotated
 
 
 def _resolve_weights_source(weights_source: Union[str, Path]) -> Union[str, Path]:

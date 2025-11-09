@@ -26,6 +26,8 @@ def main(
     epochs: int = typer.Option(100, help="Number of epochs"),
     model_path: str = typer.Option("/tmp/sample.pt", help="Path to .pt model"),
     input_img: str = typer.Option("/tmp/image.jpg", help="Input image for inference"),
+    confidence: float = typer.Option(0.25, help="Confidence threshold for detection"),
+    camera_index: int = typer.Option(0, help="Camera index for infer-camera action"),
 
 ):
     typer.echo(f"MLX starting [module={module}] [platform={platform}] [model={model}]")
@@ -47,6 +49,8 @@ def main(
         "model_path": model_path,
         "input_img": input_img,
         "input_size": (width, height),
+        "confidence": confidence,
+        "camera_index": camera_index,
     }
 
     try:

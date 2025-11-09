@@ -28,6 +28,10 @@ def main(
         None,
         help="Path to .pt model. Optional for training; required for camera inference.",
     ),
+    file_path: Optional[str] = typer.Option(
+        None,
+        help="Path to a video file for infer-video action.",
+    ),
     input_img: str = typer.Option("/tmp/image.jpg", help="Input image for inference"),
     confidence: float = typer.Option(0.25, help="Confidence threshold for detection"),
     camera_index: int = typer.Option(0, help="Camera index for infer-camera action"),
@@ -82,6 +86,7 @@ def main(
         "dataset_path": dataset_path,
         "epochs": epochs,
         "model_path": model_path,
+        "file_path": file_path,
         "input_img": input_img,
         "input_size": (width, height),
         "confidence": confidence,

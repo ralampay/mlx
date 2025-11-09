@@ -100,6 +100,20 @@ mlx --module obj-detect \
 - `--model-path`: Trained weights (`.pt`) to load.
 - `--confidence`: Detection confidence threshold.
 - `--camera-index`: OpenCV camera index (`0` for default webcam).
+- `--file-path`: Required for `infer-video`; supplies the video source.
+
+For running inference on a video file:
+
+```bash
+mlx --module obj-detect \
+    --platform ultralytics \
+    --action infer-video \
+    --model ultralytics/cfg/models/ext/cad_yolo12.yaml \
+    --model-path ./runs/train/weights/best.pt \
+    --file-path ~/videos/sample.mp4 \
+    --device cpu \
+    --confidence 0.35
+```
 
 For more options, run:
 

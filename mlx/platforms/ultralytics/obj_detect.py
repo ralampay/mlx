@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Dict, Any, Optional, Union
+from typing import Dict, Any, Optional, Tuple, Union
 
 import typer
 from rich.console import Console
@@ -23,8 +23,12 @@ def run_obj_detect(config: Dict[str, Any]):
     if action == "train":
         return _train_obj_detect(config)
     if action == "infer-camera":
-        return _infer_camera(config)
-    raise ValueError(f"Unsupported action '{action}' for obj-detect. Supported actions: train, infer-camera.")
+        return _run_stream_inference(config, source="camera")
+    if action == "infer-video":
+        return _run_stream_inference(config, source="video")
+    raise ValueError(
+        f"Unsupported action '{action}' for obj-detect. Supported actions: train, infer-camera, infer-video."
+    )
 
 
 def _train_obj_detect(config: Dict[str, Any]):
@@ -36,16 +40,9 @@ def _train_obj_detect(config: Dict[str, Any]):
     if not data_yaml.exists():
         raise typer.BadParameter(f"Expected YOLO data.yaml at: {data_yaml}")
 
-    weights_source = config.get("model_path")
-    resolved_weights = _resolve_weights_source(weights_source) if weights_source else None
-    if isinstance(resolved_weights, (str, Path)):
-        resolved_weights = Path(resolved_weights)
-        if not resolved_weights.exists():
-            raise typer.BadParameter(f"Model weights not found: {resolved_weights}")
-    model_config = config.get("model")
-    resolved_cfg = Path(_resolve_weights_source(model_config)) if model_config else None
-    if resolved_cfg and not resolved_cfg.exists():
-        raise typer.BadParameter(f"Model YAML not found: {resolved_cfg}")
+    resolved_cfg, resolved_weights = _resolve_model_paths(
+        config, require_yaml=True, require_weights=False
+    )
     epochs = config.get("epochs", 100)
     batch_size = config.get("batch_size", 16)
     device = config.get("device", "cpu")
@@ -81,29 +78,7 @@ def _train_obj_detect(config: Dict[str, Any]):
     console.print(summary)
 
     typer.echo("Loading Ultralytics model...")
-    if not model_config and not resolved_weights:
-        raise typer.BadParameter("Provide --model (YAML) and/or --model-path (.pt) to define the detector.")
-
-    model: Optional[YOLO] = None
-
-    if resolved_cfg:
-        model = YOLO(str(resolved_cfg))
-
-    if resolved_weights:
-        typer.echo(f"Loading weights from: {resolved_weights}")
-        if model is None:
-            model = YOLO(str(resolved_weights))
-        else:
-            load_result = getattr(model, "load", None)
-            if callable(load_result):
-                loaded = model.load(str(resolved_weights))
-                if loaded is not None:
-                    model = loaded
-            else:
-                model = YOLO(str(resolved_weights))
-
-    if model is None:
-        raise RuntimeError("Failed to initialize the YOLO model. Check --model and --model-path arguments.")
+    model = _initialize_model(resolved_cfg, resolved_weights, prefer_cfg=True)
 
     overrides = getattr(model, "overrides", {})
     overrides["pretrained"] = bool(config.get("pretrained", False))
@@ -140,7 +115,7 @@ def _train_obj_detect(config: Dict[str, Any]):
     return results
 
 
-def _infer_camera(config: Dict[str, Any]):
+def _run_stream_inference(config: Dict[str, Any], source: str):
     try:
         import cv2
     except ImportError as exc:  # pragma: no cover - optional dependency
@@ -148,57 +123,55 @@ def _infer_camera(config: Dict[str, Any]):
             "OpenCV is required for --action infer-camera. Install it with 'pip install opencv-python'."
         ) from exc
 
-    weights_path = config.get("model_path")
-    if not weights_path:
-        raise typer.BadParameter("Camera inference requires --model-path pointing to trained YOLO weights (.pt).")
-
-    resolved_weights = Path(weights_path).expanduser()
-    if not resolved_weights.exists():
-        raise typer.BadParameter(f"Model weights not found: {resolved_weights}")
-
-    model_cfg = config.get("model")
-    if not model_cfg:
-        raise typer.BadParameter("Camera inference requires --model pointing to the YOLO model YAML.")
-
-    resolved_cfg = Path(_resolve_weights_source(model_cfg))
-    if not resolved_cfg.exists():
-        raise typer.BadParameter(f"Model YAML not found: {resolved_cfg}")
+    resolved_cfg, resolved_weights = _resolve_model_paths(
+        config, require_yaml=True, require_weights=True
+    )
 
     device = config.get("device", "cpu")
     imgsz = max(config.get("height", 640), config.get("width", 640))
     confidence = float(config.get("confidence", 0.25))
     camera_index = int(config.get("camera_index", 0))
+    if source == "camera":
+        typer.secho("Ultralytics Object Detection - Camera Inference", fg=typer.colors.BRIGHT_CYAN, bold=True)
+    else:
+        typer.secho("Ultralytics Object Detection - Video Inference", fg=typer.colors.BRIGHT_CYAN, bold=True)
 
-    typer.secho("Ultralytics Object Detection - Camera Inference", fg=typer.colors.BRIGHT_CYAN, bold=True)
-    typer.echo(f"Loading model architecture from: {resolved_cfg}")
-    model = YOLO(str(resolved_cfg))
-
+    if resolved_cfg:
+        typer.echo(f"Model YAML: {resolved_cfg}")
     typer.echo(f"Loading weights from: {resolved_weights}")
-    load_result = getattr(model, "load", None)
-    if callable(load_result):
-        loaded = model.load(str(resolved_weights))
-        if loaded is not None:
-            model = loaded
-    else:  # fallback: re-instantiate straight from weights
-        model = YOLO(str(resolved_weights))
+
+    model = _initialize_model(resolved_cfg, resolved_weights, prefer_cfg=False)
 
     typer.echo(f"Using device: {device} | Image size: {imgsz} | Confidence: {confidence}")
-    typer.secho("Press 'q' or 'Esc' to exit the camera feed.", fg=typer.colors.YELLOW)
+    typer.secho("Press 'q' or 'Esc' to exit.", fg=typer.colors.YELLOW)
 
-    cap = cv2.VideoCapture(camera_index)
-    if not cap.isOpened():
-        raise RuntimeError(f"Unable to open camera index {camera_index}.")
-
-    window_title = "MLX Object Detection"
+    if source == "camera":
+        cap = cv2.VideoCapture(camera_index)
+        if not cap.isOpened():
+            raise RuntimeError(f"Unable to open camera index {camera_index}.")
+        window_title = "MLX Object Detection (Camera)"
+    elif source == "video":
+        video_path = config.get("file_path")
+        if not video_path:
+            raise typer.BadParameter("Video inference requires --file-path pointing to the video file.")
+        resolved_video = Path(video_path).expanduser()
+        if not resolved_video.exists():
+            raise typer.BadParameter(f"Video file not found: {resolved_video}")
+        cap = cv2.VideoCapture(str(resolved_video))
+        if not cap.isOpened():
+            raise RuntimeError(f"Unable to open video file: {resolved_video}")
+        window_title = f"MLX Object Detection (Video: {resolved_video.name})"
+    else:
+        raise ValueError(f"Unsupported source type: {source}")
 
     try:
         while True:
             ret, frame = cap.read()
             if not ret:
-                typer.echo("Failed to read frame from camera. Exiting.")
+                typer.echo("No more frames to process." if source == "video" else "Failed to read frame from camera.")
                 break
 
-            results = model.predict(
+            result = model.predict(
                 source=frame,
                 imgsz=imgsz,
                 conf=confidence,
@@ -207,12 +180,12 @@ def _infer_camera(config: Dict[str, Any]):
                 stream=False,
             )
 
-            annotated = _annotate_detections(frame, results[0])
+            annotated = _annotate_detections(frame, result[0])
             cv2.imshow(window_title, annotated)
 
-            key = cv2.waitKey(1) & 0xFF
-            if key in (ord("q"), 27):  # 'q' or ESC
-                typer.echo("Exiting camera inference.")
+            key = cv2.waitKey(1 if source == "camera" else 10) & 0xFF
+            if key in (ord("q"), 27):
+                typer.echo("Exiting inference.")
                 break
     finally:
         cap.release()
@@ -233,23 +206,105 @@ def _annotate_detections(frame, result):
     confs = boxes.conf.cpu().numpy() if boxes.conf is not None else np.zeros(len(xyxy))
     clses = boxes.cls.cpu().numpy().astype(int) if boxes.cls is not None else np.zeros(len(xyxy), dtype=int)
 
+    palette = _get_color_palette(names)
+
     for (x1, y1, x2, y2), conf, cls in zip(xyxy, confs, clses):
         x1, y1, x2, y2 = map(int, [x1, y1, x2, y2])
         label = names.get(int(cls), str(int(cls)))
         text = f"{label}: {conf:.2f}"
-        cv2.rectangle(annotated, (x1, y1), (x2, y2), (0, 255, 0), 2)
+        color = palette.get(label, palette.get(int(cls), (0, 255, 0)))
+        cv2.rectangle(annotated, (x1, y1), (x2, y2), color, 2)
         cv2.putText(
             annotated,
             text,
             (x1, max(y1 - 10, 0)),
             cv2.FONT_HERSHEY_SIMPLEX,
             0.6,
-            (0, 255, 0),
+            color,
             2,
             cv2.LINE_AA,
         )
 
     return annotated
+
+
+def _resolve_model_paths(
+    config: Dict[str, Any],
+    require_yaml: bool,
+    require_weights: bool,
+) -> Tuple[Optional[Path], Optional[Path]]:
+    model_cfg = config.get("model")
+    resolved_cfg = Path(_resolve_weights_source(model_cfg)) if model_cfg else None
+    if require_yaml and resolved_cfg is None:
+        raise typer.BadParameter("This action requires --model pointing to the model YAML.")
+    if resolved_cfg and not resolved_cfg.exists():
+        raise typer.BadParameter(f"Model YAML not found: {resolved_cfg}")
+
+    weights_path = config.get("model_path")
+    resolved_weights = Path(_resolve_weights_source(weights_path)) if weights_path else None
+    if require_weights and resolved_weights is None:
+        raise typer.BadParameter("This action requires --model-path pointing to trained weights (.pt).")
+    if resolved_weights and not resolved_weights.exists():
+        raise typer.BadParameter(f"Model weights not found: {resolved_weights}")
+
+    return resolved_cfg, resolved_weights
+
+
+def _initialize_model(
+    resolved_cfg: Optional[Path],
+    resolved_weights: Optional[Path],
+    prefer_cfg: bool,
+) -> YOLO:
+    model: Optional[YOLO] = None
+
+    if prefer_cfg and resolved_cfg:
+        model = YOLO(str(resolved_cfg))
+
+    if resolved_weights:
+        if model is None:
+            model = YOLO(str(resolved_weights))
+        else:
+            load_result = getattr(model, "load", None)
+            if callable(load_result):
+                loaded = model.load(str(resolved_weights))
+                if loaded is not None:
+                    model = loaded
+            else:
+                model = YOLO(str(resolved_weights))
+
+    if model is None and resolved_cfg:
+        model = YOLO(str(resolved_cfg))
+
+    if model is None:
+        raise RuntimeError("Failed to initialize the YOLO model. Check --model and --model-path arguments.")
+
+    return model
+
+
+def _get_color_palette(names: Dict[int, str]):
+    import hashlib
+
+    cache = getattr(_get_color_palette, "_cache", None)
+    if cache is None:
+        cache = {}
+        _get_color_palette._cache = cache
+
+    def color_for_label(label: str):
+        if label in cache:
+            return cache[label]
+        digest = hashlib.sha256(label.encode("utf-8")).hexdigest()
+        r = int(digest[0:2], 16)
+        g = int(digest[2:4], 16)
+        b = int(digest[4:6], 16)
+        base = (r, g, b)
+        cache[label] = tuple(int(min(max(c, 64), 255)) for c in base)
+        return cache[label]
+
+    palette = {}
+    for idx, label in names.items():
+        palette[label] = color_for_label(str(label))
+        palette[idx] = palette[label]
+    return palette
 
 
 def _resolve_weights_source(weights_source: Union[str, Path, None]) -> Union[str, Path, None]:

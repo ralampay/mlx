@@ -93,6 +93,10 @@ def main(
         None,
         help="Maximum number of files to process for RAG utilities.",
     ),
+    model_generator: Optional[str] = typer.Option(
+        None,
+        help="Override generation model (used by query for hosted platforms such as Hugging Face).",
+    ),
 
 ):
     typer.echo(f"MLX starting [module={module}] [platform={platform}] [model={model}]")
@@ -130,6 +134,7 @@ def main(
         "chunk_overlap": chunk_overlap,
         "table_name": table_name,
         "file_limit": file_limit,
+        "model_generator": model_generator,
     }
 
     try:

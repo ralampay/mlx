@@ -282,6 +282,62 @@ def _create_embedding_runner(
     str,
     str,
 ]:
+    if use_local:
+        local_model_path = os.environ.get("LOCAL_LLM_MODEL")
+        if not local_model_path:
+            raise typer.BadParameter(
+                "LOCAL_LLM_MODEL is not set. Export the variable or populate your .env file."
+            )
+        embedder = LocalLlamaEmbedder(local_model_path)
+
+        def embed_fn(texts: List[str]) -> Tuple[List[List[float]], int, int]:
+            return embedder.embed(texts)
+
+        model_name = Path(local_model_path).name
+        return embed_fn, model_name, "local"
+
+    if platform == "huggingface":
+        try:
+            from huggingface_hub import InferenceClient  # type: ignore
+        except ImportError as exc:  # pragma: no cover - runtime guard
+            raise typer.BadParameter(
+                "huggingface-hub is required for --platform huggingface. Install huggingface-hub to proceed."
+            ) from exc
+
+        if not configured_model_name:
+            raise typer.BadParameter(
+                "Specify --model with the Hugging Face repository id when using --platform huggingface."
+            )
+
+        token = os.environ.get("HUGGINGFACE_TOKEN")
+        client = InferenceClient(model=configured_model_name, token=token)
+
+        def embed_fn(texts: List[str]) -> Tuple[List[List[float]], int, int]:
+            vectors: List[List[float]] = []
+            total_tokens = 0
+            embedding_dim = 0
+            for text in texts:
+                result = client.feature_extraction(text)
+                if result is None:
+                    continue
+                if hasattr(result, "tolist"):
+                    result = result.tolist()
+                if isinstance(result[0], list):
+                    length = len(result[0])
+                    summed = [0.0] * length
+                    for token_vec in result:  # type: ignore[iteration-over-annotation]
+                        for idx, value in enumerate(token_vec):
+                            summed[idx] += float(value)
+                    arr = [value / len(result) for value in summed]
+                else:
+                    arr = [float(value) for value in result]  # type: ignore[arg-type]
+                vectors.append(arr)
+                embedding_dim = len(arr)
+                total_tokens += max(1, len(text) // 4)
+            return vectors, total_tokens, embedding_dim
+
+        return embed_fn, configured_model_name, "huggingface"
+
     if platform == "openai":
         try:
             from openai import OpenAI  # type: ignore
@@ -311,20 +367,6 @@ def _create_embedding_runner(
             return vectors, total_tokens, embedding_dim
 
         return embed_fn, embedding_model, "openai"
-
-    if use_local:
-        local_model_path = os.environ.get("LOCAL_LLM_MODEL")
-        if not local_model_path:
-            raise typer.BadParameter(
-                "LOCAL_LLM_MODEL is not set. Export the variable or populate your .env file."
-            )
-        embedder = LocalLlamaEmbedder(local_model_path)
-
-        def embed_fn(texts: List[str]) -> Tuple[List[List[float]], int, int]:
-            return embedder.embed(texts)
-
-        model_name = Path(local_model_path).name
-        return embed_fn, model_name, "local"
 
     def embed_fn(texts: List[str]) -> Tuple[List[List[float]], int, int]:
         return _default_embed(texts)
@@ -643,6 +685,76 @@ def _generate_openai_answer(question: str, context: str, model_name: Optional[st
     return (message.content or "").strip() or "Unable to generate a response."
 
 
+def _generate_hf_answer(question: str, context: str, model_name: str) -> str:
+    try:
+        from huggingface_hub import InferenceClient  # type: ignore
+    except ImportError as exc:  # pragma: no cover - runtime guard
+        raise typer.BadParameter(
+            "huggingface-hub is required for Hugging Face responses. Install huggingface-hub to proceed."
+        ) from exc
+
+    token = os.environ.get("HUGGINGFACE_TOKEN")
+    client = InferenceClient(model=model_name, token=token)
+    prompt = (
+        "You answer questions using the provided context. Cite only what is supplied; "
+        "if the answer cannot be found, reply that you do not know.\n\n"
+        f"Context:\n{context}\n\nQuestion: {question}\n\nAnswer:"
+    )
+    primary_error: Optional[Exception] = None
+    try:
+        response = client.text_generation(
+            prompt,
+            max_new_tokens=400,
+            temperature=0.2,
+            top_p=0.95,
+        )
+        if isinstance(response, str):
+            text = response
+        elif isinstance(response, dict):
+            text = response.get("generated_text") or ""
+        elif isinstance(response, list) and response and isinstance(response[0], dict):
+            text = response[0].get("generated_text") or ""
+        else:
+            text = str(response)
+        text = text.strip()
+        if text:
+            return text
+    except Exception as exc:  # pragma: no cover - defensive
+        primary_error = exc
+
+    try:
+        chat_response = client.chat_completion(
+            model=model_name,
+            messages=[
+                {
+                    "role": "system",
+                    "content": (
+                        "You answer questions using the provided context. "
+                        "If the answer cannot be inferred, say you do not know."
+                    ),
+                },
+                {"role": "user", "content": prompt},
+            ],
+            temperature=0.2,
+        )
+        choices = getattr(chat_response, "choices", [])
+        if choices:
+            message = choices[0].message
+            content = (message.get("content") if isinstance(message, dict) else getattr(message, "content", "")) or ""
+            content = content.strip()
+            if content:
+                return content
+    except Exception as exc:  # pragma: no cover - defensive
+        secondary_error = exc
+        detail_msg = f"{primary_error or secondary_error}"
+        return (
+            "Hugging Face generation failed. Ensure the model supports text-generation/chat and your "
+            f"token (if required) is valid. Details: {detail_msg}"
+        )
+
+    return "Unable to generate a response."
+
+
 def _rag_query(config: ModuleConfig) -> None:
     table_name = config.get("table_name")
     if not table_name:
@@ -651,6 +763,7 @@ def _rag_query(config: ModuleConfig) -> None:
     use_local = config.get("local", False)
     platform = config.get("platform")
     configured_model_name = config.get("model")
+    generator_override = config.get("model_generator")
     top_k = config.get("top_k", 5)
 
     question = typer.prompt("Enter your question")
@@ -667,11 +780,18 @@ def _rag_query(config: ModuleConfig) -> None:
             f"Collection '{table_name}' was indexed with platform '{stored_platform}'. "
             "Add --local to query local vectors or rebuild the collection with --platform openai."
         )
+    if platform == "huggingface" and not use_local and stored_platform and stored_platform != "huggingface":
+        raise typer.BadParameter(
+            f"Collection '{table_name}' was indexed with platform '{stored_platform}'. "
+            "Add --local to query local vectors or rebuild the collection with --platform huggingface."
+        )
 
     if use_local:
         retrieval_platform = "local"
     elif platform == "openai":
         retrieval_platform = "openai"
+    elif platform == "huggingface":
+        retrieval_platform = "huggingface"
     elif stored_platform:
         retrieval_platform = stored_platform
     else:
@@ -715,15 +835,32 @@ def _rag_query(config: ModuleConfig) -> None:
     console.print(Panel(question, title="Question", border_style="cyan"))
     console.print(Panel(context, title="Retrieved Context", border_style="magenta"))
 
-    if run_platform == "openai":
-        if not configured_model_name:
+    generation_platform: Optional[str]
+    if platform in {"openai", "huggingface"}:
+        generation_platform = platform
+    elif use_local:
+        generation_platform = "local"
+    else:
+        generation_platform = None
+
+    if generation_platform == "openai":
+        model_for_generation = generator_override or configured_model_name
+        if not model_for_generation:
             raise typer.BadParameter(
                 "Specify --model with an OpenAI chat model when using --platform openai for queries."
             )
-        answer = _generate_openai_answer(question, context, configured_model_name)
-        display_name = _determine_openai_chat_model(configured_model_name)
+        answer = _generate_openai_answer(question, context, model_for_generation)
+        display_name = _determine_openai_chat_model(model_for_generation)
         console.print(Panel(answer, title=f"Response ({display_name})", border_style="green"))
-    elif use_local:
+    elif generation_platform == "huggingface":
+        model_for_generation = generator_override or configured_model_name
+        if not model_for_generation:
+            raise typer.BadParameter(
+                "Specify --model with a Hugging Face text-generation repository when using --platform huggingface."
+            )
+        answer = _generate_hf_answer(question, context, model_for_generation)
+        console.print(Panel(answer, title=f"Response ({model_for_generation})", border_style="green"))
+    elif generation_platform == "local":
         local_generation_model = (
             os.environ.get("LOCAL_LLM_GENERATION_MODEL")
             or os.environ.get("LOCAL_LLM_MODEL")

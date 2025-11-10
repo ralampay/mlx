@@ -64,6 +64,17 @@ mlx --module rag \
 
 ```bash
 mlx --module rag \
+    --action vectorization-summary \
+    --platform huggingface \
+    --model sentence-transformers/all-MiniLM-L6-v2 \
+    --dataset-path ./datasets/rag \
+    --table-name demo_collection
+```
+
+- For Hugging Face embeddings, pass a repository id via `--model`. The command uses the Hugging Face Inference API (token pulled from `HUGGINGFACE_TOKEN`) and stores vectors with `platform=huggingface`.
+
+```bash
+mlx --module rag \
     --action batch-insert \
     --chunk-size 800 \
     --chunk-overlap 100 \
@@ -77,6 +88,17 @@ mlx --module rag \
 
 ```bash
 mlx --module rag \
+    --action batch-insert \
+    --platform huggingface \
+    --model sentence-transformers/all-MiniLM-L6-v2 \
+    --dataset-path ./datasets/rag \
+    --table-name demo_collection
+```
+
+- The same backend options apply to `batch-insert`; choose `--platform huggingface` or `--platform openai` to populate the collection with hosted models.
+
+```bash
+mlx --module rag \
     --action query \
     --platform openai \
     --model gpt-4o-mini \
@@ -85,6 +107,18 @@ mlx --module rag \
 ```
 
 - When `--platform openai` is supplied, embeddings and responses are generated with the OpenAI API, and retrieved vectors are filtered to those written by the OpenAI pipeline. For local answers, keep using the flags from the previous example.
+
+```bash
+mlx --module rag \
+    --action query \
+    --platform huggingface \
+    --model mistralai/Mistral-7B-Instruct-v0.2 \
+    --model-generator mistralai/Mistral-7B-Instruct-v0.2 \
+    --table-name demo_collection \
+    --top-k 5
+```
+
+- Supply a Hugging Face text-generation model (and a valid token) to generate answers online while retrieving the vectors tagged with `platform=huggingface`. Use `--model-generator` if you want to keep a different embedding model in `--model` while generating with another repository.
 
 ```bash
 mlx --module rag \
@@ -106,6 +140,7 @@ mlx --module rag \
 ```
 
 - `query`: Prompts for a question, retrieves the top results from the specified collection, and generates a response with the selected backend. With `--platform openai`, embeddings and answers come from the OpenAI API (and only records tagged with `platform=openai` are considered). With `--local`, the GGUF model pointed to `LOCAL_LLM_GENERATION_MODEL` (or `LOCAL_LLM_MODEL`) is used to respond.
+- `--model-generator` overrides the model used for response generation on hosted platforms (OpenAI/Hugging Face) without changing the embedding model specified by `--model`.
 - For local answers, configure `LOCAL_LLM_GENERATION_MODEL` with a chat-capable GGUF (or rely on `LOCAL_LLM_MODEL` if it is generative).
 
 ```bash

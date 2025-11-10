@@ -21,6 +21,7 @@ cp .env.dist .env
 ```
 
 - `LOCAL_LLM_MODEL`: Filesystem path to the local model weights that offline modules will use.
+- `LOCAL_LLM_GENERATION_MODEL`: Optional path to a text-generative GGUF used for RAG query responses (falls back to `LOCAL_LLM_MODEL` when unset).
 - `OPENAI_API_KEY`: API key used by OpenAI-powered modules.
 - `HUGGINGFACE_TOKEN`: Access token for downloading models or datasets from Hugging Face.
 - `DB_ADAPTER`: Target vector database adapter (`chromadb` by default; alternatively `postgres` if you wire up a Postgres-backed store).
@@ -52,6 +53,17 @@ mlx --module rag \
 
 ```bash
 mlx --module rag \
+    --action vectorization-summary \
+    --platform openai \
+    --model text-embedding-3-large \
+    --dataset-path ./datasets/rag \
+    --table-name demo_collection
+```
+
+- Use the OpenAI embedding API by setting `--platform openai` (the `--model` flag selects the embedding model). All inserted records are tagged with the `openai` platform so they can be queried separately from local vectors.
+
+```bash
+mlx --module rag \
     --action batch-insert \
     --chunk-size 800 \
     --chunk-overlap 100 \
@@ -62,6 +74,47 @@ mlx --module rag \
 ```
 
 - `batch-insert`: Executes the same chunking workflow and inserts the resulting vectors into the collection specified by `--table-name`. Currently supports `DB_ADAPTER=chromadb`, connecting with `DB_HOST`, `DB_PORT`, `DB_USERNAME`, and `DB_PASSWORD`. Inserts occur per source file with a Rich progress spinner, respecting `--file-limit` to cap ingestion size and reusing the summary table for confirmation.
+
+```bash
+mlx --module rag \
+    --action query \
+    --platform openai \
+    --model gpt-4o-mini \
+    --table-name demo_collection \
+    --top-k 5
+```
+
+- When `--platform openai` is supplied, embeddings and responses are generated with the OpenAI API, and retrieved vectors are filtered to those written by the OpenAI pipeline. For local answers, keep using the flags from the previous example.
+
+```bash
+mlx --module rag \
+    --action query \
+    --platform openai \
+    --model gpt-4o-mini \
+    --table-name demo_collection \
+    --local
+```
+
+- Combine `--platform openai` with `--local` to retrieve locally generated embeddings (stored with `platform=local`) while still using the OpenAI model to craft the final response.
+
+```bash
+mlx --module rag \
+    --action query \
+    --table-name demo_collection \
+    --top-k 5 \
+    --local
+```
+
+- `query`: Prompts for a question, retrieves the top results from the specified collection, and generates a response with the selected backend. With `--platform openai`, embeddings and answers come from the OpenAI API (and only records tagged with `platform=openai` are considered). With `--local`, the GGUF model pointed to `LOCAL_LLM_GENERATION_MODEL` (or `LOCAL_LLM_MODEL`) is used to respond.
+- For local answers, configure `LOCAL_LLM_GENERATION_MODEL` with a chat-capable GGUF (or rely on `LOCAL_LLM_MODEL` if it is generative).
+
+```bash
+mlx --module rag \
+    --action delete-all \
+    --table-name demo_collection
+```
+
+- `delete-all`: Removes every record from the specified collection. Currently supports `DB_ADAPTER=chromadb`.
 
 All RAG commands require `--table-name` to identify the target collection.
 

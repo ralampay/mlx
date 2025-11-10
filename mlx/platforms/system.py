@@ -17,6 +17,10 @@ ENVIRONMENT_VARIABLES: Dict[str, Dict[str, Any]] = {
         "description": "Filesystem path to the local language model weights.",
         "mask": False,
     },
+    "LOCAL_LLM_GENERATION_MODEL": {
+        "description": "Optional GGUF path used for local RAG answers.",
+        "mask": False,
+    },
     "OPENAI_API_KEY": {
         "description": "API key for OpenAI-powered modules.",
         "mask": True,

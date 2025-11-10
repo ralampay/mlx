@@ -15,7 +15,7 @@ app = typer.Typer(
 @app.command()
 def main(
     module: str = typer.Option("chat", help="Module to run (default: chat)"),
-    platform: str = typer.Option("openai", help="Platform to use (openai, torch, ultralytics)"),
+    platform: str = typer.Option(None, help="Platform to use (openai, torch, ultralytics)"),
     model: str = typer.Option("gpt-4o-mini", help="Model to use"),
     temperature: float = typer.Option(0.7, help="Creativity / randomness level (0.0-2.0)"),
     top_p: float = typer.Option(0.7, help="Nucleus sampling threshold (0-1)."),
@@ -99,6 +99,7 @@ def main(
 
     config: Dict[str, Any] = {
         "module": module,
+        "platform": platform,
         "model": model,
         "temperature": temperature,
         "top_p": top_p,

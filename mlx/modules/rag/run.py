@@ -11,6 +11,7 @@ from langchain.text_splitter import RecursiveCharacterTextSplitter
 from rich.console import Console
 from rich.table import Table
 from rich.progress import Progress, SpinnerColumn, TextColumn
+from rich.panel import Panel
 
 ModuleConfig = Dict[str, Any]
 
@@ -207,10 +208,110 @@ def _resolve_db_config() -> Dict[str, str]:
     return config
 
 
+def _get_chroma_collection(
+    table_name: str,
+    db_config: Dict[str, str],
+) -> Tuple[Any, str, int]:
+    if db_config["adapter"].lower() != "chromadb":
+        raise typer.BadParameter("This action currently supports only DB_ADAPTER=chromadb.")
+
+    db_host = db_config.get("host")
+    db_port_raw = db_config.get("port")
+    if db_host in {"not set", "", None} or db_port_raw in {"not set", "", None}:
+        raise typer.BadParameter("DB_HOST and DB_PORT must be set for chromadb operations.")
+
+    try:
+        db_port = int(db_port_raw)  # type: ignore[arg-type]
+    except (TypeError, ValueError):
+        raise typer.BadParameter("DB_PORT must be an integer for chromadb operations.")
+
+    try:
+        import chromadb  # type: ignore
+        from chromadb.config import Settings  # type: ignore
+    except ImportError as exc:  # pragma: no cover - runtime guard
+        raise typer.BadParameter("chromadb is required. Install chromadb to proceed.") from exc
+
+    settings_kwargs: Dict[str, Any] = {}
+    if db_config.get("username") or db_config.get("password"):
+        settings_kwargs["chroma_client_auth_provider"] = "chromadb.auth.basic"
+        credentials = f"{db_config.get('username', '')}:{db_config.get('password', '')}"
+        settings_kwargs["chroma_client_auth_credentials"] = credentials
+
+    settings = Settings(**settings_kwargs) if settings_kwargs else None
+    client = chromadb.HttpClient(host=db_host, port=db_port, settings=settings)
+    collection = client.get_or_create_collection(table_name)
+    return collection, db_host or "unknown", db_port
+
+
+def _infer_collection_platform(collection: Any) -> Optional[str]:
+    try:
+        sample = collection.get(limit=1, include=["metadatas"])
+    except Exception:  # pragma: no cover - defensive
+        return None
+
+    metadatas = sample.get("metadatas") or []
+    # metadatas structure is typically List[List[Dict]]
+    for entry in metadatas:
+        if isinstance(entry, list):
+            for item in entry:
+                if isinstance(item, dict) and item.get("platform"):
+                    return str(item["platform"])
+        elif isinstance(entry, dict) and entry.get("platform"):
+            return str(entry["platform"])
+    return None
+
+
+def _determine_openai_embedding_model(model_name: Optional[str]) -> str:
+    if not model_name or "gpt" in model_name.lower():
+        return "text-embedding-3-large"
+    return model_name
+
+
+def _determine_openai_chat_model(model_name: Optional[str]) -> str:
+    if not model_name or "embedding" in model_name.lower():
+        return "gpt-4o-mini"
+    return model_name
+
+
 def _create_embedding_runner(
     use_local: bool,
     configured_model_name: Optional[str],
-) -> Tuple[Callable[[List[str]], Tuple[List[List[float]], int, int]], str]:
+    platform: Optional[str],
+) -> Tuple[
+    Callable[[List[str]], Tuple[List[List[float]], int, int]],
+    str,
+    str,
+]:
+    if platform == "openai":
+        try:
+            from openai import OpenAI  # type: ignore
+        except ImportError as exc:  # pragma: no cover - runtime guard
+            raise typer.BadParameter(
+                "openai package is required for OpenAI embeddings. Install openai to proceed."
+            ) from exc
+
+        client = OpenAI()
+        embedding_model = _determine_openai_embedding_model(configured_model_name)
+
+        def embed_fn(texts: List[str]) -> Tuple[List[List[float]], int, int]:
+            vectors: List[List[float]] = []
+            total_tokens = 0
+            embedding_dim = 0
+            for text in texts:
+                response = client.embeddings.create(
+                    model=embedding_model,
+                    input=text,
+                )
+                vector = response.data[0].embedding
+                vectors.append(vector)
+                embedding_dim = len(vector)
+                usage = getattr(response, "usage", None)
+                if usage and getattr(usage, "total_tokens", None):
+                    total_tokens += usage.total_tokens
+            return vectors, total_tokens, embedding_dim
+
+        return embed_fn, embedding_model, "openai"
+
     if use_local:
         local_model_path = os.environ.get("LOCAL_LLM_MODEL")
         if not local_model_path:
@@ -222,13 +323,14 @@ def _create_embedding_runner(
         def embed_fn(texts: List[str]) -> Tuple[List[List[float]], int, int]:
             return embedder.embed(texts)
 
-        return embed_fn, local_model_path
+        model_name = Path(local_model_path).name
+        return embed_fn, model_name, "local"
 
     def embed_fn(texts: List[str]) -> Tuple[List[List[float]], int, int]:
         return _default_embed(texts)
 
     model_name = configured_model_name or "chromadb-default-embedder"
-    return embed_fn, model_name
+    return embed_fn, model_name, "local"
 
 
 def _render_run_metadata(
@@ -244,6 +346,7 @@ def _render_run_metadata(
     db_host: str,
     db_port: str,
     table_name: str,
+    embedding_platform: str,
 ) -> None:
     table = Table(title="Vectorization Summary")
     table.add_column("Field", style="bold cyan")
@@ -259,6 +362,7 @@ def _render_run_metadata(
     table.add_row("DB Adapter", db_adapter)
     table.add_row("DB Host", db_host)
     table.add_row("DB Port", db_port)
+    table.add_row("Embedding Platform", embedding_platform)
     table.add_row("Table / Collection", table_name)
     console.print(table)
 
@@ -267,7 +371,12 @@ def _rag_vectorization_summary(config: ModuleConfig) -> None:
     chunk_size = config.get("chunk_size", 800)
     chunk_overlap = config.get("chunk_overlap", 100)
     use_local = config.get("local", False)
+    platform = config.get("platform")
+    platform = config.get("platform")
+    platform = config.get("platform")
     configured_model_name = config.get("model")
+    platform = config.get("platform")
+    platform = config.get("platform")
     table_name = config.get("table_name")
     dataset_path = config.get("dataset_path")
     if not dataset_path:
@@ -287,7 +396,9 @@ def _rag_vectorization_summary(config: ModuleConfig) -> None:
     )
     documents = [record["text"] for record in chunk_records]
 
-    embed_fn, model_name = _create_embedding_runner(use_local, configured_model_name)
+    embed_fn, model_name, run_platform = _create_embedding_runner(
+        use_local, configured_model_name, platform
+    )
     embeddings, total_tokens, embedding_size = embed_fn(documents)
     if embedding_size == 0 and len(embeddings) > 0:
         embedding_size = len(embeddings[0])
@@ -307,6 +418,7 @@ def _rag_vectorization_summary(config: ModuleConfig) -> None:
         db_host=db_config["host"],
         db_port=db_config["port"],
         table_name=table_name,
+        embedding_platform=run_platform,
     )
 
     sample_chunk = chunk_records[0]
@@ -322,10 +434,10 @@ def _rag_vectorization_summary(config: ModuleConfig) -> None:
             "embedding_dimensions": len(sample_embedding),
             "table_name": table_name,
             "model_name": model_name,
-            "platform": "local" if use_local else "online",
+            "platform": run_platform,
         },
         "model_name": model_name,
-        "platform": "local" if use_local else "online",
+        "platform": run_platform,
         "source": sample_chunk["source"],
         "table_name": table_name,
     }
@@ -338,6 +450,7 @@ def _rag_batch_insert(config: ModuleConfig) -> None:
     chunk_overlap = config.get("chunk_overlap", 100)
     use_local = config.get("local", False)
     configured_model_name = config.get("model")
+    platform = config.get("platform")
     table_name = config.get("table_name")
     dataset_path = config.get("dataset_path")
     file_limit = config.get("file_limit")
@@ -359,36 +472,11 @@ def _rag_batch_insert(config: ModuleConfig) -> None:
     if not chunk_records:
         raise typer.BadParameter("No content available for insertion.")
 
-    embed_fn, model_name = _create_embedding_runner(use_local, configured_model_name)
+    embed_fn, model_name, run_platform = _create_embedding_runner(
+        use_local, configured_model_name, platform
+    )
     db_config = _resolve_db_config()
-    if db_config["adapter"].lower() != "chromadb":
-        raise typer.BadParameter("batch-insert currently supports DB_ADAPTER=chromadb.")
-
-    db_host = db_config.get("host")
-    db_port_raw = db_config.get("port")
-    if db_host in {"not set", "", None} or db_port_raw in {"not set", "", None}:
-        raise typer.BadParameter("DB_HOST and DB_PORT must be set for chromadb batch insert.")
-
-    try:
-        db_port = int(db_port_raw)  # type: ignore[arg-type]
-    except (TypeError, ValueError):
-        raise typer.BadParameter("DB_PORT must be an integer for chromadb batch insert.")
-
-    try:
-        import chromadb  # type: ignore
-        from chromadb.config import Settings  # type: ignore
-    except ImportError as exc:  # pragma: no cover - runtime guard
-        raise typer.BadParameter("chromadb is required for batch-insert. Install chromadb to proceed.") from exc
-
-    settings_kwargs: Dict[str, Any] = {}
-    if db_config.get("username") or db_config.get("password"):
-        settings_kwargs["chroma_client_auth_provider"] = "chromadb.auth.basic"
-        credentials = f"{db_config.get('username', '')}:{db_config.get('password', '')}"
-        settings_kwargs["chroma_client_auth_credentials"] = credentials
-
-    settings = Settings(**settings_kwargs) if settings_kwargs else None
-    client = chromadb.HttpClient(host=db_host, port=db_port, settings=settings)
-    collection = client.get_or_create_collection(table_name)
+    collection, db_host, db_port = _get_chroma_collection(table_name, db_config)
 
     total_tokens = 0
     embedding_size = 0
@@ -423,7 +511,7 @@ def _rag_batch_insert(config: ModuleConfig) -> None:
                     "source": item["source"],
                     "table_name": table_name,
                     "model_name": model_name,
-                    "platform": "local" if use_local else "online",
+                    "platform": run_platform,
                 }
                 for item in batch
             ]
@@ -448,13 +536,222 @@ def _rag_batch_insert(config: ModuleConfig) -> None:
         db_host=db_host,
         db_port=str(db_port),
         table_name=table_name,
+        embedding_platform=run_platform,
     )
     console.print(f"[green]Inserted {total_chunks} chunk(s) into '{table_name}'.[/]")
+
+
+def _rag_delete_all(config: ModuleConfig) -> None:
+    table_name = config.get("table_name")
+    if not table_name:
+        raise typer.BadParameter("--table-name is required for delete-all.")
+
+    db_config = _resolve_db_config()
+    collection, db_host, db_port = _get_chroma_collection(table_name, db_config)
+
+    total_records = collection.count()
+    if total_records == 0:
+        console.print(f"[yellow]Collection '{table_name}' is already empty.[/]")
+        return
+
+    deleted = 0
+    batch_size = 1000
+    while True:
+        batch = collection.get(limit=batch_size, include=[])
+        ids: List[str] = batch.get("ids") or []
+        if not ids:
+            break
+        collection.delete(ids=ids)
+        deleted += len(ids)
+
+    console.print(
+        f"[green]Deleted {deleted} record(s) from collection '{table_name}' (host={db_host}, port={db_port}).[/]"
+    )
+
+
+def _generate_local_answer(question: str, context: str, model_path: str) -> str:
+    _ensure_llama_silenced()
+    try:
+        from llama_cpp import Llama  # type: ignore
+    except ImportError as exc:  # pragma: no cover - runtime guard
+        raise typer.BadParameter(
+            "llama-cpp-python is required for --local query responses. Install llama-cpp-python to proceed."
+        ) from exc
+
+    context_window = 4096
+    llm = Llama(
+        model_path=model_path,
+        n_ctx=context_window,
+        n_batch=256,
+        embedding=False,
+        verbose=False,
+        cache_capacity=context_window * 2,
+    )
+    prompt = (
+        "You answer questions using the provided context. Cite only what is supplied; "
+        "if the answer cannot be found, reply that you do not know.\n\n"
+        f"Context:\n{context}\n\nQuestion: {question}\n\nAnswer:"
+    )
+    try:
+        result = llm(
+            prompt=prompt,
+            max_tokens=512,
+            temperature=0.2,
+            top_p=0.95,
+        )
+    except Exception as exc:  # pragma: no cover - protective guard
+        return (
+            "Local generation failed. Ensure LOCAL_LLM_MODEL points to a text-generative GGUF model. "
+            f"Details: {exc}"
+        )
+
+    return result.get("choices", [{}])[0].get("text", "").strip() or "Unable to generate a response."
+
+
+def _generate_openai_answer(question: str, context: str, model_name: Optional[str]) -> str:
+    try:
+        from openai import OpenAI  # type: ignore
+    except ImportError as exc:  # pragma: no cover - runtime guard
+        raise typer.BadParameter(
+            "openai package is required for OpenAI responses. Install openai to proceed."
+        ) from exc
+
+    client = OpenAI()
+    chat_model = _determine_openai_chat_model(model_name)
+    messages = [
+        {
+            "role": "system",
+            "content": (
+                "You answer the user's question using only the provided context. "
+                "If the answer is not present, respond that you do not know."
+            ),
+        },
+        {
+            "role": "user",
+            "content": f"Context:\n{context}\n\nQuestion: {question}",
+        },
+    ]
+    response = client.chat.completions.create(
+        model=chat_model,
+        messages=messages,
+        temperature=0.2,
+    )
+    choices = getattr(response, "choices", [])
+    if not choices:
+        return "Unable to generate a response."
+    message = choices[0].message
+    return (message.content or "").strip() or "Unable to generate a response."
+
+
+def _rag_query(config: ModuleConfig) -> None:
+    table_name = config.get("table_name")
+    if not table_name:
+        raise typer.BadParameter("--table-name is required for query.")
+
+    use_local = config.get("local", False)
+    platform = config.get("platform")
+    configured_model_name = config.get("model")
+    top_k = config.get("top_k", 5)
+
+    question = typer.prompt("Enter your question")
+    if not question.strip():
+        console.print("[yellow]No question provided; aborting.[/]")
+        return
+
+    db_config = _resolve_db_config()
+    collection, db_host, db_port = _get_chroma_collection(table_name, db_config)
+    stored_platform = _infer_collection_platform(collection)
+
+    if platform == "openai" and not use_local and stored_platform and stored_platform != "openai":
+        raise typer.BadParameter(
+            f"Collection '{table_name}' was indexed with platform '{stored_platform}'. "
+            "Add --local to query local vectors or rebuild the collection with --platform openai."
+        )
+
+    if use_local:
+        retrieval_platform = "local"
+    elif platform == "openai":
+        retrieval_platform = "openai"
+    elif stored_platform:
+        retrieval_platform = stored_platform
+    else:
+        retrieval_platform = "local"
+
+    embed_fn, model_name, run_platform = _create_embedding_runner(
+        retrieval_platform == "local", configured_model_name, retrieval_platform
+    )
+    query_embeddings, _, _ = embed_fn([question])
+    if not query_embeddings:
+        console.print("[red]Failed to generate embedding for the query.[/]")
+        return
+
+    where_filter = None
+    if run_platform:
+        where_filter = {"platform": {"$eq": run_platform}}
+
+    results = collection.query(
+        query_embeddings=query_embeddings,
+        n_results=top_k,
+        include=["documents", "metadatas"],
+        where=where_filter,
+    )
+    documents = results.get("documents") or []
+    metadatas = results.get("metadatas") or []
+    if not documents or not documents[0]:
+        console.print("[yellow]No matching documents were found in the collection.[/]")
+        return
+
+    retrieved_docs = documents[0]
+    retrieved_meta = metadatas[0] if metadatas else []
+    context_parts: List[str] = []
+    sources: List[str] = []
+    for idx, doc in enumerate(retrieved_docs):
+        meta = retrieved_meta[idx] if idx < len(retrieved_meta) else {}
+        source = meta.get("source", "unknown")
+        sources.append(source)
+        context_parts.append(f"[Source: {source}]\n{doc}")
+    context = "\n\n".join(context_parts)
+
+    console.print(Panel(question, title="Question", border_style="cyan"))
+    console.print(Panel(context, title="Retrieved Context", border_style="magenta"))
+
+    if run_platform == "openai":
+        if not configured_model_name:
+            raise typer.BadParameter(
+                "Specify --model with an OpenAI chat model when using --platform openai for queries."
+            )
+        answer = _generate_openai_answer(question, context, configured_model_name)
+        display_name = _determine_openai_chat_model(configured_model_name)
+        console.print(Panel(answer, title=f"Response ({display_name})", border_style="green"))
+    elif use_local:
+        local_generation_model = (
+            os.environ.get("LOCAL_LLM_GENERATION_MODEL")
+            or os.environ.get("LOCAL_LLM_MODEL")
+        )
+        if not local_generation_model:
+            raise typer.BadParameter(
+                "Set LOCAL_LLM_GENERATION_MODEL (or fallback LOCAL_LLM_MODEL) to a text-generative GGUF for query responses."
+            )
+        answer = _generate_local_answer(question, context, local_generation_model)
+        display_name = Path(local_generation_model).name
+        console.print(Panel(answer, title=f"Response ({display_name})", border_style="green"))
+    else:
+        console.print("[yellow]No generation backend configured for this platform; showing context only.[/]")
+
+    unique_sources = sorted({source for source in sources})
+    source_table = Table(title="Sources", show_header=True)
+    source_table.add_column("Index", style="cyan", justify="center")
+    source_table.add_column("Path", style="white")
+    for idx, source in enumerate(unique_sources, start=1):
+        source_table.add_row(str(idx), source)
+    console.print(source_table)
 
 
 ACTIONS: Dict[str, Callable[[ModuleConfig], None]] = {
     "vectorization-summary": _rag_vectorization_summary,
     "batch-insert": _rag_batch_insert,
+    "delete-all": _rag_delete_all,
+    "query": _rag_query,
 }
 
 

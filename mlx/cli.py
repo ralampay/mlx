@@ -1,8 +1,12 @@
+from pathlib import Path
 from typing import Dict, Any, Optional
 
 import typer
+from dotenv import load_dotenv
 
 from mlx.platforms import run_module, registered_modules, UnknownModuleError
+
+load_dotenv(dotenv_path=Path(__file__).resolve().parent.parent / ".env", override=False)
 
 app = typer.Typer(
     help="MLX - Machine Learning eXecutor"
@@ -67,6 +71,28 @@ def main(
         None,
         help="Optional gradient clipping value for Ultralytics training (None disables).",
     ),
+    local: bool = typer.Option(
+        False,
+        "--local/--no-local",
+        help="Use the local LLM model defined in LOCAL_LLM_MODEL for embedding workloads.",
+        show_default=True,
+    ),
+    chunk_size: int = typer.Option(
+        800,
+        help="Character count for each chunk when generating embeddings.",
+    ),
+    chunk_overlap: int = typer.Option(
+        100,
+        help="Overlap between chunks when splitting documents for embeddings.",
+    ),
+    table_name: Optional[str] = typer.Option(
+        None,
+        help="Destination table/collection for RAG vector storage.",
+    ),
+    file_limit: Optional[int] = typer.Option(
+        None,
+        help="Maximum number of files to process for RAG utilities.",
+    ),
 
 ):
     typer.echo(f"MLX starting [module={module}] [platform={platform}] [model={model}]")
@@ -98,6 +124,11 @@ def main(
         "warmup_epochs": warmup_epochs,
         "amp": amp,
         "loss_clip": loss_clip,
+        "local": local,
+        "chunk_size": chunk_size,
+        "chunk_overlap": chunk_overlap,
+        "table_name": table_name,
+        "file_limit": file_limit,
     }
 
     try:

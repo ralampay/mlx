@@ -66,3 +66,6 @@ __test_output__/
 
 # Ignore pt files in root directory
 *.pt
+
+# Ignore tmp folder
+tmp/

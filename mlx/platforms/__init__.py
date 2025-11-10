@@ -58,6 +58,8 @@ registry.register("torch", "ic-one-shot", "mlx.platforms.torch.ic_one_shot:run_i
 registry.register("ultralytics", "obj-detect", "mlx.platforms.ultralytics.obj_detect:run_obj_detect")
 # Provide a generic fallback so existing invocations without --platform still work.
 registry.register_generic("ic-one-shot", "mlx.platforms.torch.ic_one_shot:run_ic_one_shot")
+registry.register_generic("system", "mlx.platforms.system:run_system")
+registry.register_generic("rag", "mlx.modules.rag.run:run")
 
 
 def run_module(platform: str, module_name: str, config: ModuleConfig) -> Any:

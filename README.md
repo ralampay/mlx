@@ -12,6 +12,59 @@ mlx --module chat --platform openai --model gpt-4o-mini
 
 The sections below detail every built-in module, their supported platforms, and the key parameters you can tweak.
 
+## Environment Setup
+
+Copy the provided template and populate the values required for your workspace:
+
+```bash
+cp .env.dist .env
+```
+
+- `LOCAL_LLM_MODEL`: Filesystem path to the local model weights that offline modules will use.
+- `OPENAI_API_KEY`: API key used by OpenAI-powered modules.
+- `HUGGINGFACE_TOKEN`: Access token for downloading models or datasets from Hugging Face.
+- `DB_ADAPTER`: Target vector database adapter (`chromadb` by default; alternatively `postgres` if you wire up a Postgres-backed store).
+- `DB_HOST`, `DB_PORT`: Hostname and port for the ChromaDB server when `DB_ADAPTER=chromadb`.
+- `DB_USERNAME`, `DB_PASSWORD`: Credentials for authenticated ChromaDB deployments (password is masked in the CLI).
+
+The CLI loads `.env` automatically on startup. You can confirm the current values (masked where appropriate) with:
+
+```bash
+mlx --module system --action ls-env
+```
+
+Set any additional variables you rely on (for example `ROBOFLOW_API_KEY`) in the same `.env` file or through your preferred secrets manager.
+
+### RAG Utilities
+
+```bash
+mlx --module rag \
+    --action vectorization-summary \
+    --chunk-size 800 \
+    --chunk-overlap 100 \
+    --dataset-path ./datasets/rag \
+    --table-name demo_collection \
+    --file-limit 50 \
+    --local
+```
+
+- `vectorization-summary`: Scans the directory from `--dataset-path` for `.txt` and `.pdf` files, chunks their contents, and prints a summary table showing the model, embedding size, chunking hyperparameters, dataset statistics, expected row count, total token count, the destination table/collection, and the target database adapter. A sample JSON record (including id, the first five embedding coordinates, content, metadata, model name, platform, and source) is also shown to preview what will be inserted downstream. Tune the chunker with `--chunk-size` and `--chunk-overlap`, and cap ingestion with `--file-limit` if needed. Pass `--local` to load the GGUF model pointed to by `LOCAL_LLM_MODEL` via `llama-cpp-python`; omit it to fall back to the default Chroma embedding function. When `DB_ADAPTER` is `chromadb`, the summary also displays `DB_HOST` and `DB_PORT`.
+
+```bash
+mlx --module rag \
+    --action batch-insert \
+    --chunk-size 800 \
+    --chunk-overlap 100 \
+    --dataset-path ./datasets/rag \
+    --table-name demo_collection \
+    --file-limit 50 \
+    --local
+```
+
+- `batch-insert`: Executes the same chunking workflow and inserts the resulting vectors into the collection specified by `--table-name`. Currently supports `DB_ADAPTER=chromadb`, connecting with `DB_HOST`, `DB_PORT`, `DB_USERNAME`, and `DB_PASSWORD`. Inserts occur per source file with a Rich progress spinner, respecting `--file-limit` to cap ingestion size and reusing the summary table for confirmation.
+
+All RAG commands require `--table-name` to identify the target collection.
+
 ## Modules
 
 ### Chat (OpenAI platform)

@@ -7,7 +7,7 @@ import typer
 from rich.console import Console
 from rich.table import Table
 
-from .utils import _resolve_weights_source, _resolve_model_paths, _get_color_palette
+from .utils import _resolve_weights_source, _resolve_model_paths, _get_color_palette, _initialize_model
 from .run_stream_inference import RunStreamInference
 
 console = Console()

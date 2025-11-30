@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import os
 from pathlib import Path
-from typing import Any, Dict, List
+from typing import Any, Callable, Dict, List, Optional
 
 import typer
 from rich.console import Console
@@ -13,10 +13,11 @@ ModuleConfig = Dict[str, Any]
 
 console = Console()
 _LLAMACPP_SILENCED = False
+_LLAMACPP_LOGGER: Optional[Callable[..., None]] = None
 
 
 def _ensure_llama_silenced() -> None:
-    global _LLAMACPP_SILENCED
+    global _LLAMACPP_SILENCED, _LLAMACPP_LOGGER
     if _LLAMACPP_SILENCED:
         return
     try:
@@ -28,6 +29,7 @@ def _ensure_llama_silenced() -> None:
     def _silent_logger(_: int, __: bytes, ___: Any) -> None:
         return
 
+    _LLAMACPP_LOGGER = _silent_logger
     llama_cpp.llama_log_set(_silent_logger, None)
     _LLAMACPP_SILENCED = True
 
@@ -58,7 +60,7 @@ def _print_session_summary(
     temperature: float,
     top_p: float,
     top_k: int,
-    context_window: int,
+    context_window: Optional[int],
     max_tokens: int,
 ) -> None:
     model_name = Path(model_path).name
@@ -74,7 +76,8 @@ def _print_session_summary(
     table.add_row("Temperature (creativity)", f"{temperature}")
     table.add_row("Top P (nucleus sampling)", f"{top_p}")
     table.add_row("Top K (cutoff)", f"{top_k}")
-    table.add_row("Context window", f"{context_window}")
+    context_display = f"{context_window}" if context_window is not None else "model-defined default"
+    table.add_row("Context window", context_display)
     table.add_row("Max tokens per reply", f"{max_tokens}")
     console.print(table)
     console.print("[dim]Type 'exit' or 'quit' to end.[/dim]\n")
@@ -84,7 +87,7 @@ class _LocalLlamaChat:
     def __init__(
         self,
         model_path: str,
-        context_window: int,
+        context_window: Optional[int],
         temperature: float,
         top_p: float,
         top_k: int,
@@ -99,15 +102,33 @@ class _LocalLlamaChat:
 
         _ensure_llama_silenced()
 
-        self._llama = Llama(
-            model_path=model_path,
-            n_ctx=context_window,
-            verbose=False,
+        llama_kwargs = {
+            "model_path": model_path,
+            "verbose": False,
+            "n_ctx": context_window if context_window is not None else 0,
+        }
+
+        self._llama = Llama(**llama_kwargs)
+        detected_context = None
+        n_ctx_attr = getattr(self._llama, "n_ctx", None)
+        if callable(n_ctx_attr):
+            try:
+                detected_context = n_ctx_attr()
+            except TypeError:
+                detected_context = None
+        elif isinstance(n_ctx_attr, int):
+            detected_context = n_ctx_attr
+        self._context_window = (
+            detected_context if detected_context is not None else context_window
         )
         self._max_tokens = max_tokens
         self._temperature = temperature
         self._top_p = top_p
         self._top_k = top_k
+
+    @property
+    def context_window(self) -> Optional[int]:
+        return self._context_window
 
     def generate(self, prompt: str) -> str:
         result = self._llama(
@@ -149,7 +170,7 @@ def run_chat(config: ModuleConfig) -> None:
     temperature = config.get("temperature", 0.7)
     top_p = config.get("top_p", 0.7)
     top_k = config.get("top_k", 50)
-    context_window = config.get("context_window", 4096)
+    context_window = config.get("context_window")
     max_tokens = config.get("max_tokens", 512)
     initial_content = config.get(
         "initial_content",
@@ -172,7 +193,7 @@ def run_chat(config: ModuleConfig) -> None:
         temperature,
         top_p,
         top_k,
-        context_window,
+        chat_model.context_window,
         max_tokens,
     )
 
@@ -187,7 +208,8 @@ def run_chat(config: ModuleConfig) -> None:
 
         try:
             console.print("[bold cyan]MLX:[/bold cyan] ", end="")
-            response_text = chat_model.generate(prompt)
+            with console.status("[bold cyan]Thinking...[/bold cyan]", spinner="dots"):
+                response_text = chat_model.generate(prompt)
             console.print(response_text, style="white")
             console.print()
             messages.append({"role": "assistant", "content": response_text})

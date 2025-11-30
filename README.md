@@ -53,3 +53,26 @@ mlx --module system --action ls-env
 Set any additional variables you rely on (for example `ROBOFLOW_API_KEY`) in the same `.env` file or through your preferred secrets manager.
 
 ## Packages
+
+Install the dependencies listed below (package names target PyPI):
+
+- beautifulsoup4 (`bs4`)
+- chromadb
+- huggingface-hub
+- langchain
+- llama-cpp-python (`llama_cpp`)
+- matplotlib
+- numpy
+- opencv-python (`cv2`)
+- openai
+- Pillow (`PIL`)
+- pypdf
+- python-dotenv (`dotenv`)
+- requests
+- rich
+- scikit-learn (`sklearn`)
+- torch
+- torchvision
+- tqdm
+- typer
+- ultralytics (`https://github.com/ralampay/ultralytics`)

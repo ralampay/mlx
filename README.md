@@ -41,7 +41,7 @@ Set any additional variables you rely on (for example `ROBOFLOW_API_KEY`) in the
 
 * [Object Detection](./docs/object_detection/index.md)
 * [RAG Utilities](./docs/rag/index.md)
-* [Chat (OpenAI platform)](./docs/chat/index.md)
+* [Chat](./docs/chat/index.md)
 * [One-Shot Image Classification (Torch platform)](./docs/image_classification/index.md)
 
 Run `mlx --help` to explore every module's available actions and configuration flags.

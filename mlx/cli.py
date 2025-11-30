@@ -20,6 +20,10 @@ def main(
     temperature: float = typer.Option(0.7, help="Creativity / randomness level (0.0-2.0)"),
     top_p: float = typer.Option(0.7, help="Nucleus sampling threshold (0-1)."),
     top_k: int = typer.Option(50, help="Top-k sampling cutoff (>=1)"),
+    system_prompt: str = typer.Option(
+        "You are a general purpose assistant.",
+        help="System prompt/initial content for chat sessions.",
+    ),
     height: int = typer.Option(256, help="Height of image"),
     width: int = typer.Option(256, help="Width of image"),
     device: str = typer.Option("cpu", help="Device to load model and data on"),
@@ -135,6 +139,7 @@ def main(
         "table_name": table_name,
         "file_limit": file_limit,
         "model_generator": model_generator,
+        "initial_content": system_prompt,
     }
 
     try:

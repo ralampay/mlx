@@ -10,7 +10,22 @@ All commands share a common signature. Pick the `--module` you want to run, sele
 mlx --module chat --platform openai --model gpt-4o-mini
 ```
 
+or when running from source:
+
+```bash
+python -m mlx --module chat --platform openai --model gpt-4o-mini
+```
+
 The sections below detail every built-in module, their supported platforms, and the key parameters you can tweak.
+
+## Modules
+
+* [Chat](./docs/chat/index.md)
+* [Object Detection](./docs/object_detection/index.md)
+* [RAG Utilities](./docs/rag/index.md)
+* [One-Shot Image Classification (Torch platform)](./docs/image_classification/index.md)
+
+Run `mlx --help` to explore every module's available actions and configuration flags.
 
 ## Environment Setup
 
@@ -37,11 +52,4 @@ mlx --module system --action ls-env
 
 Set any additional variables you rely on (for example `ROBOFLOW_API_KEY`) in the same `.env` file or through your preferred secrets manager.
 
-## Modules
-
-* [Object Detection](./docs/object_detection/index.md)
-* [RAG Utilities](./docs/rag/index.md)
-* [Chat](./docs/chat/index.md)
-* [One-Shot Image Classification (Torch platform)](./docs/image_classification/index.md)
-
-Run `mlx --help` to explore every module's available actions and configuration flags.
+## Packages

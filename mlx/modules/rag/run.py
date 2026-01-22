@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import os
 import uuid
-from itertools import groupby
 from pathlib import Path
 from typing import Any, Callable, Dict, List, Optional, Tuple
 
@@ -10,10 +9,10 @@ import typer
 from langchain.text_splitter import RecursiveCharacterTextSplitter
 from rich.console import Console
 from rich.table import Table
-from rich.progress import Progress, SpinnerColumn, TextColumn
 from rich.panel import Panel
 
-ModuleConfig = Dict[str, Any]
+from mlx.modules.rag.utils import _resolve_db_config
+from mlx.definitions import ModuleConfig
 
 console = Console()
 _LLAMACPP_SILENCED = False
@@ -190,22 +189,6 @@ def _estimate_tokens_from_texts(texts: List[str]) -> int:
         # Rough heuristic: assume ~4 characters per token.
         total += max(1, len(text) // 4)
     return total
-
-
-def _resolve_db_config() -> Dict[str, str]:
-    adapter = os.environ.get("DB_ADAPTER", "chromadb")
-    config: Dict[str, str] = {
-        "adapter": adapter,
-        "username": os.environ.get("DB_USERNAME", ""),
-        "password": os.environ.get("DB_PASSWORD", ""),
-    }
-    if adapter.lower() == "chromadb":
-        config["host"] = os.environ.get("DB_HOST", "not set")
-        config["port"] = os.environ.get("DB_PORT", "not set")
-    else:
-        config["host"] = "n/a"
-        config["port"] = "n/a"
-    return config
 
 
 def _get_chroma_collection(
@@ -488,99 +471,9 @@ def _rag_vectorization_summary(config: ModuleConfig) -> None:
 
 
 def _rag_batch_insert(config: ModuleConfig) -> None:
-    chunk_size = config.get("chunk_size", 800)
-    chunk_overlap = config.get("chunk_overlap", 100)
-    use_local = config.get("local", False)
-    configured_model_name = config.get("model")
-    platform = config.get("platform")
-    table_name = config.get("table_name")
-    dataset_path = config.get("dataset_path")
-    file_limit = config.get("file_limit")
+    from mlx.modules.rag.rag_batch_insert import RagBatchInsert
 
-    if not dataset_path:
-        raise typer.BadParameter("--dataset-path is required for batch-insert.")
-    if not table_name:
-        raise typer.BadParameter("--table-name is required for batch-insert.")
-
-    splitter = RecursiveCharacterTextSplitter(
-        chunk_size=chunk_size,
-        chunk_overlap=chunk_overlap,
-    )
-    chunk_records, processed_files = _collect_dataset_chunks(
-        dataset_path,
-        splitter,
-        max_files=file_limit,
-    )
-    if not chunk_records:
-        raise typer.BadParameter("No content available for insertion.")
-
-    embed_fn, model_name, run_platform = _create_embedding_runner(
-        use_local, configured_model_name, platform
-    )
-    db_config = _resolve_db_config()
-    collection, db_host, db_port = _get_chroma_collection(table_name, db_config)
-
-    total_tokens = 0
-    embedding_size = 0
-    total_chunks = len(chunk_records)
-
-    progress = Progress(
-        SpinnerColumn(),
-        TextColumn("[progress.description]{task.description}"),
-        TextColumn("{task.completed}/{task.total} chunks"),
-        transient=True,
-        console=console,
-    )
-
-    with progress:
-        task_id = progress.add_task(f"Inserting into {table_name}", total=total_chunks)
-        for source, group in groupby(chunk_records, key=lambda record: record["source"]):
-            batch = list(group)
-            documents = [item["text"] for item in batch]
-            embeddings, token_count, dim = embed_fn(documents)
-            total_tokens += token_count
-            if embedding_size == 0:
-                if dim:
-                    embedding_size = dim
-                elif len(embeddings) > 0:
-                    embedding_size = len(embeddings[0])
-
-            ids = [str(uuid.uuid4()) for _ in batch]
-            metadatas = [
-                {
-                    "chunk_id": item["id"],
-                    "chunk_index": item["global_index"],
-                    "source": item["source"],
-                    "table_name": table_name,
-                    "model_name": model_name,
-                    "platform": run_platform,
-                }
-                for item in batch
-            ]
-            collection.upsert(
-                ids=ids,
-                documents=documents,
-                metadatas=metadatas,
-                embeddings=embeddings,
-            )
-            progress.advance(task_id, len(batch))
-
-    _render_run_metadata(
-        model_name=model_name,
-        embedding_size=embedding_size,
-        chunk_size=chunk_size,
-        chunk_overlap=chunk_overlap,
-        dataset_path=dataset_path,
-        file_count=processed_files,
-        row_count=total_chunks,
-        total_tokens=total_tokens,
-        db_adapter=db_config["adapter"],
-        db_host=db_host,
-        db_port=str(db_port),
-        table_name=table_name,
-        embedding_platform=run_platform,
-    )
-    console.print(f"[green]Inserted {total_chunks} chunk(s) into '{table_name}'.[/]")
+    RagBatchInsert(config).execute()
 
 
 def _rag_delete_all(config: ModuleConfig) -> None:

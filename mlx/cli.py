@@ -97,6 +97,12 @@ def main(
         None,
         help="Maximum number of files to process for RAG utilities.",
     ),
+    show_sample: bool = typer.Option(
+        True,
+        "--show-sample/--no-show-sample",
+        help="Show a sample vector record in RAG summaries.",
+        show_default=True,
+    ),
     model_generator: Optional[str] = typer.Option(
         None,
         help="Override generation model (used by query for hosted platforms such as Hugging Face).",
@@ -138,6 +144,7 @@ def main(
         "chunk_overlap": chunk_overlap,
         "table_name": table_name,
         "file_limit": file_limit,
+        "show_sample": show_sample,
         "model_generator": model_generator,
         "initial_content": system_prompt,
     }

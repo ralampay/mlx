@@ -2,17 +2,58 @@
 
 ## Overview
 
-The `rag` module orchestrates ingestion, vectorization, and query workflows around a single collection. Every command is executed via `mlx --module rag` plus an `--action` flag. The module currently targets a Chroma-compatible backend (local or remote) but tags each record with the originating platform so you can filter results per backend.
+The `rag` module orchestrates ingestion, vectorization, and query workflows around a single collection. Every command is executed via `mlx --module rag` plus an `--action` flag. The module supports Chroma-compatible and PostgreSQL backends, and tags each record with the originating platform so you can filter results per backend.
 
 ## Environment Requirements
 
 Ensure the following environment variables are populated, preferably via `.env` (you can copy `.env.dist` and edit the values):
 
-- `DB_ADAPTER`: Vector database adapter (`chromadb` is supported out of the box).
-- `DB_HOST`, `DB_PORT`, `DB_USERNAME`, `DB_PASSWORD`: Connection details when `DB_ADAPTER=chromadb`.
+- `DB_ADAPTER`: Vector database adapter (`chromadb` and `postgresql` are supported).
+- `DB_HOST`, `DB_PORT`, `DB_USERNAME`, `DB_PASSWORD`: Connection details when `DB_ADAPTER=chromadb` or `DB_ADAPTER=postgresql`.
+- `DB_NAME`: Database name when `DB_ADAPTER=postgresql`.
 - `HUGGINGFACE_TOKEN`: Needed when using Hugging Face hosted embeddings or generators.
 - `LOCAL_LLM_MODEL`: Path to a GGUF weights file used by offline modes.
 - `LOCAL_LLM_GENERATION_MODEL`: Optional gguf for generation; falls back to `LOCAL_LLM_MODEL` when unset.
+
+## PostgreSQL Setup
+
+Use PostgreSQL with the `pgvector` extension and a table schema that matches the RAG insert format.
+
+Create an admin user (example username `developer`, password `password`):
+
+```sql
+CREATE ROLE developer WITH LOGIN PASSWORD 'password' SUPERUSER;
+```
+
+Create a database and enable `pgvector`:
+
+```sql
+CREATE DATABASE rag_db OWNER developer;
+\c rag_db
+CREATE EXTENSION IF NOT EXISTS vector;
+```
+
+Create a table with the expected schema (replace `public.demo_collection` and the vector size as needed):
+
+```sql
+CREATE TABLE IF NOT EXISTS public.demo_collection (
+  id uuid PRIMARY KEY,
+  content text NOT NULL,
+  embedding vector(384) NOT NULL,
+  metadata jsonb NOT NULL
+);
+```
+
+Environment variables for PostgreSQL:
+
+```bash
+export DB_ADAPTER=postgresql
+export DB_HOST=localhost
+export DB_PORT=5432
+export DB_NAME=rag_db
+export DB_USERNAME=developer
+export DB_PASSWORD=password
+```
 
 ## Vectorization Summary
 
@@ -102,6 +143,16 @@ mlx --module rag \
 
 For fully-local responses skip the hosted platform flags and rely on `LOCAL_LLM_GENERATION_MODEL` or `LOCAL_LLM_MODEL`.
 
+Example (local embeddings + local chat response):
+
+```bash
+mlx --module rag \
+    --action query \
+    --table-name demo_collection \
+    --top-k 5 \
+    --local
+```
+
 ## Cleanup
 
 Clear a collection before re-running ingestion with:
@@ -112,6 +163,6 @@ mlx --module rag \
     --table-name demo_collection
 ```
 
-This currently works for `chromadb` tables.
+This works for both `chromadb` collections and PostgreSQL tables.
 
 > **Note:** Every `rag` command requires `--table-name` to select the collection that backs the workflow.

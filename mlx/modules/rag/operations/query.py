@@ -18,6 +18,7 @@ from mlx.modules.rag.helpers import (
     console,
 )
 from mlx.modules.rag.utils import _resolve_db_config
+from mlx.ui import prompt_text
 
 
 class RagQuery:
@@ -33,7 +34,7 @@ class RagQuery:
         self.top_k = config.get("top_k", 5)
 
     def execute(self) -> None:
-        question = typer.prompt("Enter your question")
+        question = prompt_text("Enter your question")
         if not question.strip():
             console.print("[yellow]No question provided; aborting.[/]")
             return

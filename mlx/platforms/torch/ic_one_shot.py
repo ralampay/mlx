@@ -1,5 +1,4 @@
 import os
-import random
 import math
 
 import numpy as np
@@ -9,26 +8,20 @@ from tqdm import tqdm
 import torch
 from torch.utils.data import DataLoader
 from torch import nn, optim
-import typer
-from torchvision import transforms, datasets
-import torchvision.transforms.v2 as T
 import torch.nn.functional as F
 from sklearn.metrics import f1_score, precision_score, recall_score, accuracy_score
 
 from rich.table import Table
-from rich.console import Console, Group
+from rich.console import Group
 from rich.progress import Progress, TimeElapsedColumn, TimeRemainingColumn, BarColumn, TextColumn, SpinnerColumn
 from rich.live import Live
 from rich.panel import Panel
-from rich.text import Text
 
 from mlx.modules.data_builder import load_ic_one_shot_dataset
 from mlx.modules.ic.siamese_le_net import SiameseLeNet
 from mlx.modules.data_builder import build_ic_one_shot
-from mlx.utils import render_loss_plot
 from mlx.modules.datasets.one_shot_pair_dataset import OneShotPairDataset
-
-console = Console()
+from mlx.ui import console, print_info, print_success, print_warning
 
 def run_ic_one_shot(module_config):
     defaults = {
@@ -96,10 +89,7 @@ def _train_model(net, config):
     checkpoint_dir = os.path.join(dataset_path, "checkpoints")
     os.makedirs(checkpoint_dir, exist_ok=True)
 
-    typer.secho(
-        f"Starting training on device={device} for {epochs} epochs",
-        fg=typer.colors.BRIGHT_YELLOW, bold=True
-    )
+    print_info(f"Starting training on device={device} for {epochs} epochs")
 
     net = net.to(device)
     criterion = nn.BCEWithLogitsLoss()
@@ -218,7 +208,7 @@ def _train_model(net, config):
 
             prev_train_loss, prev_val_loss = avg_train_loss, avg_val_loss
 
-    typer.secho("\nTraining complete!", fg=typer.colors.BRIGHT_GREEN, bold=True)
+    print_success("Training complete!")
 
 
 def _test_model(net, config):
@@ -228,11 +218,7 @@ def _test_model(net, config):
     device  = config["device"]
     colored = config["colored"]
 
-    typer.secho(
-        f"Running test on device={device} | input={h}x{w} | batch={batch}",
-        fg=typer.colors.GREEN,
-        bold=True,
-    )
+    print_info(f"Running test on device={device} | input={h}x{w} | batch={batch}")
 
     # Assume colored
     input_channel_size = 3 if colored else 1
@@ -241,8 +227,8 @@ def _test_model(net, config):
 
     out = net(x1, x2)
 
-    typer.secho("\nTest completed successfully!", fg=typer.colors.BRIGHT_GREEN, bold=True)
-    typer.secho(f"Output tensor shape: {list(out.shape)}\n", fg=typer.colors.BRIGHT_GREEN)
+    print_success("Test completed successfully!")
+    print_info(f"Output tensor shape: {list(out.shape)}")
 
     # Display output in compact table
     table = Table(title="Model Output", show_header=True)
@@ -267,7 +253,6 @@ def _benchmark_model(model, config):
             - Optional: "batch_size", "embedding_size", "img_size"
     """
 
-    console = Console()
     console.rule("[bold blue]Benchmarking Model[/bold blue]")
 
     # --- Load config values ---
@@ -390,7 +375,7 @@ def _infer_image(model, config):
                 try:
                     ref_emb = get_embedding(ref_path)
                 except Exception as e:
-                    print(f"Skipping {ref_path}: {e}")
+                    print_warning(f"Skipping {ref_path}: {e}")
                     continue
 
                 dist = F.pairwise_distance(input_emb, ref_emb).item()
@@ -449,7 +434,7 @@ def _display_inference_results(result):
         table.add_row(str(i), label, path, f"{dist:.4f}")
 
     console.print(table)
-    typer.echo(f"\n✅ Best match: {best_label} (distance={best_distance:.4f})")
+    print_success(f"Best match: {best_label} (distance={best_distance:.4f})")
 
     # --- Helper for header bar
     def draw_header_bar(img, text):
@@ -516,7 +501,7 @@ def _display_inference_results(result):
         imgs.append(ref_display)
 
     if not imgs:
-        typer.echo("⚠️ No images to display.")
+        print_warning("No images to display.")
         return
 
     # --- Resize to consistent height
@@ -559,6 +544,6 @@ def _display_inference_results(result):
         side_by_side = np.hstack((input_resized, best_resized))
         cv2.imshow("Best Match Comparison", side_by_side)
 
-    typer.echo("\nPress any key on an image window to close...")
+    print_info("Press any key on an image window to close...")
     cv2.waitKey(0)
     cv2.destroyAllWindows()

@@ -1,7 +1,7 @@
 [project]
 name = "mlx"
 version = "0.1.0"
-description = "MLX: A command-line AI assistant."
+description = "MLX: A command-line machine learning workflow runner."
 authors = [{ name = "Your Name", email = "raphael.alampay@gmail.com" }]
 readme = "README.md"
 license = { text = "MIT" }

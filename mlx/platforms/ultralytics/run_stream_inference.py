@@ -6,8 +6,11 @@ except ImportError as exc:
     ) from exc
 
 import typer
-from typing import Dict, Any, Optional, Tuple, Union
+from pathlib import Path
+from typing import Any, Dict
+from rich.panel import Panel
 from mlx.platforms.ultralytics.utils import _resolve_model_paths, _initialize_model, _annotate_detections
+from mlx.ui import console, print_info, print_warning
 
 class RunStreamInference:
     def __init__(self, config: Dict[str, Any], source: str):
@@ -30,19 +33,13 @@ class RunStreamInference:
         self.camera_index = int(self.config.get("camera_index", 0))
 
         if source == "camera":
-            typer.secho(
-                "Ultralytics Object Detection - Camera Inference", 
-                fg=typer.colors.BRIGHT_CYAN, bold=True
-            )
+            console.print(Panel.fit("Ultralytics Object Detection - Camera Inference", border_style="cyan"))
         else:
-            typer.secho(
-                "Ultralytics Object Detection - Video Inference", 
-                fg=typer.colors.BRIGHT_CYAN, bold=True
-            )
+            console.print(Panel.fit("Ultralytics Object Detection - Video Inference", border_style="cyan"))
 
         if self.resolved_cfg:
-            typer.echo(f"Model YAML: {self.resolved_cfg}")
-        typer.echo(f"Loading weights from: {self.resolved_weights}")
+            print_info(f"Model YAML: {self.resolved_cfg}")
+        print_info(f"Loading weights from: {self.resolved_weights}")
 
         self.model = _initialize_model(
             self.resolved_cfg, 
@@ -51,10 +48,10 @@ class RunStreamInference:
         )
 
     def execute(self):
-        typer.echo(
+        print_info(
             f"Using device: {self.device} | Image size: {self.imgsz} | Confidence: {self.confidence}"
         )
-        typer.secho("Press 'q' or 'Esc' to exit.", fg=typer.colors.YELLOW)
+        print_warning("Press 'q' or 'Esc' to exit.")
 
         if self.source == "camera":
             cap = cv2.VideoCapture(self.camera_index)
@@ -84,7 +81,9 @@ class RunStreamInference:
                 ret, frame = cap.read()
 
                 if not ret:
-                    typer.echo("No more frames to process." if self.source == "video" else "Failed to read frame from camera.")
+                    print_warning(
+                        "No more frames to process." if self.source == "video" else "Failed to read frame from camera."
+                    )
                     break
 
                 result = self.model.predict(
@@ -101,7 +100,7 @@ class RunStreamInference:
 
                 key = cv2.waitKey(1 if self.source == "camera" else 10) & 0xFF
                 if key in (ord("q"), 27):
-                    typer.echo("Exiting inference.")
+                    print_info("Exiting inference.")
                     break
         finally:
             cap.release()

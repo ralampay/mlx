@@ -63,7 +63,6 @@ registry.register_generic("chat", "mlx.modules.chat:run_chat")
 registry.register_generic("ic-one-shot", "mlx.platforms.torch.ic_one_shot:run_ic_one_shot")
 registry.register_generic("system", "mlx.platforms.system:run_system")
 registry.register_generic("rag", "mlx.modules.rag.run:run")
-registry.register_generic("agents", "mlx.modules.agents:run")
 
 
 def run_module(platform: str, module_name: str, config: ModuleConfig) -> Any:

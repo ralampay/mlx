@@ -1,6 +1,8 @@
 # MLX (Machine Learning eXecutor)
 
-A CLI that wraps several ML/DL workflows behind a consistent interface.
+A CLI that wraps chat, retrieval, and computer-vision workflows behind a consistent interface.
+
+The terminal experience uses the Python `rich` text UI library for interactive prompts, status panels, tables, and runtime summaries.
 
 ## Usage
 
@@ -16,7 +18,7 @@ or when running from source:
 python -m mlx --module chat --platform openai --model gpt-4o-mini
 ```
 
-The sections below detail every built-in module, their supported platforms, and the key parameters you can tweak.
+The sections below detail the built-in modules, their supported platforms, and the key parameters you can tweak.
 
 ## Modules
 
@@ -25,7 +27,7 @@ The sections below detail every built-in module, their supported platforms, and 
 * [RAG Utilities](./docs/rag/index.md)
 * [One-Shot Image Classification (Torch platform)](./docs/image_classification/index.md)
 
-Run `mlx --help` to explore every module's available actions and configuration flags.
+Run `mlx --help` to explore every available module action and configuration flag.
 
 ## Environment Setup
 

@@ -3,8 +3,10 @@ from typing import Dict, Any, Optional
 
 import typer
 from dotenv import load_dotenv
+from rich.table import Table
 
 from mlx.platforms import run_module, registered_modules, UnknownModuleError
+from mlx.ui import console, print_error, print_startup, print_warning
 
 load_dotenv(dotenv_path=Path(__file__).resolve().parent.parent / ".env", override=False)
 
@@ -109,7 +111,7 @@ def main(
     ),
 
 ):
-    typer.echo(f"MLX starting [module={module}] [platform={platform}] [model={model}]")
+    print_startup(module, platform, model)
 
     config: Dict[str, Any] = {
         "module": module,
@@ -152,15 +154,24 @@ def main(
     try:
         run_module(platform, module, config)
     except UnknownModuleError as exc:
-        typer.secho(str(exc), fg=typer.colors.RED, err=True)
+        print_error(str(exc))
         available = registered_modules()
         platform_modules = ", ".join(sorted(available.get(platform, {}).keys()))
         generic_modules = ", ".join(sorted(available.get("generic", {}).keys()))
 
+        table = Table(title="Available Modules", show_header=True)
+        table.add_column("Scope", style="cyan", no_wrap=True)
+        table.add_column("Modules", style="white")
+
         if platform_modules:
-            typer.secho(f"Available modules for '{platform}': {platform_modules}", fg=typer.colors.YELLOW, err=True)
+            table.add_row(f"Platform '{platform}'", platform_modules)
         if generic_modules:
-            typer.secho(f"Platform-agnostic modules: {generic_modules}", fg=typer.colors.YELLOW, err=True)
+            table.add_row("Generic", generic_modules)
+
+        if table.row_count:
+            console.print(table)
+        else:
+            print_warning("No modules are registered for the requested platform.")
 
         raise typer.Exit(code=1)
 

@@ -1,16 +1,15 @@
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Dict, Any, Optional, Tuple, Union
+from typing import Any, Dict
 
 import typer
-from rich.console import Console
+from rich.panel import Panel
 from rich.table import Table
 
-from .utils import _resolve_weights_source, _resolve_model_paths, _get_color_palette, _initialize_model
+from .utils import _resolve_model_paths, _initialize_model
 from .run_stream_inference import RunStreamInference
-
-console = Console()
+from mlx.ui import console, print_info, print_success
 
 def run_obj_detect(config: Dict[str, Any]):
     action = config.get("action", "train")
@@ -57,7 +56,7 @@ def _train_obj_detect(config: Dict[str, Any]):
     project_dir.mkdir(parents=True, exist_ok=True)
     run_name = config.get("run_name", "mlx-ultralytics")
 
-    typer.secho("Ultralytics Object Detection - Training", fg=typer.colors.BRIGHT_CYAN, bold=True)
+    console.print(Panel.fit("Ultralytics Object Detection - Training", border_style="cyan"))
 
     summary = Table(title="Training Configuration", show_lines=True)
     summary.add_column("Key", justify="right", style="cyan", no_wrap=True)
@@ -83,7 +82,7 @@ def _train_obj_detect(config: Dict[str, Any]):
     summary.add_row("Loss Clip", str(loss_clip) if loss_clip is not None else "disabled")
     console.print(summary)
 
-    typer.echo("Loading Ultralytics model...")
+    print_info("Loading Ultralytics model...")
     model = _initialize_model(resolved_cfg, resolved_weights, prefer_cfg=True)
 
     overrides = getattr(model, "overrides", {})
@@ -114,8 +113,8 @@ def _train_obj_detect(config: Dict[str, Any]):
     if loss_clip is not None:
         train_kwargs["loss_clip"] = float(loss_clip)
 
-    typer.echo("Starting training loop...")
+    print_info("Starting training loop...")
     results = model.train(**train_kwargs)
-    typer.secho("Training complete!", fg=typer.colors.GREEN, bold=True)
+    print_success("Training complete!")
 
     return results

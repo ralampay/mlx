@@ -3,14 +3,9 @@ import random
 import shutil
 import typer
 from pathlib import Path
-from PIL import Image
-from torch.utils.data import Dataset
 from rich.table import Table
-from rich.console import Console
-from torchvision import transforms, datasets
 from mlx.modules.datasets.one_shot_pair_dataset import OneShotPairDataset
-
-console = Console()
+from mlx.ui import console, confirm_action, print_info, print_success, print_warning, prompt_int, prompt_text
 
 def load_ic_one_shot_dataset(dataset_path, input_size=(105, 105), colored=True, n_pairs_per_class=100):
     """
@@ -59,12 +54,12 @@ def build_ic_one_shot(dataset_path: str):
 
     dataset_path = Path(dataset_path)
     if not dataset_path.exists():
-        typer.secho(f"Dataset path not found: {dataset_path}", fg=typer.colors.RED, bold=True)
+        print_warning(f"Dataset path not found: {dataset_path}")
         raise typer.Exit(code=1)
 
     # Discover all label folders
     label_dirs = [d for d in dataset_path.iterdir() if d.is_dir()]
-    typer.secho(f"Found {len(label_dirs)} label(s) under {dataset_path.name}", fg=typer.colors.CYAN, bold=True)
+    print_info(f"Found {len(label_dirs)} label(s) under {dataset_path.name}")
 
     # Count images per label
     table = Table(title="Label Summary", show_lines=True)
@@ -83,22 +78,21 @@ def build_ic_one_shot(dataset_path: str):
     console.print(table)
 
     # Ask user how many to allocate for splits
-    train_count = typer.prompt("How many images per label for TRAIN?", type=int)
-    val_count = typer.prompt("How many images per label for VAL?", type=int)
-    test_count = typer.prompt("How many images per label for TEST?", type=int)
+    train_count = prompt_int("How many images per label for TRAIN?")
+    val_count = prompt_int("How many images per label for VAL?")
+    test_count = prompt_int("How many images per label for TEST?")
 
     total_needed = train_count + val_count + test_count
     for label, count in label_counts.items():
         if count < total_needed:
-            typer.secho(
-                f"Label '{label}' has only {count} images — less than requested total {total_needed}.",
-                fg=typer.colors.YELLOW,
+            print_warning(
+                f"Label '{label}' has only {count} images, less than requested total {total_needed}."
             )
 
     # Ask for output directory
-    output_path = Path(typer.prompt("Enter output path for split dataset"))
+    output_path = Path(prompt_text("Enter output path for split dataset"))
     if output_path.exists():
-        typer.confirm(f"Output directory '{output_path}' already exists. Overwrite?", abort=True)
+        confirm_action(f"Output directory '{output_path}' already exists. Overwrite?", abort=True)
         shutil.rmtree(output_path)
     output_path.mkdir(parents=True, exist_ok=True)
 
@@ -107,7 +101,7 @@ def build_ic_one_shot(dataset_path: str):
         (output_path / split).mkdir(exist_ok=True)
 
     # Split each label
-    typer.secho("Splitting dataset...", fg=typer.colors.BLUE, bold=True)
+    print_info("Splitting dataset...")
     for label in label_dirs:
         images = []
         for ext in ["*.jpg", "*.jpeg", "*.png", "*.JPG", "*.JPEG", "*.PNG"]:
@@ -127,4 +121,4 @@ def build_ic_one_shot(dataset_path: str):
             for img_path in split_images:
                 shutil.copy2(img_path, out_dir / img_path.name)
 
-    typer.secho(f"Dataset created successfully at {output_path}", fg=typer.colors.GREEN, bold=True)
+    print_success(f"Dataset created successfully at {output_path}")

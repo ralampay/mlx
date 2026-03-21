@@ -9,10 +9,9 @@ try:
     from langchain_text_splitters import RecursiveCharacterTextSplitter
 except ImportError:  # pragma: no cover - fallback for older langchain
     from langchain.text_splitter import RecursiveCharacterTextSplitter
-from rich.console import Console
 from rich.table import Table
+from mlx.ui import console, print_warning
 
-console = Console()
 _LLAMACPP_SILENCED = False
 _LLAMACPP_CALLBACK: Optional[Any] = None
 
@@ -149,17 +148,11 @@ def _collect_dataset_chunks(
             else:
                 text = _extract_pdf_text(file_path)
         except Exception as exc:
-            typer.secho(
-                f"Failed to read {file_path.name}: {exc}. Skipping.",
-                fg=typer.colors.YELLOW,
-            )
+            print_warning(f"Failed to read {file_path.name}: {exc}. Skipping.")
             continue
 
         if not text.strip():
-            typer.secho(
-                f"{file_path.name} is empty after parsing. Skipping.",
-                fg=typer.colors.YELLOW,
-            )
+            print_warning(f"{file_path.name} is empty after parsing. Skipping.")
             continue
 
         processed_files += 1

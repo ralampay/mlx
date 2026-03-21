@@ -3,11 +3,11 @@ from __future__ import annotations
 from typing import Any
 
 from mlx.core.exceptions import MLXUserError
-from mlx.features.object_detection.ultralytics.inference import StreamInferenceRunner
-from mlx.features.object_detection.ultralytics.training import train_object_detection
+from mlx.modes.object_detection.ultralytics.inference import StreamInferenceRunner
+from mlx.modes.object_detection.ultralytics.training import train_object_detection
 
 
-def run_obj_detect(config: dict[str, Any]) -> Any:
+def run_object_detection(config: dict[str, Any]) -> Any:
     action = config.get("action", "train")
     if action == "train":
         return train_object_detection(config)
@@ -18,5 +18,5 @@ def run_obj_detect(config: dict[str, Any]) -> Any:
 
     raise MLXUserError(
         "Unsupported action "
-        f"'{action}' for obj-detect. Supported actions: train, infer-camera, infer-video."
+        f"'{action}' for object-detection. Supported actions: train, infer-camera, infer-video."
     )

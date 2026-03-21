@@ -20,7 +20,7 @@ try:
     from ultralytics import YOLO
 except ImportError as exc:
     raise ImportError(
-        "The ultralytics package (ralampay fork) is required for the obj-detect module."
+        "The ultralytics package (ralampay fork) is required for object-detection mode."
     ) from exc
 
 

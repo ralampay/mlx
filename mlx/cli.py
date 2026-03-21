@@ -1,13 +1,13 @@
 import argparse
 import sys
+from importlib import import_module
 from pathlib import Path
-from typing import Any, Dict, Optional, Sequence
+from typing import Any, Callable, Dict, Optional, Sequence
 
 from rich.panel import Panel
 from rich.table import Table
 
 from mlx.core.exceptions import MLXAbort, MLXUserError
-from mlx.platforms import UnknownModuleError, registered_modules, run_module
 from mlx.core.ui import console, print_error, print_startup, print_warning
 
 try:
@@ -23,21 +23,32 @@ class CLIUsageError(Exception):
     """Raised when command-line arguments are invalid."""
 
 
+class UnknownModeError(ValueError):
+    """Raised when the selected mode is not registered."""
+
+
 class RichArgumentParser(argparse.ArgumentParser):
     def error(self, message: str) -> None:
         raise CLIUsageError(message)
 
 
+ModeRunner = Callable[[Dict[str, Any]], Any]
+
+MODE_REGISTRY: Dict[str, str] = {
+    "image-classification": "mlx.modes.one_shot.runner:run_image_classification",
+    "object-detection": "mlx.modes.object_detection.ultralytics.runner:run_object_detection",
+}
+
+
 def build_parser() -> RichArgumentParser:
-    parser = RichArgumentParser(add_help=False, prog="mlx")
+    parser = RichArgumentParser(add_help=False, prog="python -m mlx")
     parser.add_argument("-h", "--help", action="store_true", dest="help")
-    parser.add_argument("--module", default="system")
-    parser.add_argument("--platform", default=None)
+    parser.add_argument("--mode", default=None)
     parser.add_argument("--model", default=None)
     parser.add_argument("--height", type=int, default=256)
     parser.add_argument("--width", type=int, default=256)
     parser.add_argument("--device", default="cpu")
-    parser.add_argument("--action", default="ls-env")
+    parser.add_argument("--action", default=None)
     parser.add_argument("--embedding-size", type=int, default=4096, dest="embedding_size")
     parser.add_argument("--batch-size", type=int, default=1, dest="batch_size")
     parser.add_argument("--dataset-path", default="./tmp/dataset", dest="dataset_path")
@@ -68,19 +79,19 @@ def _render_help() -> None:
 
     usage = Table(title="Usage", show_header=False)
     usage.add_column("Command", style="bold cyan")
-    usage.add_row("mlx --module system --action ls-env")
-    usage.add_row("mlx --module obj-detect --platform ultralytics --action train --dataset-path ./dataset --model ultralytics/cfg/models/ext/cad_yolo12.yaml")
-    usage.add_row("mlx --module ic-one-shot --platform torch --action train --dataset-path ./omniglot")
+    usage.add_row("python -m mlx --mode object-detection --action train --dataset-path ./dataset --model ultralytics/cfg/models/ext/cad_yolo12.yaml")
+    usage.add_row("python -m mlx --mode object-detection --action infer-camera --model ultralytics/cfg/models/ext/cad_yolo12.yaml --model-path ./runs/train/weights/best.pt")
+    usage.add_row("python -m mlx --mode image-classification --action train --dataset-path ./omniglot")
+    usage.add_row("python -m mlx --mode image-classification --action build-dataset --dataset-path ./raw-dataset")
     console.print(usage)
 
     options = Table(title="Options", show_lines=True)
     options.add_column("Flag", style="cyan", no_wrap=True)
     options.add_column("Default", style="magenta")
     options.add_column("Description", style="white")
-    options.add_row("--module", "system", "Module to run: system, obj-detect, ic-one-shot.")
-    options.add_row("--platform", "generic", "Platform backend: ultralytics or torch.")
+    options.add_row("--mode", "None", "Mode to run: object-detection or image-classification.")
     options.add_row("--model", "None", "Model identifier, YAML path, or architecture name.")
-    options.add_row("--action", "ls-env", "Module action such as train, infer-video, or test.")
+    options.add_row("--action", "mode-specific", "Sub-action such as train, infer-video, benchmark, or build-dataset.")
     options.add_row("--dataset-path", "./tmp/dataset", "Dataset root used by training and dataset utilities.")
     options.add_row("--model-path", "None", "Weights checkpoint path for inference or warm starts.")
     options.add_row("--file-path", "None", "Video path for file-based inference.")
@@ -103,12 +114,11 @@ def _render_help() -> None:
     options.add_row("--help", "False", "Show this help screen.")
     console.print(options)
 
-    modules = registered_modules()
-    available = Table(title="Available Modules", show_header=True)
-    available.add_column("Scope", style="cyan", no_wrap=True)
-    available.add_column("Modules", style="white")
-    for scope, entries in sorted(modules.items()):
-        available.add_row(str(scope), ", ".join(sorted(entries.keys())))
+    available = Table(title="Available Modes", show_header=True)
+    available.add_column("Mode", style="cyan", no_wrap=True)
+    available.add_column("Actions", style="white")
+    available.add_row("object-detection", "train, infer-camera, infer-video")
+    available.add_row("image-classification", "train, test, benchmark, infer-image, build-dataset")
     console.print(available)
 
 
@@ -119,24 +129,23 @@ def _build_config(namespace: argparse.Namespace) -> Dict[str, Any]:
     return config
 
 
-def _render_unknown_module(platform: Optional[str]) -> None:
-    available = registered_modules()
-    platform_modules = ", ".join(sorted(available.get(platform, {}).keys()))
-    generic_modules = ", ".join(sorted(available.get("generic", {}).keys()))
+def _resolve_mode_runner(mode: str) -> ModeRunner:
+    dotted_path = MODE_REGISTRY.get(mode)
+    if dotted_path is None:
+        raise UnknownModeError(f"Unknown mode '{mode}'.")
 
-    table = Table(title="Available Modules", show_header=True)
-    table.add_column("Scope", style="cyan", no_wrap=True)
-    table.add_column("Modules", style="white")
+    module_path, func_name = dotted_path.split(":")
+    module = import_module(module_path)
+    return getattr(module, func_name)
 
-    if platform_modules:
-        table.add_row(f"Platform '{platform}'", platform_modules)
-    if generic_modules:
-        table.add_row("Generic", generic_modules)
 
-    if table.row_count:
-        console.print(table)
-    else:
-        print_warning("No modules are registered for the requested platform.")
+def _render_unknown_mode() -> None:
+    table = Table(title="Available Modes", show_header=True)
+    table.add_column("Mode", style="cyan", no_wrap=True)
+    table.add_column("Purpose", style="white")
+    table.add_row("object-detection", "Ultralytics-backed detection training and inference")
+    table.add_row("image-classification", "Image classification workflows, including one-shot")
+    console.print(table)
 
 
 def main(argv: Optional[Sequence[str]] = None) -> int:
@@ -153,15 +162,20 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
     if namespace.help:
         _render_help()
         return 0
+    if not namespace.mode:
+        print_error("Missing required argument: --mode")
+        _render_help()
+        return 2
 
     config = _build_config(namespace)
-    print_startup(config["module"], config["platform"], config["model"])
+    print_startup(config["mode"], config.get("action"), config["model"])
 
     try:
-        run_module(config["platform"], config["module"], config)
-    except UnknownModuleError as exc:
+        runner = _resolve_mode_runner(config["mode"])
+        runner(config)
+    except UnknownModeError as exc:
         print_error(str(exc))
-        _render_unknown_module(config["platform"])
+        _render_unknown_mode()
         return 1
     except MLXAbort:
         print_warning("Action cancelled.")

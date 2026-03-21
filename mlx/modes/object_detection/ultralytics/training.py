@@ -8,7 +8,7 @@ from rich.table import Table
 
 from mlx.core.exceptions import MLXUserError
 from mlx.core.ui import console, print_info, print_success
-from mlx.features.object_detection.ultralytics.utils import initialize_model, resolve_model_paths
+from mlx.modes.object_detection.ultralytics.utils import initialize_model, resolve_model_paths
 
 
 def train_object_detection(config: dict[str, Any]):

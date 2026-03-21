@@ -1,13 +1,15 @@
 # Object Detection
 
-Namespace: `mlx.features.object_detection.ultralytics`
+Mode: `object-detection`
+
+Package: `mlx.modes.object_detection.ultralytics`
 
 ## Overview
 
-This namespace contains the Ultralytics-backed object-detection workflow exposed by:
+This mode provides the Ultralytics-backed object-detection workflow exposed by:
 
 ```bash
-mlx --module obj-detect --platform ultralytics
+python -m mlx --mode object-detection
 ```
 
 The source is split by responsibility:
@@ -39,8 +41,8 @@ Pass `--dataset-path` as the directory that contains `data.yaml`.
 Example:
 
 ```bash
-mlx --module obj-detect \
-    --platform ultralytics \
+python -m mlx \
+    --mode object-detection \
     --action train \
     --dataset-path ~/datasets/roboflow-yolo \
     --model ultralytics/cfg/models/ext/cad_yolo12.yaml \
@@ -64,8 +66,8 @@ Important arguments:
 Example:
 
 ```bash
-mlx --module obj-detect \
-    --platform ultralytics \
+python -m mlx \
+    --mode object-detection \
     --action infer-camera \
     --model ultralytics/cfg/models/ext/cad_yolo12.yaml \
     --model-path ./runs/train/weights/best.pt \
@@ -86,8 +88,8 @@ Important arguments:
 Example:
 
 ```bash
-mlx --module obj-detect \
-    --platform ultralytics \
+python -m mlx \
+    --mode object-detection \
     --action infer-video \
     --model ultralytics/cfg/models/ext/cad_yolo12.yaml \
     --model-path ./runs/train/weights/best.pt \
@@ -107,4 +109,4 @@ Additional arguments:
 - `ultralytics`
 - `opencv-python` for webcam or video inference
 
-Run `mlx --help` for the full CLI reference.
+Run `python -m mlx --help` for the full CLI reference.

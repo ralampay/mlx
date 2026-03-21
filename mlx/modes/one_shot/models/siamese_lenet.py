@@ -1,7 +1,7 @@
 import torch
 import torch.nn as nn
 
-from mlx.features.one_shot.models.base import BaseICOneShotModel
+from mlx.modes.one_shot.models.base import BaseICOneShotModel
 
 
 class SiameseLeNet(BaseICOneShotModel):

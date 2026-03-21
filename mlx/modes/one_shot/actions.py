@@ -24,15 +24,15 @@ from tqdm import tqdm
 
 from mlx.core.exceptions import MLXUserError
 from mlx.core.ui import console, print_info, print_success, print_warning
-from mlx.features.one_shot.data import (
+from mlx.modes.one_shot.data import (
     OneShotPairDataset,
     build_ic_one_shot,
     iter_dataset_images,
     load_ic_one_shot_dataset,
     load_image_tensor,
 )
-from mlx.features.one_shot.models import SiameseLeNet
-from mlx.features.one_shot.presentation import display_inference_results
+from mlx.modes.one_shot.models import SiameseLeNet
+from mlx.modes.one_shot.presentation import display_inference_results
 
 
 def build_model(model_name: str, config: dict[str, Any]):

@@ -12,10 +12,10 @@ console = Console()
 stderr_console = Console(stderr=True)
 
 
-def print_startup(module: str, platform: Optional[str], model: Optional[str]) -> None:
+def print_startup(mode: str, action: Optional[str], model: Optional[str]) -> None:
     summary = (
-        f"[bold cyan]Module[/bold cyan]: {module}\n"
-        f"[bold cyan]Platform[/bold cyan]: {platform or 'generic'}\n"
+        f"[bold cyan]Mode[/bold cyan]: {mode}\n"
+        f"[bold cyan]Action[/bold cyan]: {action or 'default'}\n"
         f"[bold cyan]Model[/bold cyan]: {model or 'default'}"
     )
     console.print(Panel.fit(summary, title="MLX", border_style="cyan"))

@@ -7,7 +7,7 @@ from rich.panel import Panel
 
 from mlx.core.exceptions import MLXUserError
 from mlx.core.ui import console, print_info, print_warning
-from mlx.features.object_detection.ultralytics.utils import (
+from mlx.modes.object_detection.ultralytics.utils import (
     annotate_detections,
     initialize_model,
     resolve_model_paths,

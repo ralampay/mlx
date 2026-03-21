@@ -1,21 +1,23 @@
-# One-Shot Image Classification
+# Image Classification
 
-Namespace: `mlx.features.one_shot`
+Mode: `image-classification`
+
+Package: `mlx.modes.one_shot`
 
 ## Overview
 
-This namespace contains the Torch-backed one-shot classification workflow exposed by:
+This mode provides the image-classification workflow exposed by:
 
 ```bash
-mlx --module ic-one-shot --platform torch
+python -m mlx --mode image-classification
 ```
 
 The source is organized by responsibility:
 
 - `runner.py`: default config and action dispatch.
-- `actions.py`: train, test, benchmark, and inference actions.
+- `actions.py`: train, test, benchmark, one-shot inference, and dataset actions.
 - `data.py`: dataset loading, dataset building, and shared image preprocessing.
-- `models/`: one-shot model definitions.
+- `models/`: one-shot model definitions used by the mode.
 - `presentation.py`: rich tables and OpenCV result rendering.
 
 ## Dataset Expectations
@@ -52,8 +54,8 @@ It interactively creates `train/`, `val/`, and `test/` splits in a new output di
 Example:
 
 ```bash
-mlx --module ic-one-shot \
-    --platform torch \
+python -m mlx \
+    --mode image-classification \
     --model siamese-le-net \
     --action train \
     --dataset-path ~/datasets/omniglot \
@@ -83,8 +85,8 @@ Important arguments:
 Example:
 
 ```bash
-mlx --module ic-one-shot \
-    --platform torch \
+python -m mlx \
+    --mode image-classification \
     --action benchmark \
     --dataset-path ~/datasets/omniglot/test \
     --model-path ~/datasets/omniglot/checkpoints/best_epoch_10.pt \
@@ -98,8 +100,8 @@ mlx --module ic-one-shot \
 Example:
 
 ```bash
-mlx --module ic-one-shot \
-    --platform torch \
+python -m mlx \
+    --mode image-classification \
     --action infer-image \
     --dataset-path ~/datasets/omniglot/test \
     --input-img ~/datasets/query/sample.png \

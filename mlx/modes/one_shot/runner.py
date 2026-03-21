@@ -3,8 +3,8 @@ from __future__ import annotations
 from typing import Any
 
 from mlx.core.exceptions import MLXUserError
-from mlx.features.one_shot.actions import ACTION_HANDLERS, build_model
-from mlx.features.one_shot.presentation import print_config_summary
+from mlx.modes.one_shot.actions import ACTION_HANDLERS, build_model
+from mlx.modes.one_shot.presentation import print_config_summary
 
 DEFAULT_CONFIG = {
     "action": "test",
@@ -20,9 +20,9 @@ DEFAULT_CONFIG = {
 }
 
 
-def run_ic_one_shot(module_config: dict[str, Any]) -> Any:
-    config = {**DEFAULT_CONFIG, **{k: v for k, v in module_config.items() if k != "model"}}
-    model_name = module_config.get("model", "siamese-le-net")
+def run_image_classification(mode_config: dict[str, Any]) -> Any:
+    config = {**DEFAULT_CONFIG, **{k: v for k, v in mode_config.items() if k != "model"}}
+    model_name = mode_config.get("model") or "siamese-le-net"
 
     print_config_summary(model_name, config)
     net = build_model(model_name, config)
@@ -32,7 +32,7 @@ def run_ic_one_shot(module_config: dict[str, Any]) -> Any:
     if handler is None:
         available = ", ".join(sorted(ACTION_HANDLERS))
         raise MLXUserError(
-            f"Unsupported action '{action}' for ic-one-shot. Available actions: {available}."
+            f"Unsupported action '{action}' for image-classification. Available actions: {available}."
         )
 
     return handler(net, config)

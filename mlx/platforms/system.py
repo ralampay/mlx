@@ -6,7 +6,7 @@ from typing import Any, Callable, Dict
 from rich import box
 from rich.console import Console
 from rich.table import Table
-from mlx.definitions import MLXUserError
+from mlx.core.exceptions import MLXUserError
 
 ModuleConfig = Dict[str, Any]
 

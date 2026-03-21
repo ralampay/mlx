@@ -6,9 +6,9 @@ from typing import Any, Dict, Optional, Sequence
 from rich.panel import Panel
 from rich.table import Table
 
-from mlx.definitions import MLXAbort, MLXUserError
+from mlx.core.exceptions import MLXAbort, MLXUserError
 from mlx.platforms import UnknownModuleError, registered_modules, run_module
-from mlx.ui import console, print_error, print_startup, print_warning
+from mlx.core.ui import console, print_error, print_startup, print_warning
 
 try:
     from dotenv import load_dotenv

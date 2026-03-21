@@ -6,7 +6,8 @@ from __future__ import annotations
 from importlib import import_module
 from typing import Any, Callable, Dict, Mapping
 
-ModuleConfig = Dict[str, Any]
+from mlx.core.types import ModuleConfig
+
 ModuleRunner = Callable[[ModuleConfig], Any]
 
 
@@ -53,9 +54,13 @@ class PlatformRegistry:
 registry = PlatformRegistry()
 
 # -- Platform registrations -------------------------------------------------
-registry.register("torch", "ic-one-shot", "mlx.platforms.torch.ic_one_shot:run_ic_one_shot")
-registry.register("ultralytics", "obj-detect", "mlx.platforms.ultralytics.obj_detect:run_obj_detect")
-registry.register_generic("ic-one-shot", "mlx.platforms.torch.ic_one_shot:run_ic_one_shot")
+registry.register("torch", "ic-one-shot", "mlx.features.one_shot.runner:run_ic_one_shot")
+registry.register(
+    "ultralytics",
+    "obj-detect",
+    "mlx.features.object_detection.ultralytics.runner:run_obj_detect",
+)
+registry.register_generic("ic-one-shot", "mlx.features.one_shot.runner:run_ic_one_shot")
 registry.register_generic("system", "mlx.platforms.system:run_system")
 
 

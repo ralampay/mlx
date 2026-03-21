@@ -80,6 +80,97 @@ Important arguments:
 - `infer-image`: compare one input image against a reference dataset and show the best matches.
 - `build-dataset`: interactively create train/val/test splits from a label-organized source dataset.
 
+## Build Dataset
+
+`build-dataset` is used to convert a label-organized source dataset into a split dataset with `train/`, `val/`, and `test/` directories.
+
+Required flag:
+
+- `--dataset-path`: source dataset root. This must point to the unsplit label-organized dataset you want to process.
+
+Behavior:
+
+- The command scans each label directory under `--dataset-path`.
+- It prints a label summary showing how many images were found per label.
+- It then prompts for three values: images per label for `TRAIN`, `VAL`, and `TEST`.
+- It finally prompts for the output path where the split dataset should be created.
+- If the output directory already exists, MLX asks for confirmation before overwriting it.
+- If a label has fewer images than the requested total, MLX prints a warning before continuing.
+
+Expected input layout:
+
+```text
+<source-dataset>/
+├── cats/
+│   ├── cat-1.jpg
+│   ├── cat-2.jpg
+│   └── ...
+├── dogs/
+│   ├── dog-1.jpg
+│   ├── dog-2.jpg
+│   └── ...
+└── horses/
+    ├── horse-1.jpg
+    ├── horse-2.jpg
+    └── ...
+```
+
+Example command:
+
+```bash
+python -m mlx \
+    --mode image-classification \
+    --action build-dataset \
+    --dataset-path ~/datasets/animals-raw
+```
+
+Example interactive flow:
+
+```text
+How many images per label for TRAIN? 20
+How many images per label for VAL? 5
+How many images per label for TEST? 5
+Enter output path for split dataset ~/datasets/animals-split
+```
+
+This creates a dataset like:
+
+```text
+~/datasets/animals-split/
+├── train/
+│   ├── cats/
+│   ├── dogs/
+│   └── horses/
+├── val/
+│   ├── cats/
+│   ├── dogs/
+│   └── horses/
+└── test/
+    ├── cats/
+    ├── dogs/
+    └── horses/
+```
+
+Another example:
+
+```bash
+python -m mlx \
+    --mode image-classification \
+    --action build-dataset \
+    --dataset-path ./data/omniglot-raw
+```
+
+Then provide prompts such as:
+
+```text
+How many images per label for TRAIN? 12
+How many images per label for VAL? 4
+How many images per label for TEST? 4
+Enter output path for split dataset ./data/omniglot-split
+```
+
+Use the generated output directory as `--dataset-path` for `train`, and use its `test/` directory for `benchmark` or `infer-image` when needed.
+
 ## Benchmarking
 
 Example:

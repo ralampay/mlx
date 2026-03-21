@@ -5,10 +5,10 @@ except ImportError as exc:
         "OpenCV is required for --action infer-camera. Install it with 'pip install opencv-python'."
     ) from exc
 
-import typer
 from pathlib import Path
 from typing import Any, Dict
 from rich.panel import Panel
+from mlx.definitions import MLXUserError
 from mlx.platforms.ultralytics.utils import _resolve_model_paths, _initialize_model, _annotate_detections
 from mlx.ui import console, print_info, print_warning
 
@@ -61,11 +61,11 @@ class RunStreamInference:
         elif self.source == "video":
             video_path = self.config.get("file_path")
             if not video_path:
-                raise typer.BadParameter("Video inference requires --file-path pointing to the video file.")
+                raise MLXUserError("Video inference requires --file-path pointing to the video file.")
             resolved_video = Path(video_path).expanduser()
 
             if not resolved_video.exists():
-                raise typer.BadParameter(f"Video file not found: {resolved_video}")
+                raise MLXUserError(f"Video file not found: {resolved_video}")
 
             cap = cv2.VideoCapture(str(resolved_video))
 

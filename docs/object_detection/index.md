@@ -94,4 +94,4 @@ Additional considerations:
 - `--device`: The backend that Ultralytics uses for inference; keep it consistent with the weights.
 - `--model` and `--model-path` behave the same as in camera mode.
 
-Run `mlx --help` to list every available option for the object detection module.
+Run `mlx --help` to view the rich CLI help screen and available options.

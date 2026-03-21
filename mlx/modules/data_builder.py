@@ -1,9 +1,9 @@
 import os
 import random
 import shutil
-import typer
 from pathlib import Path
 from rich.table import Table
+from mlx.definitions import MLXUserError
 from mlx.modules.datasets.one_shot_pair_dataset import OneShotPairDataset
 from mlx.ui import console, confirm_action, print_info, print_success, print_warning, prompt_int, prompt_text
 
@@ -54,8 +54,7 @@ def build_ic_one_shot(dataset_path: str):
 
     dataset_path = Path(dataset_path)
     if not dataset_path.exists():
-        print_warning(f"Dataset path not found: {dataset_path}")
-        raise typer.Exit(code=1)
+        raise MLXUserError(f"Dataset path not found: {dataset_path}")
 
     # Discover all label folders
     label_dirs = [d for d in dataset_path.iterdir() if d.is_dir()]

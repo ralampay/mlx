@@ -1,5 +1,6 @@
 from pathlib import Path
 from typing import Dict, Any, Optional, Tuple, Union
+from mlx.definitions import MLXUserError
 try:
     import ultralytics
     from ultralytics import YOLO
@@ -60,16 +61,16 @@ def _resolve_model_paths(
     model_cfg = config.get("model")
     resolved_cfg = Path(_resolve_weights_source(model_cfg)) if model_cfg else None
     if require_yaml and resolved_cfg is None:
-        raise typer.BadParameter("This action requires --model pointing to the model YAML.")
+        raise MLXUserError("This action requires --model pointing to the model YAML.")
     if resolved_cfg and not resolved_cfg.exists():
-        raise typer.BadParameter(f"Model YAML not found: {resolved_cfg}")
+        raise MLXUserError(f"Model YAML not found: {resolved_cfg}")
 
     weights_path = config.get("model_path")
     resolved_weights = Path(_resolve_weights_source(weights_path)) if weights_path else None
     if require_weights and resolved_weights is None:
-        raise typer.BadParameter("This action requires --model-path pointing to trained weights (.pt).")
+        raise MLXUserError("This action requires --model-path pointing to trained weights (.pt).")
     if resolved_weights and not resolved_weights.exists():
-        raise typer.BadParameter(f"Model weights not found: {resolved_weights}")
+        raise MLXUserError(f"Model weights not found: {resolved_weights}")
 
     return resolved_cfg, resolved_weights
 

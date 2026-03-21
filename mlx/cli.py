@@ -1,179 +1,177 @@
+import argparse
+import sys
 from pathlib import Path
-from typing import Dict, Any, Optional
+from typing import Any, Dict, Optional, Sequence
 
-import typer
-from dotenv import load_dotenv
+from rich.panel import Panel
 from rich.table import Table
 
-from mlx.platforms import run_module, registered_modules, UnknownModuleError
+from mlx.definitions import MLXAbort, MLXUserError
+from mlx.platforms import UnknownModuleError, registered_modules, run_module
 from mlx.ui import console, print_error, print_startup, print_warning
 
-load_dotenv(dotenv_path=Path(__file__).resolve().parent.parent / ".env", override=False)
+try:
+    from dotenv import load_dotenv
+except ImportError:  # pragma: no cover - optional convenience dependency
+    load_dotenv = None
 
-app = typer.Typer(
-    help="MLX - Machine Learning eXecutor"
-)
+if load_dotenv is not None:
+    load_dotenv(dotenv_path=Path(__file__).resolve().parent.parent / ".env", override=False)
 
-@app.command()
-def main(
-    module: str = typer.Option("chat", help="Module to run (default: chat)"),
-    platform: str = typer.Option(None, help="Platform to use (openai, torch, ultralytics)"),
-    model: str = typer.Option("gpt-4o-mini", help="Model to use"),
-    temperature: float = typer.Option(0.7, help="Creativity / randomness level (0.0-2.0)"),
-    top_p: float = typer.Option(0.7, help="Nucleus sampling threshold (0-1)."),
-    top_k: int = typer.Option(50, help="Top-k sampling cutoff (>=1)"),
-    system_prompt: str = typer.Option(
-        "You are a general purpose assistant.",
-        help="System prompt/initial content for chat sessions.",
-    ),
-    height: int = typer.Option(256, help="Height of image"),
-    width: int = typer.Option(256, help="Width of image"),
-    device: str = typer.Option("cpu", help="Device to load model and data on"),
-    action: str = typer.Option("test", help="Action for model to take (default: test)"),
-    embedding_size: int = typer.Option(4096, help="Embedding size (default: 4096"),
-    batch_size: int = typer.Option(1, help="Batch size"),
-    dataset_path: str = typer.Option("./tmp/dataset", help="Path for dataset"),
-    epochs: int = typer.Option(100, help="Number of epochs"),
-    model_path: Optional[str] = typer.Option(
-        None,
-        help="Path to .pt model. Optional for training; required for camera inference.",
-    ),
-    file_path: Optional[str] = typer.Option(
-        None,
-        help="Path to a video file for infer-video action.",
-    ),
-    input_img: str = typer.Option("/tmp/image.jpg", help="Input image for inference"),
-    confidence: float = typer.Option(0.25, help="Confidence threshold for detection"),
-    camera_index: int = typer.Option(0, help="Camera index for infer-camera action"),
-    pretrained: bool = typer.Option(
-        False,
-        "--pretrained/--no-pretrained",
-        help="Allow Ultralytics to load pretrained weights when only a YAML is provided.",
-        show_default=True,
-    ),
-    lr0: Optional[float] = typer.Option(
-        None,
-        help="Initial learning rate for Ultralytics training (overrides default when provided).",
-    ),
-    optimizer: str = typer.Option(
-        "auto",
-        help="Optimizer to use (auto, sgd, adam, adamw, rmsprop).",
-    ),
-    nbs: int = typer.Option(
-        64,
-        help="Nominal batch size used for learning-rate scaling inside Ultralytics.",
-    ),
-    warmup_epochs: float = typer.Option(
-        3.0,
-        help="Number of warmup epochs before switching to the main schedule.",
-    ),
-    amp: bool = typer.Option(
-        True,
-        "--amp/--no-amp",
-        help="Enable mixed-precision (AMP) training inside Ultralytics.",
-        show_default=True,
-    ),
-    loss_clip: Optional[float] = typer.Option(
-        None,
-        help="Optional gradient clipping value for Ultralytics training (None disables).",
-    ),
-    local: bool = typer.Option(
-        False,
-        "--local/--no-local",
-        help="Use the local LLM model defined in LOCAL_LLM_MODEL for embedding workloads.",
-        show_default=True,
-    ),
-    chunk_size: int = typer.Option(
-        800,
-        help="Character count for each chunk when generating embeddings.",
-    ),
-    chunk_overlap: int = typer.Option(
-        100,
-        help="Overlap between chunks when splitting documents for embeddings.",
-    ),
-    table_name: Optional[str] = typer.Option(
-        None,
-        help="Destination table/collection for RAG vector storage.",
-    ),
-    file_limit: Optional[int] = typer.Option(
-        None,
-        help="Maximum number of files to process for RAG utilities.",
-    ),
-    show_sample: bool = typer.Option(
-        True,
-        "--show-sample/--no-show-sample",
-        help="Show a sample vector record in RAG summaries.",
-        show_default=True,
-    ),
-    model_generator: Optional[str] = typer.Option(
-        None,
-        help="Override generation model (used by query for hosted platforms such as Hugging Face).",
-    ),
 
-):
-    print_startup(module, platform, model)
+class CLIUsageError(Exception):
+    """Raised when command-line arguments are invalid."""
 
-    config: Dict[str, Any] = {
-        "module": module,
-        "platform": platform,
-        "model": model,
-        "temperature": temperature,
-        "top_p": top_p,
-        "top_k": top_k,
-        "height": height,
-        "width": width,
-        "device": device,
-        "action": action,
-        "embedding_size": embedding_size,
-        "batch_size": batch_size,
-        "dataset_path": dataset_path,
-        "epochs": epochs,
-        "model_path": model_path,
-        "file_path": file_path,
-        "input_img": input_img,
-        "input_size": (width, height),
-        "confidence": confidence,
-        "camera_index": camera_index,
-        "pretrained": pretrained,
-        "lr0": lr0,
-        "optimizer": optimizer,
-        "nbs": nbs,
-        "warmup_epochs": warmup_epochs,
-        "amp": amp,
-        "loss_clip": loss_clip,
-        "local": local,
-        "chunk_size": chunk_size,
-        "chunk_overlap": chunk_overlap,
-        "table_name": table_name,
-        "file_limit": file_limit,
-        "show_sample": show_sample,
-        "model_generator": model_generator,
-        "initial_content": system_prompt,
-    }
+
+class RichArgumentParser(argparse.ArgumentParser):
+    def error(self, message: str) -> None:
+        raise CLIUsageError(message)
+
+
+def build_parser() -> RichArgumentParser:
+    parser = RichArgumentParser(add_help=False, prog="mlx")
+    parser.add_argument("-h", "--help", action="store_true", dest="help")
+    parser.add_argument("--module", default="system")
+    parser.add_argument("--platform", default=None)
+    parser.add_argument("--model", default=None)
+    parser.add_argument("--height", type=int, default=256)
+    parser.add_argument("--width", type=int, default=256)
+    parser.add_argument("--device", default="cpu")
+    parser.add_argument("--action", default="ls-env")
+    parser.add_argument("--embedding-size", type=int, default=4096, dest="embedding_size")
+    parser.add_argument("--batch-size", type=int, default=1, dest="batch_size")
+    parser.add_argument("--dataset-path", default="./tmp/dataset", dest="dataset_path")
+    parser.add_argument("--epochs", type=int, default=100)
+    parser.add_argument("--model-path", default=None, dest="model_path")
+    parser.add_argument("--file-path", default=None, dest="file_path")
+    parser.add_argument("--input-img", default="/tmp/image.jpg", dest="input_img")
+    parser.add_argument("--confidence", type=float, default=0.25)
+    parser.add_argument("--camera-index", type=int, default=0, dest="camera_index")
+    parser.add_argument("--pretrained", action=argparse.BooleanOptionalAction, default=False)
+    parser.add_argument("--lr0", type=float, default=None)
+    parser.add_argument("--optimizer", default="auto")
+    parser.add_argument("--nbs", type=int, default=64)
+    parser.add_argument("--warmup-epochs", type=float, default=3.0, dest="warmup_epochs")
+    parser.add_argument("--amp", action=argparse.BooleanOptionalAction, default=True)
+    parser.add_argument("--loss-clip", type=float, default=None, dest="loss_clip")
+    parser.add_argument("--run-name", default=None, dest="run_name")
+    return parser
+
+
+def _render_help() -> None:
+    console.print(
+        Panel.fit(
+            "MLX\nA rich-powered CLI for computer-vision workflows.",
+            border_style="cyan",
+        )
+    )
+
+    usage = Table(title="Usage", show_header=False)
+    usage.add_column("Command", style="bold cyan")
+    usage.add_row("mlx --module system --action ls-env")
+    usage.add_row("mlx --module obj-detect --platform ultralytics --action train --dataset-path ./dataset --model ultralytics/cfg/models/ext/cad_yolo12.yaml")
+    usage.add_row("mlx --module ic-one-shot --platform torch --action train --dataset-path ./omniglot")
+    console.print(usage)
+
+    options = Table(title="Options", show_lines=True)
+    options.add_column("Flag", style="cyan", no_wrap=True)
+    options.add_column("Default", style="magenta")
+    options.add_column("Description", style="white")
+    options.add_row("--module", "system", "Module to run: system, obj-detect, ic-one-shot.")
+    options.add_row("--platform", "generic", "Platform backend: ultralytics or torch.")
+    options.add_row("--model", "None", "Model identifier, YAML path, or architecture name.")
+    options.add_row("--action", "ls-env", "Module action such as train, infer-video, or test.")
+    options.add_row("--dataset-path", "./tmp/dataset", "Dataset root used by training and dataset utilities.")
+    options.add_row("--model-path", "None", "Weights checkpoint path for inference or warm starts.")
+    options.add_row("--file-path", "None", "Video path for file-based inference.")
+    options.add_row("--input-img", "/tmp/image.jpg", "Input image for classification inference.")
+    options.add_row("--device", "cpu", "Execution device such as cpu or cuda:0.")
+    options.add_row("--height / --width", "256 / 256", "Image size controls.")
+    options.add_row("--batch-size", "1", "Training or evaluation batch size.")
+    options.add_row("--epochs", "100", "Training epoch count.")
+    options.add_row("--embedding-size", "4096", "Siamese network embedding size.")
+    options.add_row("--confidence", "0.25", "Detection confidence threshold.")
+    options.add_row("--camera-index", "0", "Camera index for webcam inference.")
+    options.add_row("--pretrained / --no-pretrained", "False", "Toggle Ultralytics pretrained initialization.")
+    options.add_row("--amp / --no-amp", "True", "Toggle mixed precision for Ultralytics training.")
+    options.add_row("--lr0", "None", "Override initial learning rate.")
+    options.add_row("--optimizer", "auto", "Optimizer selection for Ultralytics.")
+    options.add_row("--nbs", "64", "Nominal batch size for LR scaling.")
+    options.add_row("--warmup-epochs", "3.0", "Warmup epoch count.")
+    options.add_row("--loss-clip", "None", "Optional gradient clipping value.")
+    options.add_row("--run-name", "None", "Optional Ultralytics run folder name.")
+    options.add_row("--help", "False", "Show this help screen.")
+    console.print(options)
+
+    modules = registered_modules()
+    available = Table(title="Available Modules", show_header=True)
+    available.add_column("Scope", style="cyan", no_wrap=True)
+    available.add_column("Modules", style="white")
+    for scope, entries in sorted(modules.items()):
+        available.add_row(str(scope), ", ".join(sorted(entries.keys())))
+    console.print(available)
+
+
+def _build_config(namespace: argparse.Namespace) -> Dict[str, Any]:
+    config = vars(namespace).copy()
+    config.pop("help", None)
+    config["input_size"] = (config["width"], config["height"])
+    return config
+
+
+def _render_unknown_module(platform: Optional[str]) -> None:
+    available = registered_modules()
+    platform_modules = ", ".join(sorted(available.get(platform, {}).keys()))
+    generic_modules = ", ".join(sorted(available.get("generic", {}).keys()))
+
+    table = Table(title="Available Modules", show_header=True)
+    table.add_column("Scope", style="cyan", no_wrap=True)
+    table.add_column("Modules", style="white")
+
+    if platform_modules:
+        table.add_row(f"Platform '{platform}'", platform_modules)
+    if generic_modules:
+        table.add_row("Generic", generic_modules)
+
+    if table.row_count:
+        console.print(table)
+    else:
+        print_warning("No modules are registered for the requested platform.")
+
+
+def main(argv: Optional[Sequence[str]] = None) -> int:
+    args = list(sys.argv[1:] if argv is None else argv)
+    parser = build_parser()
 
     try:
-        run_module(platform, module, config)
+        namespace = parser.parse_args(args)
+    except CLIUsageError as exc:
+        print_error(str(exc))
+        _render_help()
+        return 2
+
+    if namespace.help:
+        _render_help()
+        return 0
+
+    config = _build_config(namespace)
+    print_startup(config["module"], config["platform"], config["model"])
+
+    try:
+        run_module(config["platform"], config["module"], config)
     except UnknownModuleError as exc:
         print_error(str(exc))
-        available = registered_modules()
-        platform_modules = ", ".join(sorted(available.get(platform, {}).keys()))
-        generic_modules = ", ".join(sorted(available.get("generic", {}).keys()))
+        _render_unknown_module(config["platform"])
+        return 1
+    except MLXAbort:
+        print_warning("Action cancelled.")
+        return 1
+    except MLXUserError as exc:
+        print_error(str(exc))
+        return 1
 
-        table = Table(title="Available Modules", show_header=True)
-        table.add_column("Scope", style="cyan", no_wrap=True)
-        table.add_column("Modules", style="white")
+    return 0
 
-        if platform_modules:
-            table.add_row(f"Platform '{platform}'", platform_modules)
-        if generic_modules:
-            table.add_row("Generic", generic_modules)
-
-        if table.row_count:
-            console.print(table)
-        else:
-            print_warning("No modules are registered for the requested platform.")
-
-        raise typer.Exit(code=1)
 
 if __name__ == "__main__":
-    app()
+    raise SystemExit(main())

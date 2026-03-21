@@ -3,10 +3,10 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Any, Dict
 
-import typer
 from rich.panel import Panel
 from rich.table import Table
 
+from mlx.definitions import MLXUserError
 from .utils import _resolve_model_paths, _initialize_model
 from .run_stream_inference import RunStreamInference
 from mlx.ui import console, print_info, print_success
@@ -39,11 +39,11 @@ def run_obj_detect(config: Dict[str, Any]):
 def _train_obj_detect(config: Dict[str, Any]):
     dataset_dir = Path(config.get("dataset_path", "")).expanduser()
     if not dataset_dir.exists():
-        raise typer.BadParameter(f"Dataset path does not exist: {dataset_dir}")
+        raise MLXUserError(f"Dataset path does not exist: {dataset_dir}")
 
     data_yaml = dataset_dir / "data.yaml"
     if not data_yaml.exists():
-        raise typer.BadParameter(f"Expected YOLO data.yaml at: {data_yaml}")
+        raise MLXUserError(f"Expected YOLO data.yaml at: {data_yaml}")
 
     resolved_cfg, resolved_weights = _resolve_model_paths(
         config, require_yaml=True, require_weights=False

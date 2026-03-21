@@ -1,0 +1,9 @@
+matplotlib
+numpy
+opencv-python
+python-dotenv
+rich
+scikit-learn
+torch
+tqdm
+ultralytics @ git+https://github.com/ralampay/ultralytics

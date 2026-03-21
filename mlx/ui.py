@@ -2,10 +2,10 @@ from __future__ import annotations
 
 from typing import Optional
 
-import typer
 from rich.console import Console
 from rich.panel import Panel
 from rich.prompt import Confirm, IntPrompt, Prompt
+from mlx.definitions import MLXAbort
 
 console = Console()
 stderr_console = Console(stderr=True)
@@ -51,5 +51,5 @@ def prompt_int(message: str, default: Optional[int] = None) -> int:
 def confirm_action(message: str, default: bool = False, abort: bool = False) -> bool:
     confirmed = Confirm.ask(f"[bold yellow]{message}[/bold yellow]", default=default)
     if abort and not confirmed:
-        raise typer.Abort()
+        raise MLXAbort()
     return confirmed

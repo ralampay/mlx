@@ -4,12 +4,20 @@ import os
 import random
 import shutil
 from pathlib import Path
-from typing import Iterable, List, Tuple
+from typing import Iterable, List, Sequence, Tuple
 
 import cv2
 import torch
 from rich.table import Table
 from torch.utils.data import Dataset
+from torchvision import transforms
+
+try:
+    from PIL import Image
+except ImportError as exc:  # pragma: no cover - pillow is expected via torchvision
+    raise ImportError(
+        "Pillow is required for image-classification datasets. Install it with 'pip install pillow'."
+    ) from exc
 
 from mlx.core.exceptions import MLXUserError
 from mlx.core.ui import (
@@ -111,7 +119,82 @@ class OneShotPairDataset(Dataset):
         return image_one, image_two, torch.tensor(label, dtype=torch.float32)
 
 
-def load_ic_one_shot_dataset(
+class ImageClassificationDataset(Dataset):
+    def __init__(
+        self,
+        dataset_path: os.PathLike[str] | str,
+        *,
+        split: str = "train",
+        transform=None,
+        input_size: Tuple[int, int] = (224, 224),
+        colored: bool = True,
+        label_names: Sequence[str] | None = None,
+    ) -> None:
+        self.dataset_path = Path(dataset_path)
+        self.split = split
+        self.input_size = input_size
+        self.colored = colored
+        self.transform = transform or _default_classification_transform(
+            input_size=input_size,
+            colored=colored,
+        )
+        candidate_split_dir = self.dataset_path / split
+
+        if not self.dataset_path.exists():
+            raise MLXUserError(f"Dataset directory not found: {self.dataset_path}")
+        if candidate_split_dir.exists():
+            self.root_dir = candidate_split_dir
+        else:
+            self.root_dir = self.dataset_path
+        if not self.root_dir.exists():
+            raise MLXUserError(f"Dataset directory not found: {self.root_dir}")
+
+        discovered_dirs = {path.name: path for path in _label_directories(self.root_dir)}
+        if label_names is None:
+            self.label_names = sorted(discovered_dirs.keys())
+        else:
+            self.label_names = list(label_names)
+
+        self.label_to_index = {label: index for index, label in enumerate(self.label_names)}
+        self.samples: list[tuple[Path, int]] = []
+
+        for label in self.label_names:
+            label_dir = discovered_dirs.get(label)
+            if label_dir is None:
+                continue
+            for image_path in _iter_image_paths(label_dir):
+                self.samples.append((image_path, self.label_to_index[label]))
+
+        if not self.samples:
+            raise MLXUserError(f"No labelled images were found under: {self.root_dir}")
+
+    def __len__(self) -> int:
+        return len(self.samples)
+
+    def __getitem__(self, index: int) -> tuple[torch.Tensor, torch.Tensor]:
+        image_path, label = self.samples[index]
+        image = Image.open(image_path)
+        if self.colored:
+            image = image.convert("RGB")
+        else:
+            image = image.convert("L")
+        image = self.transform(image)
+        return image, torch.tensor(label, dtype=torch.long)
+
+
+def _default_classification_transform(
+    *,
+    input_size: Tuple[int, int],
+    colored: bool,
+):
+    transform_steps = [transforms.Resize(input_size)]
+    if not colored:
+        transform_steps.append(transforms.Grayscale(num_output_channels=1))
+    transform_steps.append(transforms.ToTensor())
+    return transforms.Compose(transform_steps)
+
+
+def load_one_shot_datasets(
     dataset_path: os.PathLike[str] | str,
     input_size: Tuple[int, int] = (105, 105),
     colored: bool = True,
@@ -144,11 +227,74 @@ def load_ic_one_shot_dataset(
     )
 
 
+def load_standard_classification_datasets(
+    dataset_path: os.PathLike[str] | str,
+    *,
+    input_size: Tuple[int, int] = (224, 224),
+    colored: bool = True,
+) -> tuple[ImageClassificationDataset, ImageClassificationDataset, list[str]]:
+    dataset_root = Path(dataset_path)
+    train_dir = dataset_root / "train"
+    val_dir = dataset_root / "val"
+
+    if not train_dir.exists() or not val_dir.exists():
+        raise MLXUserError(
+            "Expected dataset structure:\n"
+            f"{dataset_root}/train/<class_name>/img.png\n"
+            f"{dataset_root}/val/<class_name>/img.png"
+        )
+
+    label_names = [path.name for path in _label_directories(train_dir)]
+    if not label_names:
+        raise MLXUserError(f"No label directories were found under: {train_dir}")
+
+    transform = _default_classification_transform(
+        input_size=input_size,
+        colored=colored,
+    )
+    train_dataset = ImageClassificationDataset(
+        dataset_root,
+        split="train",
+        transform=transform,
+        input_size=input_size,
+        colored=colored,
+        label_names=label_names,
+    )
+    val_dataset = ImageClassificationDataset(
+        dataset_root,
+        split="val",
+        transform=transform,
+        input_size=input_size,
+        colored=colored,
+        label_names=label_names,
+    )
+    return train_dataset, val_dataset, label_names
+
+
+def load_standard_classification_directory(
+    dataset_path: os.PathLike[str] | str,
+    *,
+    label_names: Sequence[str],
+    split: str = "test",
+    transform=None,
+    input_size: Tuple[int, int] = (224, 224),
+    colored: bool = True,
+) -> ImageClassificationDataset:
+    return ImageClassificationDataset(
+        dataset_path,
+        split=split,
+        transform=transform,
+        input_size=input_size,
+        colored=colored,
+        label_names=label_names,
+    )
+
+
 def _label_directories(dataset_path: Path) -> List[Path]:
     return sorted(path for path in dataset_path.iterdir() if path.is_dir())
 
 
-def build_ic_one_shot(dataset_path: str) -> None:
+def build_image_classification_dataset(dataset_path: str) -> None:
     dataset_root = Path(dataset_path)
     if not dataset_root.exists():
         raise MLXUserError(f"Dataset path not found: {dataset_root}")
@@ -207,6 +353,12 @@ def build_ic_one_shot(dataset_path: str) -> None:
                 shutil.copy2(image_path, out_dir / image_path.name)
 
     print_success(f"Dataset created successfully at {output_path}")
+
+
+def resolve_evaluation_dir(dataset_path: os.PathLike[str] | str) -> Path:
+    dataset_root = Path(dataset_path)
+    test_dir = dataset_root / "test"
+    return test_dir if test_dir.exists() else dataset_root
 
 
 def iter_dataset_images(dataset_path: os.PathLike[str] | str) -> Iterable[Path]:

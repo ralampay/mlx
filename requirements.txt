@@ -5,5 +5,6 @@ python-dotenv
 rich
 scikit-learn
 torch
+torchvision
 tqdm
 ultralytics @ git+https://github.com/ralampay/ultralytics

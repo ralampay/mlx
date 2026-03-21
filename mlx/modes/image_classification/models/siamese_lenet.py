@@ -1,10 +1,10 @@
 import torch
 import torch.nn as nn
 
-from mlx.modes.one_shot.models.base import BaseICOneShotModel
+from mlx.modes.image_classification.models.base import BaseImageSimilarityModel
 
 
-class SiameseLeNet(BaseICOneShotModel):
+class SiameseLeNet(BaseImageSimilarityModel):
     def __init__(self, colored: bool = True, embedding_size: int = 4096) -> None:
         super().__init__()
 

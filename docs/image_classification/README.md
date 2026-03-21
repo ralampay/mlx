@@ -1,24 +1,37 @@
 # Image Classification
 
-Mode: `image-classification`
+Mode: `image_classification`
 
-Package: `mlx.modes.one_shot`
+Package: `mlx.modes.image_classification`
 
 ## Overview
 
 This mode provides the image-classification workflow exposed by:
 
 ```bash
-python -m mlx --mode image-classification
+python -m mlx --mode image_classification
 ```
 
 The source is organized by responsibility:
 
 - `runner.py`: default config and action dispatch.
-- `actions.py`: train, test, benchmark, one-shot inference, and dataset actions.
+- `train.py`: training loops and smoke tests for one-shot and standard classifiers.
+- `evaluation.py`: benchmark flows for both model families.
+- `inference.py`: image inference for both model families.
 - `data.py`: dataset loading, dataset building, and shared image preprocessing.
-- `models/`: one-shot model definitions used by the mode.
-- `presentation.py`: rich tables and OpenCV result rendering.
+- `models/`: Siamese and standard classification model builders.
+- `utils.py`: model resolution and checkpoint metadata helpers.
+- `presentation.py`: rich tables and one-shot match rendering.
+- `data.py` exposes `ImageClassificationDataset`, which expects a dataset root containing `train/` and `val/`.
+
+## Supported Models
+
+This mode supports two training setups:
+
+- One-shot similarity models: `siamese-le-net`
+- Standard classification models: `resnet18`, `resnet50`
+
+The selected `--model` determines which training, benchmarking, and inference path is used. Torchvision-backed models are loaded by name for `resnet18` and `resnet50`. Additional custom standard classifiers can be plugged in later through the model registry.
 
 ## Dataset Expectations
 
@@ -27,7 +40,7 @@ The source is organized by responsibility:
 Training expects a dataset root with at least:
 
 ```text
-<dataset-path>/
+<dataset-root>/
 ├── train/
 │   └── <label>/
 └── val/
@@ -35,6 +48,13 @@ Training expects a dataset root with at least:
 ```
 
 Each label directory must contain at least two images so positive pairs can be generated.
+
+This same split layout is used by both model families:
+
+- Standard classifiers use `train/` and `val/` as supervised class datasets.
+- One-shot models use `train/` and `val/` to generate positive and negative image pairs.
+
+The standard classification path uses `ImageClassificationDataset(dataset_path, split="train" | "val", transform=...)`, which returns `(x, y)` pairs where `x` is the transformed image tensor and `y` is the label index.
 
 ### Dataset Builder
 
@@ -51,14 +71,43 @@ It interactively creates `train/`, `val/`, and `test/` splits in a new output di
 
 ## Training
 
+### Standard Classification
+
 Example:
 
 ```bash
 python -m mlx \
-    --mode image-classification \
+    --mode image_classification \
+    --model resnet18 \
+    --action train \
+    --dataset ~/datasets/animals \
+    --output ./model.pth \
+    --epochs 50 \
+    --batch-size 16 \
+    --device cuda:0 \
+    --lr 0.001
+```
+
+Important arguments:
+
+- `--model`: standard classifier such as `resnet18` or `resnet50`.
+- `--dataset`: dataset root containing `train/` and `val/`.
+- `--output`: output checkpoint file, for example `model.pth`.
+- `--epochs`, `--batch-size`, `--device`, `--lr`: standard training controls.
+- `--pretrained`: enable pretrained initialization for supported torchvision backbones.
+- `--height`, `--width`: input dimensions used to build `input_size`.
+
+### One-Shot Classification
+
+Example:
+
+```bash
+python -m mlx \
+    --mode image_classification \
     --model siamese-le-net \
     --action train \
-    --dataset-path ~/datasets/omniglot \
+    --dataset ~/datasets/omniglot \
+    --output ./siamese.pth \
     --epochs 50 \
     --batch-size 8 \
     --device cuda:0
@@ -66,18 +115,19 @@ python -m mlx \
 
 Important arguments:
 
-- `--model`: model name, currently `siamese-le-net`.
-- `--dataset-path`: dataset root containing `train/` and `val/`.
+- `--model`: one-shot model name, currently `siamese-le-net`.
+- `--dataset`: dataset root containing `train/` and `val/`.
+- `--output`: output checkpoint file, for example `siamese.pth`.
 - `--embedding-size`: Siamese embedding width.
-- `--epochs`, `--batch-size`, `--device`: training controls.
+- `--epochs`, `--batch-size`, `--device`, `--lr`: training controls.
 - `--height`, `--width`: input dimensions used to build `input_size`.
 
 ## Available Actions
 
-- `train`: train the network and save best checkpoints under `<dataset-path>/checkpoints`.
+- `train`: train the selected model and write the best checkpoint to `--output`.
 - `test`: run a random-tensor smoke test for the configured model.
-- `benchmark`: evaluate a trained checkpoint against a dataset directory.
-- `infer-image`: compare one input image against a reference dataset and show the best matches.
+- `benchmark`: evaluate a trained checkpoint against a dataset directory. Standard models classify labels directly; one-shot models evaluate pair similarity.
+- `infer-image`: run inference for one input image. Standard models output class probabilities; one-shot models compare against a reference dataset and show the best matches.
 - `build-dataset`: interactively create train/val/test splits from a label-organized source dataset.
 
 ## Build Dataset
@@ -119,9 +169,9 @@ Example command:
 
 ```bash
 python -m mlx \
-    --mode image-classification \
+    --mode image_classification \
     --action build-dataset \
-    --dataset-path ~/datasets/animals-raw
+    --dataset ~/datasets/animals-raw
 ```
 
 Example interactive flow:
@@ -155,9 +205,9 @@ Another example:
 
 ```bash
 python -m mlx \
-    --mode image-classification \
+    --mode image_classification \
     --action build-dataset \
-    --dataset-path ./data/omniglot-raw
+    --dataset ./data/omniglot-raw
 ```
 
 Then provide prompts such as:
@@ -169,35 +219,69 @@ How many images per label for TEST? 4
 Enter output path for split dataset ./data/omniglot-split
 ```
 
-Use the generated output directory as `--dataset-path` for `train`, and use its `test/` directory for `benchmark` or `infer-image` when needed.
+Use the generated output directory as `--dataset` for `train`, and use its `test/` directory for `benchmark` or `infer-image` when needed.
 
 ## Benchmarking
+
+### Standard Classification
 
 Example:
 
 ```bash
 python -m mlx \
-    --mode image-classification \
+    --mode image_classification \
     --action benchmark \
-    --dataset-path ~/datasets/omniglot/test \
+    --model-path ~/datasets/animals/checkpoints/best_epoch_12.pt \
+    --dataset ~/datasets/animals/test \
+    --device cpu
+```
+
+For standard classifiers, `benchmark` loads class labels from the checkpoint metadata and evaluates accuracy, precision, recall, and F1 against the labelled images in `--dataset`. If `--dataset` points to the dataset root and a `test/` directory exists, MLX evaluates that `test/` directory automatically.
+
+### One-Shot Classification
+
+Example:
+
+```bash
+python -m mlx \
+    --mode image_classification \
+    --action benchmark \
+    --dataset ~/datasets/omniglot/test \
     --model-path ~/datasets/omniglot/checkpoints/best_epoch_10.pt \
     --device cpu
 ```
 
-`benchmark` requires `--model-path` and uses `--dataset-path` as the directory to evaluate.
+For one-shot models, `benchmark` requires `--model-path` and evaluates similarity pairs built from the provided dataset directory.
 
 ## Image Inference
+
+### Standard Classification
 
 Example:
 
 ```bash
 python -m mlx \
-    --mode image-classification \
+    --mode image_classification \
     --action infer-image \
-    --dataset-path ~/datasets/omniglot/test \
+    --model-path ~/datasets/animals/checkpoints/best_epoch_12.pt \
+    --input-img ~/datasets/query/cat.jpg \
+    --device cpu
+```
+
+For standard classifiers, `infer-image` predicts the top classes for `--input-img`. `--dataset` is not required for this path because labels are loaded from the checkpoint metadata.
+
+### One-Shot Classification
+
+Example:
+
+```bash
+python -m mlx \
+    --mode image_classification \
+    --action infer-image \
+    --dataset ~/datasets/omniglot/test \
     --input-img ~/datasets/query/sample.png \
     --model siamese-le-net \
     --device cpu
 ```
 
-`infer-image` loads the query image, computes its embedding, compares it against images under `--dataset-path`, and renders the top matches.
+`infer-image` loads the query image, computes its embedding, compares it against images under `--dataset`, and renders the top matches.

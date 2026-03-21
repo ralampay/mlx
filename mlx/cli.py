@@ -35,8 +35,10 @@ class RichArgumentParser(argparse.ArgumentParser):
 ModeRunner = Callable[[Dict[str, Any]], Any]
 
 MODE_REGISTRY: Dict[str, str] = {
-    "image-classification": "mlx.modes.one_shot.runner:run_image_classification",
+    "image-classification": "mlx.modes.image_classification.runner:run_image_classification",
+    "image_classification": "mlx.modes.image_classification.runner:run_image_classification",
     "object-detection": "mlx.modes.object_detection.ultralytics.runner:run_object_detection",
+    "object_detection": "mlx.modes.object_detection.ultralytics.runner:run_object_detection",
 }
 
 
@@ -51,14 +53,16 @@ def build_parser() -> RichArgumentParser:
     parser.add_argument("--action", default=None)
     parser.add_argument("--embedding-size", type=int, default=4096, dest="embedding_size")
     parser.add_argument("--batch-size", type=int, default=1, dest="batch_size")
-    parser.add_argument("--dataset-path", default="./tmp/dataset", dest="dataset_path")
+    parser.add_argument("--dataset", "--dataset-path", default="./tmp/dataset", dest="dataset_path")
     parser.add_argument("--epochs", type=int, default=100)
+    parser.add_argument("--output", default=None, dest="output_path")
     parser.add_argument("--model-path", default=None, dest="model_path")
     parser.add_argument("--file-path", default=None, dest="file_path")
     parser.add_argument("--input-img", default="/tmp/image.jpg", dest="input_img")
     parser.add_argument("--confidence", type=float, default=0.25)
     parser.add_argument("--camera-index", type=int, default=0, dest="camera_index")
     parser.add_argument("--pretrained", action=argparse.BooleanOptionalAction, default=False)
+    parser.add_argument("--lr", type=float, default=None)
     parser.add_argument("--lr0", type=float, default=None)
     parser.add_argument("--optimizer", default="auto")
     parser.add_argument("--nbs", type=int, default=64)
@@ -79,20 +83,22 @@ def _render_help() -> None:
 
     usage = Table(title="Usage", show_header=False)
     usage.add_column("Command", style="bold cyan")
-    usage.add_row("python -m mlx --mode object-detection --action train --dataset-path ./dataset --model ultralytics/cfg/models/ext/cad_yolo12.yaml")
-    usage.add_row("python -m mlx --mode object-detection --action infer-camera --model ultralytics/cfg/models/ext/cad_yolo12.yaml --model-path ./runs/train/weights/best.pt")
-    usage.add_row("python -m mlx --mode image-classification --action train --dataset-path ./omniglot")
-    usage.add_row("python -m mlx --mode image-classification --action build-dataset --dataset-path ./raw-dataset")
+    usage.add_row("python -m mlx --mode object_detection --action train --dataset-path ./dataset --model ultralytics/cfg/models/ext/cad_yolo12.yaml")
+    usage.add_row("python -m mlx --mode object_detection --action infer-camera --model ultralytics/cfg/models/ext/cad_yolo12.yaml --model-path ./runs/train/weights/best.pt")
+    usage.add_row("python -m mlx --mode image_classification --action train --output model.pth --dataset ./dataset --model resnet18")
+    usage.add_row("python -m mlx --mode image_classification --action train --output siamese.pth --dataset ./omniglot --model siamese-le-net")
+    usage.add_row("python -m mlx --mode image_classification --action build-dataset --dataset ./raw-dataset")
     console.print(usage)
 
     options = Table(title="Options", show_lines=True)
     options.add_column("Flag", style="cyan", no_wrap=True)
     options.add_column("Default", style="magenta")
     options.add_column("Description", style="white")
-    options.add_row("--mode", "None", "Mode to run: object-detection or image-classification.")
+    options.add_row("--mode", "None", "Mode to run: object_detection or image_classification.")
     options.add_row("--model", "None", "Model identifier, YAML path, or architecture name.")
     options.add_row("--action", "mode-specific", "Sub-action such as train, infer-video, benchmark, or build-dataset.")
-    options.add_row("--dataset-path", "./tmp/dataset", "Dataset root used by training and dataset utilities.")
+    options.add_row("--dataset", "./tmp/dataset", "Dataset root used by training and dataset utilities.")
+    options.add_row("--output", "None", "Output model path written by train.")
     options.add_row("--model-path", "None", "Weights checkpoint path for inference or warm starts.")
     options.add_row("--file-path", "None", "Video path for file-based inference.")
     options.add_row("--input-img", "/tmp/image.jpg", "Input image for classification inference.")
@@ -104,6 +110,7 @@ def _render_help() -> None:
     options.add_row("--confidence", "0.25", "Detection confidence threshold.")
     options.add_row("--camera-index", "0", "Camera index for webcam inference.")
     options.add_row("--pretrained / --no-pretrained", "False", "Toggle Ultralytics pretrained initialization.")
+    options.add_row("--lr", "None", "Learning rate for image-classification training.")
     options.add_row("--amp / --no-amp", "True", "Toggle mixed precision for Ultralytics training.")
     options.add_row("--lr0", "None", "Override initial learning rate.")
     options.add_row("--optimizer", "auto", "Optimizer selection for Ultralytics.")
@@ -117,14 +124,16 @@ def _render_help() -> None:
     available = Table(title="Available Modes", show_header=True)
     available.add_column("Mode", style="cyan", no_wrap=True)
     available.add_column("Actions", style="white")
-    available.add_row("object-detection", "train, infer-camera, infer-video")
-    available.add_row("image-classification", "train, test, benchmark, infer-image, build-dataset")
+    available.add_row("object_detection", "train, infer-camera, infer-video")
+    available.add_row("image_classification", "train, test, benchmark, infer-image, build-dataset")
     console.print(available)
 
 
 def _build_config(namespace: argparse.Namespace) -> Dict[str, Any]:
     config = vars(namespace).copy()
     config.pop("help", None)
+    if config.get("mode"):
+        config["mode"] = config["mode"].replace("-", "_")
     config["input_size"] = (config["width"], config["height"])
     return config
 
@@ -143,8 +152,8 @@ def _render_unknown_mode() -> None:
     table = Table(title="Available Modes", show_header=True)
     table.add_column("Mode", style="cyan", no_wrap=True)
     table.add_column("Purpose", style="white")
-    table.add_row("object-detection", "Ultralytics-backed detection training and inference")
-    table.add_row("image-classification", "Image classification workflows, including one-shot")
+    table.add_row("object_detection", "Ultralytics-backed detection training and inference")
+    table.add_row("image_classification", "Image classification workflows for both one-shot and standard classifiers")
     console.print(table)
 
 

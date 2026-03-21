@@ -16,13 +16,13 @@ Machine-learning workflow runner for computer-vision tasks.
 MLX provides a CLI for running mode-specific workflows behind a shared interface:
 
 ```bash
-python -m mlx --mode object-detection --action train
+python -m mlx --mode object_detection --action train
 ```
 
 The codebase is organized around mode packages:
 
 - `mlx.core`: shared exceptions and terminal UI helpers.
-- `mlx.modes.one_shot`: image-classification workflows, including one-shot models.
+- `mlx.modes.image_classification`: image-classification workflows for both one-shot and standard classifiers.
 - `mlx.modes.object_detection.ultralytics`: object detection on Ultralytics.
 
 ## Project Layout
@@ -33,7 +33,7 @@ mlx/
 ├── modes/
 │   ├── object_detection/
 │   │   └── ultralytics/
-│   └── one_shot/
+│   └── image_classification/
 ```
 
 The CLI now dispatches directly by `--mode`, so there is no separate platform abstraction.
@@ -54,6 +54,7 @@ Current runtime dependencies:
 - `rich`
 - `scikit-learn`
 - `torch`
+- `torchvision`
 - `tqdm`
 - `ultralytics` from the pinned Git repository in `requirements.txt`
 
@@ -68,10 +69,11 @@ python -m mlx --mode <mode-name> --action <action-name>
 Examples:
 
 ```bash
-python -m mlx --mode object-detection --action train --dataset-path ./dataset --model ultralytics/cfg/models/ext/cad_yolo12.yaml
-python -m mlx --mode object-detection --action infer-camera --model ultralytics/cfg/models/ext/cad_yolo12.yaml --model-path ./runs/train/weights/best.pt
-python -m mlx --mode image-classification --action train --dataset-path ./omniglot
-python -m mlx --mode image-classification --action build-dataset --dataset-path ./raw-dataset
+python -m mlx --mode object_detection --action train --dataset-path ./dataset --model ultralytics/cfg/models/ext/cad_yolo12.yaml
+python -m mlx --mode object_detection --action infer-camera --model ultralytics/cfg/models/ext/cad_yolo12.yaml --model-path ./runs/train/weights/best.pt
+python -m mlx --mode image_classification --action train --output model.pth --dataset ./dataset --model resnet18
+python -m mlx --mode image_classification --action train --output siamese.pth --dataset ./omniglot --model siamese-le-net
+python -m mlx --mode image_classification --action build-dataset --dataset ./raw-dataset
 ```
 
 Run `python -m mlx --help` for the complete CLI reference.
@@ -80,10 +82,10 @@ Run `python -m mlx --help` for the complete CLI reference.
 
 | Mode | Package | Actions | Docs |
 | --- | --- | --- | --- |
-| `object-detection` | `mlx.modes.object_detection.ultralytics` | `train`, `infer-camera`, `infer-video` | [Object detection](./docs/object_detection/README.md) |
-| `image-classification` | `mlx.modes.one_shot` | `train`, `test`, `benchmark`, `infer-image`, `build-dataset` | [Image classification](./docs/image_classification/README.md) |
+| `object_detection` | `mlx.modes.object_detection.ultralytics` | `train`, `infer-camera`, `infer-video` | [Object detection](./docs/object_detection/README.md) |
+| `image_classification` | `mlx.modes.image_classification` | `train`, `test`, `benchmark`, `infer-image`, `build-dataset` | [Image classification](./docs/image_classification/README.md) |
 
-`image-classification` is the public mode name even when using one-shot functionality internally.
+`image_classification` supports both Siamese one-shot models and standard classifiers such as `resnet18` and `resnet50`.
 
 ## Documentation
 

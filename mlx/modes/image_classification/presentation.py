@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import math
 from pathlib import Path
-from typing import Any, Sequence
+from typing import Any
 
 import cv2
 import numpy as np
@@ -11,8 +11,8 @@ from rich.table import Table
 from mlx.core.ui import console, print_info, print_success, print_warning
 
 
-def print_config_summary(model: str, config: dict[str, Any]) -> None:
-    table = Table(title=f"Configuration for {model}", show_lines=True)
+def print_config_summary(model: str, family: str, config: dict[str, Any]) -> None:
+    table = Table(title=f"Configuration for {model} ({family})", show_lines=True)
     table.add_column("Parameter", justify="right", style="cyan", no_wrap=True)
     table.add_column("Value", style="magenta")
     for key, value in config.items():
@@ -47,7 +47,7 @@ def _draw_header_bar(image, text: str):
     return np.vstack((bar, image))
 
 
-def display_inference_results(result: dict[str, Any]) -> None:
+def display_similarity_matches(result: dict[str, Any]) -> None:
     input_image = result["input_image"]
     all_matches = result["top_matches"]
     best_label = result["best_match_label"]
@@ -122,3 +122,17 @@ def display_inference_results(result: dict[str, Any]) -> None:
     print_info("Press any key on an image window to close...")
     cv2.waitKey(0)
     cv2.destroyAllWindows()
+
+
+def display_classification_predictions(result: dict[str, Any]) -> None:
+    table = Table(title="Classification Predictions", show_lines=True)
+    table.add_column("Rank", justify="center", style="cyan")
+    table.add_column("Label", style="magenta")
+    table.add_column("Probability", justify="right", style="green")
+
+    for index, (label, probability) in enumerate(result["top_predictions"], start=1):
+        table.add_row(str(index), label, f"{probability:.4f}")
+
+    console.print(table)
+    if result.get("predicted_label"):
+        print_success(f"Predicted label: {result['predicted_label']}")

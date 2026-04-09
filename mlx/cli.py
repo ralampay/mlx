@@ -94,6 +94,7 @@ def _render_help() -> None:
     usage.add_row("python -m mlx --mode image_classification --action build-dataset --dataset ./raw-dataset")
     usage.add_row("python -m mlx --mode segmentation --action train --dataset ./dataset --model unet --output unet-seg.pt")
     usage.add_row("python -m mlx --mode segmentation --action infer-image --model-path ./unet-seg.pt --input-img ./sample.jpg")
+    usage.add_row("python -m mlx --mode segmentation --action build-dataset --dataset ./raw-segmentation")
     console.print(usage)
 
     options = Table(title="Options", show_lines=True)
@@ -135,7 +136,7 @@ def _render_help() -> None:
     available.add_column("Actions", style="white")
     available.add_row("object_detection", "train, infer-camera, infer-video")
     available.add_row("image_classification", "train, test, benchmark, infer-image, build-dataset")
-    available.add_row("segmentation", "train, test, infer-image, infer-camera, infer-video")
+    available.add_row("segmentation", "train, test, infer-image, infer-camera, infer-video, build-dataset")
     console.print(available)
 
 

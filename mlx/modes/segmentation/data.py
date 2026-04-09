@@ -8,6 +8,19 @@ import torch
 from torch.utils.data import Dataset
 
 from mlx.core.exceptions import MLXUserError
+from mlx.core.ui import (
+    confirm_action,
+    console,
+    print_info,
+    print_success,
+    print_warning,
+    prompt_int,
+    prompt_text,
+)
+from rich.table import Table
+
+import random
+import shutil
 
 IMAGE_EXTENSIONS = (".png", ".jpg", ".jpeg", ".bmp", ".tif", ".tiff")
 
@@ -16,6 +29,37 @@ def _iter_image_paths(directory: Path) -> list[Path]:
     return sorted(
         path for path in directory.iterdir() if path.is_file() and path.suffix.lower() in IMAGE_EXTENSIONS
     )
+
+
+def _paired_source_directories(dataset_root: Path) -> tuple[Path, Path]:
+    images_dir = dataset_root / "images"
+    masks_dir = dataset_root / "masks"
+    if not images_dir.exists() or not masks_dir.exists():
+        raise MLXUserError(
+            "Expected segmentation source dataset structure:\n"
+            f"{dataset_root}/images/<file>\n"
+            f"{dataset_root}/masks/<file>"
+        )
+    return images_dir, masks_dir
+
+
+def _paired_samples(images_dir: Path, masks_dir: Path) -> list[tuple[Path, Path]]:
+    image_paths = _iter_image_paths(images_dir)
+    mask_paths = _iter_image_paths(masks_dir)
+    image_map = {path.stem: path for path in image_paths}
+    mask_map = {path.stem: path for path in mask_paths}
+
+    missing_masks = sorted(set(image_map) - set(mask_map))
+    missing_images = sorted(set(mask_map) - set(image_map))
+    if missing_masks or missing_images:
+        problems = []
+        if missing_masks:
+            problems.append(f"missing masks for stems: {', '.join(missing_masks[:5])}")
+        if missing_images:
+            problems.append(f"missing images for stems: {', '.join(missing_images[:5])}")
+        raise MLXUserError(f"Image/mask mismatch: {'; '.join(problems)}")
+
+    return [(image_map[stem], mask_map[stem]) for stem in sorted(image_map)]
 
 
 def load_image_tensor(
@@ -91,22 +135,7 @@ class SegmentationDataset(Dataset):
                 f"{self.dataset_path}/val/masks/<file>"
             )
 
-        image_paths = _iter_image_paths(self.images_dir)
-        mask_paths = _iter_image_paths(self.masks_dir)
-        image_map = {path.stem: path for path in image_paths}
-        mask_map = {path.stem: path for path in mask_paths}
-
-        missing_masks = sorted(set(image_map) - set(mask_map))
-        missing_images = sorted(set(mask_map) - set(image_map))
-        if missing_masks or missing_images:
-            problems = []
-            if missing_masks:
-                problems.append(f"missing masks for stems: {', '.join(missing_masks[:5])}")
-            if missing_images:
-                problems.append(f"missing images for stems: {', '.join(missing_images[:5])}")
-            raise MLXUserError(f"Image/mask mismatch under split '{split}': {'; '.join(problems)}")
-
-        self.samples = [(image_map[stem], mask_map[stem]) for stem in sorted(image_map)]
+        self.samples = _paired_samples(self.images_dir, self.masks_dir)
         if not self.samples:
             raise MLXUserError(f"No paired image/mask samples were found under: {split_dir}")
 
@@ -151,3 +180,56 @@ def iter_split_images(dataset_path: str | Path, split: str = "test") -> Iterable
         raise MLXUserError(f"Dataset split images directory not found: {images_dir}")
     return _iter_image_paths(images_dir)
 
+
+def build_segmentation_dataset(dataset_path: str) -> None:
+    dataset_root = Path(dataset_path)
+    if not dataset_root.exists():
+        raise MLXUserError(f"Dataset path not found: {dataset_root}")
+
+    images_dir, masks_dir = _paired_source_directories(dataset_root)
+    samples = _paired_samples(images_dir, masks_dir)
+    if not samples:
+        raise MLXUserError(f"No paired image/mask samples were found under: {dataset_root}")
+
+    table = Table(title="Segmentation Pair Summary", show_lines=True)
+    table.add_column("Directory", style="cyan")
+    table.add_column("Value", style="magenta")
+    table.add_row("Images Dir", str(images_dir))
+    table.add_row("Masks Dir", str(masks_dir))
+    table.add_row("Pairs", str(len(samples)))
+    console.print(table)
+
+    train_count = prompt_int("How many paired samples for TRAIN?")
+    val_count = prompt_int("How many paired samples for VAL?")
+    test_count = prompt_int("How many paired samples for TEST?")
+
+    total_needed = train_count + val_count + test_count
+    if len(samples) < total_needed:
+        print_warning(
+            f"Only {len(samples)} paired samples were found, less than requested total {total_needed}."
+        )
+
+    output_path = Path(prompt_text("Enter output path for split dataset"))
+    if output_path.exists():
+        confirm_action(f"Output directory '{output_path}' already exists. Overwrite?", abort=True)
+        shutil.rmtree(output_path)
+    output_path.mkdir(parents=True, exist_ok=True)
+
+    for split in ("train", "val", "test"):
+        (output_path / split / "images").mkdir(parents=True, exist_ok=True)
+        (output_path / split / "masks").mkdir(parents=True, exist_ok=True)
+
+    random.shuffle(samples)
+    splits = {
+        "train": samples[:train_count],
+        "val": samples[train_count : train_count + val_count],
+        "test": samples[train_count + val_count : train_count + val_count + test_count],
+    }
+
+    print_info("Splitting segmentation dataset...")
+    for split, split_samples in splits.items():
+        for image_path, mask_path in split_samples:
+            shutil.copy2(image_path, output_path / split / "images" / image_path.name)
+            shutil.copy2(mask_path, output_path / split / "masks" / mask_path.name)
+
+    print_success(f"Segmentation dataset created successfully at {output_path}")

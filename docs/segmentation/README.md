@@ -18,6 +18,7 @@ The source is organized by responsibility:
 - `train.py`: training loop and smoke test.
 - `inference.py`: single-image, webcam, and video inference.
 - `data.py`: paired image/mask dataset loading and preprocessing.
+- `data.py` also contains the interactive dataset split builder.
 - `models/`: segmentation model registry and the basic `unet`.
 - `utils.py`: checkpoint metadata, metrics, and shared helpers.
 - `presentation.py`: rich tables and OpenCV visualization helpers.
@@ -71,6 +72,77 @@ Mask preprocessing:
 - `infer-image`: run inference for one image and display original, predicted mask, and overlay
 - `infer-camera`: run webcam inference with segmentation overlay
 - `infer-video`: run file-based video inference with segmentation overlay
+- `build-dataset`: interactively split a flat paired image/mask dataset into `train`, `val`, and `test`
+
+## Build Dataset
+
+`build-dataset` is used to convert a flat paired segmentation dataset into a split dataset with `train/`, `val/`, and `test/`.
+
+Required flag:
+
+- `--dataset-path`: source dataset root. This must point to the unsplit dataset you want to process.
+
+Expected input layout:
+
+```text
+<source-dataset>/
+├── images/
+│   ├── sample_001.png
+│   ├── sample_002.tiff
+│   └── ...
+└── masks/
+    ├── sample_001.png
+    ├── sample_002.tiff
+    └── ...
+```
+
+Rules:
+
+- image and mask filenames must match by stem
+- image and mask extensions may differ as long as the stem matches
+- supported file extensions include `.png`, `.jpg`, `.jpeg`, `.bmp`, `.tif`, and `.tiff`
+
+Behavior:
+
+- the command scans the source `images/` and `masks/` directories
+- it validates that pairs exist for every image and mask by stem
+- it prints a pair summary
+- it prompts for the number of samples to place in `TRAIN`, `VAL`, and `TEST`
+- it prompts for the output path where the split dataset should be created
+- if the output directory already exists, MLX asks for confirmation before overwriting it
+
+Example command:
+
+```bash
+python -m mlx \
+    --mode segmentation \
+    --action build-dataset \
+    --dataset ./data/kvasir-seg-raw
+```
+
+Example interactive flow:
+
+```text
+How many paired samples for TRAIN? 800
+How many paired samples for VAL? 100
+How many paired samples for TEST? 100
+Enter output path for split dataset ./data/kvasir-seg-split
+```
+
+This creates a dataset like:
+
+```text
+./data/kvasir-seg-split/
+├── train/
+│   ├── images/
+│   └── masks/
+├── val/
+│   ├── images/
+│   └── masks/
+└── test/
+    ├── images/
+    └── masks/
+```
 
 ## Training
 

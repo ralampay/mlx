@@ -3,6 +3,7 @@ from __future__ import annotations
 from typing import Any
 
 from mlx.core.exceptions import MLXUserError
+from mlx.modes.segmentation.data import build_segmentation_dataset
 from mlx.modes.segmentation.inference import (
     StreamSegmentationInferenceRunner,
     infer_segmentation_image,
@@ -26,6 +27,7 @@ DEFAULT_CONFIG = {
 }
 
 ACTION_HANDLERS = {
+    "build-dataset": lambda config: build_segmentation_dataset(config["dataset_path"]),
     "infer-camera": lambda config: StreamSegmentationInferenceRunner(
         config, source="camera"
     ).execute(),
@@ -52,4 +54,3 @@ def run_segmentation(mode_config: dict[str, Any]) -> Any:
             f"Unsupported action '{config['action']}' for segmentation. Available actions: {available}."
         )
     return handler(config)
-

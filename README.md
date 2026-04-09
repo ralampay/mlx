@@ -24,6 +24,7 @@ The codebase is organized around mode packages:
 - `mlx.core`: shared exceptions and terminal UI helpers.
 - `mlx.modes.image_classification`: image-classification workflows for both one-shot and standard classifiers.
 - `mlx.modes.object_detection.ultralytics`: object detection on Ultralytics.
+- `mlx.modes.segmentation`: semantic segmentation workflows for U-Net style models.
 
 ## Project Layout
 
@@ -33,7 +34,8 @@ mlx/
 ├── modes/
 │   ├── object_detection/
 │   │   └── ultralytics/
-│   └── image_classification/
+│   ├── image_classification/
+│   └── segmentation/
 ```
 
 The CLI now dispatches directly by `--mode`, so there is no separate platform abstraction.
@@ -74,6 +76,8 @@ python -m mlx --mode object_detection --action infer-camera --model ultralytics/
 python -m mlx --mode image_classification --action train --output model.pth --dataset ./dataset --model resnet18
 python -m mlx --mode image_classification --action train --output siamese.pth --dataset ./omniglot --model siamese-le-net
 python -m mlx --mode image_classification --action build-dataset --dataset ./raw-dataset
+python -m mlx --mode segmentation --action train --dataset ./dataset --model unet --output ./unet-seg.pt
+python -m mlx --mode segmentation --action infer-image --model-path ./unet-seg.pt --input-img ./sample.jpg
 ```
 
 Run `python -m mlx --help` for the complete CLI reference.
@@ -84,6 +88,7 @@ Run `python -m mlx --help` for the complete CLI reference.
 | --- | --- | --- | --- |
 | `object_detection` | `mlx.modes.object_detection.ultralytics` | `train`, `infer-camera`, `infer-video` | [Object detection](./docs/object_detection/README.md) |
 | `image_classification` | `mlx.modes.image_classification` | `train`, `test`, `benchmark`, `infer-image`, `build-dataset` | [Image classification](./docs/image_classification/README.md) |
+| `segmentation` | `mlx.modes.segmentation` | `train`, `test`, `infer-image`, `infer-camera`, `infer-video` | [Segmentation](./docs/segmentation/README.md) |
 
 `image_classification` supports both Siamese one-shot models and standard classifiers such as `resnet18` and `resnet50`.
 
@@ -92,3 +97,4 @@ Run `python -m mlx --help` for the complete CLI reference.
 - [Documentation index](./docs/README.md)
 - [Object detection mode docs](./docs/object_detection/README.md)
 - [Image classification docs](./docs/image_classification/README.md)
+- [Segmentation mode docs](./docs/segmentation/README.md)

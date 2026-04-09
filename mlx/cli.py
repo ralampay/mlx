@@ -39,6 +39,7 @@ MODE_REGISTRY: Dict[str, str] = {
     "image_classification": "mlx.modes.image_classification.runner:run_image_classification",
     "object-detection": "mlx.modes.object_detection.ultralytics.runner:run_object_detection",
     "object_detection": "mlx.modes.object_detection.ultralytics.runner:run_object_detection",
+    "segmentation": "mlx.modes.segmentation.runner:run_segmentation",
 }
 
 
@@ -70,6 +71,9 @@ def build_parser() -> RichArgumentParser:
     parser.add_argument("--amp", action=argparse.BooleanOptionalAction, default=True)
     parser.add_argument("--loss-clip", type=float, default=None, dest="loss_clip")
     parser.add_argument("--run-name", default=None, dest="run_name")
+    parser.add_argument("--num-classes", type=int, default=2, dest="num_classes")
+    parser.add_argument("--mask-threshold", type=float, default=0.5, dest="mask_threshold")
+    parser.add_argument("--overlay-alpha", type=float, default=0.45, dest="overlay_alpha")
     return parser
 
 
@@ -88,13 +92,15 @@ def _render_help() -> None:
     usage.add_row("python -m mlx --mode image_classification --action train --output model.pth --dataset ./dataset --model resnet18")
     usage.add_row("python -m mlx --mode image_classification --action train --output siamese.pth --dataset ./omniglot --model siamese-le-net")
     usage.add_row("python -m mlx --mode image_classification --action build-dataset --dataset ./raw-dataset")
+    usage.add_row("python -m mlx --mode segmentation --action train --dataset ./dataset --model unet --output unet-seg.pt")
+    usage.add_row("python -m mlx --mode segmentation --action infer-image --model-path ./unet-seg.pt --input-img ./sample.jpg")
     console.print(usage)
 
     options = Table(title="Options", show_lines=True)
     options.add_column("Flag", style="cyan", no_wrap=True)
     options.add_column("Default", style="magenta")
     options.add_column("Description", style="white")
-    options.add_row("--mode", "None", "Mode to run: object_detection or image_classification.")
+    options.add_row("--mode", "None", "Mode to run: object_detection, image_classification, or segmentation.")
     options.add_row("--model", "None", "Model identifier, YAML path, or architecture name.")
     options.add_row("--action", "mode-specific", "Sub-action such as train, infer-video, benchmark, or build-dataset.")
     options.add_row("--dataset", "./tmp/dataset", "Dataset root used by training and dataset utilities.")
@@ -118,6 +124,9 @@ def _render_help() -> None:
     options.add_row("--warmup-epochs", "3.0", "Warmup epoch count.")
     options.add_row("--loss-clip", "None", "Optional gradient clipping value.")
     options.add_row("--run-name", "None", "Optional Ultralytics run folder name.")
+    options.add_row("--num-classes", "2", "Number of segmentation classes expected in the masks.")
+    options.add_row("--mask-threshold", "0.5", "Threshold used when rendering binary segmentation masks.")
+    options.add_row("--overlay-alpha", "0.45", "Blend strength for segmentation overlays.")
     options.add_row("--help", "False", "Show this help screen.")
     console.print(options)
 
@@ -126,6 +135,7 @@ def _render_help() -> None:
     available.add_column("Actions", style="white")
     available.add_row("object_detection", "train, infer-camera, infer-video")
     available.add_row("image_classification", "train, test, benchmark, infer-image, build-dataset")
+    available.add_row("segmentation", "train, test, infer-image, infer-camera, infer-video")
     console.print(available)
 
 
@@ -154,6 +164,7 @@ def _render_unknown_mode() -> None:
     table.add_column("Purpose", style="white")
     table.add_row("object_detection", "Ultralytics-backed detection training and inference")
     table.add_row("image_classification", "Image classification workflows for both one-shot and standard classifiers")
+    table.add_row("segmentation", "Semantic segmentation workflows for U-Net style models")
     console.print(table)
 
 

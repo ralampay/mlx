@@ -29,9 +29,9 @@ The source is organized by responsibility:
 This mode supports two training setups:
 
 - One-shot similarity models: `siamese-le-net`
-- Standard classification models: `resnet18`, `resnet50`
+- Standard classification models: `resnet18`, `resnet50`, `densenet121`, `mobilenet_v3_large`, `efficientnet_b0`, `convnext_tiny`
 
-The selected `--model` determines which training, benchmarking, and inference path is used. Torchvision-backed models are loaded by name for `resnet18` and `resnet50`. Additional custom standard classifiers can be plugged in later through the model registry.
+The selected `--model` determines which training, benchmarking, and inference path is used. Torchvision-backed standard models are loaded by name and their classifier heads are adapted to the dataset class count. Additional custom standard classifiers can be plugged in later through the model registry.
 
 ## Dataset Expectations
 
@@ -110,6 +110,7 @@ python -m mlx \
 Important arguments:
 
 - `--model`: standard classifier such as `resnet18` or `resnet50`.
+- Supported standard models: `resnet18`, `resnet50`, `densenet121`, `mobilenet_v3_large`, `efficientnet_b0`, `convnext_tiny`.
 - `--dataset`: dataset root containing `train/` and `val/`.
 - `--output`: output artifact directory. Training writes `{model}.pth` and `training.csv` inside it.
 - `--epochs`, `--batch-size`, `--device`, `--lr`: standard training controls.

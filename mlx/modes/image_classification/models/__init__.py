@@ -13,7 +13,14 @@ from mlx.modes.image_classification.models.standard import (
 
 DEFAULT_MODEL = "resnet18"
 ONE_SHOT_MODEL_NAMES = {"siamese-le-net"}
-STANDARD_MODEL_NAMES = {"resnet18", "resnet50"}
+STANDARD_MODEL_NAMES = {
+    "convnext_tiny",
+    "densenet121",
+    "efficientnet_b0",
+    "mobilenet_v3_large",
+    "resnet18",
+    "resnet50",
+}
 
 
 def supported_model_names() -> list[str]:

@@ -25,6 +25,7 @@ DEFAULT_CONFIG = {
     "lr": None,
     "num_pairs": 100,
     "pretrained": False,
+    "random_seed": None,
     "refresh_per_second": 2,
 }
 

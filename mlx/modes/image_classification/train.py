@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import csv
 from pathlib import Path
 from typing import Any
 
@@ -7,6 +8,7 @@ import torch
 from rich.console import Group
 from rich.live import Live
 from rich.panel import Panel
+from rich.text import Text
 from rich.progress import (
     BarColumn,
     Progress,
@@ -30,12 +32,13 @@ from mlx.modes.image_classification.models import (
 )
 from mlx.modes.image_classification.utils import (
     resolve_model_name,
-    resolve_train_output_path,
+    resolve_train_output_paths,
     save_checkpoint,
 )
 
 
 def train_image_classification(config: dict[str, Any]) -> None:
+    _apply_random_seed(config)
     model_name = resolve_model_name(config)
     family = model_family_for(model_name)
     if family == "one-shot":
@@ -45,6 +48,7 @@ def train_image_classification(config: dict[str, Any]) -> None:
 
 
 def smoke_test_image_classification(config: dict[str, Any]) -> None:
+    _apply_random_seed(config)
     model_name = resolve_model_name(config)
     family = model_family_for(model_name)
     if family == "one-shot":
@@ -62,7 +66,10 @@ def _train_one_shot(model_name: str, config: dict[str, Any]) -> None:
     input_size = config.get("input_size", (105, 105))
     colored = config.get("colored", True)
     refresh_rate = config.get("refresh_per_second", 2)
-    output_path = resolve_train_output_path(config)
+    output_paths = resolve_train_output_paths(config, model_name=model_name)
+    checkpoint_path = output_paths["checkpoint_path"]
+    training_csv_path = output_paths["training_csv_path"]
+    _initialize_training_csv(training_csv_path)
 
     print_info(f"Starting one-shot training on device={device} for {epochs} epochs")
 
@@ -80,14 +87,13 @@ def _train_one_shot(model_name: str, config: dict[str, Any]) -> None:
     val_loader = DataLoader(val_dataset, batch_size=batch_size, shuffle=False, num_workers=2)
 
     best_val_loss = float("inf")
-    prev_train_loss = None
-    prev_val_loss = None
+    epoch_log = _build_epoch_log()
     last_saved_panel = Panel("No model saved yet", border_style="dim")
 
     progress = _build_progress(epochs=epochs, train_loader_size=len(train_loader))
     epoch_task, batch_task = _progress_tasks(progress, epochs=epochs)
 
-    with Live(Group(progress, last_saved_panel), refresh_per_second=refresh_rate, transient=False) as live:
+    with Live(Group(epoch_log, progress, last_saved_panel), refresh_per_second=refresh_rate, transient=False) as live:
         for epoch in range(epochs):
             model.train()
             running_loss = 0.0
@@ -107,37 +113,42 @@ def _train_one_shot(model_name: str, config: dict[str, Any]) -> None:
 
             avg_train_loss = running_loss / len(train_loader)
             progress.advance(epoch_task)
-            avg_val_loss = _validate_one_shot(model, val_loader, criterion, device)
-
-            metrics_table = _build_loss_table(
-                epoch=epoch,
+            avg_val_loss, val_accuracy = _validate_one_shot(model, val_loader, criterion, device)
+            _append_training_csv_row(
+                training_csv_path,
+                epoch=epoch + 1,
+                loss=avg_train_loss,
+                metric=avg_val_loss,
+            )
+            epoch_log = _append_epoch_log(
+                epoch_log,
+                epoch=epoch + 1,
                 epochs=epochs,
-                avg_train_loss=avg_train_loss,
-                avg_val_loss=avg_val_loss,
-                prev_train_loss=prev_train_loss,
-                prev_val_loss=prev_val_loss,
+                values=[
+                    ("loss", avg_train_loss),
+                    ("val_loss", avg_val_loss),
+                    ("val_accuracy", val_accuracy),
+                ],
             )
 
             if avg_val_loss < best_val_loss:
                 best_val_loss = avg_val_loss
                 save_checkpoint(
-                    output_path,
+                    checkpoint_path,
                     model,
                     model_name=model_name,
                     family="one-shot",
                     config=config,
                 )
                 last_saved_panel = Panel(
-                    f"[green]Saved new best model at {output_path}[/]",
+                    f"[green]Saved new best model at {checkpoint_path}[/]",
                     title="Checkpoint",
                     border_style="green",
                 )
             else:
                 last_saved_panel = Panel("No improvement", title="Checkpoint", border_style="dim")
 
-            live.update(Group(progress, metrics_table, last_saved_panel))
-            prev_train_loss = avg_train_loss
-            prev_val_loss = avg_val_loss
+            live.update(Group(epoch_log, progress, last_saved_panel))
 
     print_success("One-shot training complete!")
 
@@ -151,7 +162,10 @@ def _train_standard(model_name: str, config: dict[str, Any]) -> None:
     input_size = config.get("input_size", (224, 224))
     colored = config.get("colored", True)
     refresh_rate = config.get("refresh_per_second", 2)
-    output_path = resolve_train_output_path(config)
+    output_paths = resolve_train_output_paths(config, model_name=model_name)
+    checkpoint_path = output_paths["checkpoint_path"]
+    training_csv_path = output_paths["training_csv_path"]
+    _initialize_training_csv(training_csv_path)
 
     print_info(f"Starting standard classification training on device={device} for {epochs} epochs")
     train_dataset, val_dataset, classes = load_standard_classification_datasets(
@@ -171,14 +185,13 @@ def _train_standard(model_name: str, config: dict[str, Any]) -> None:
     val_loader = DataLoader(val_dataset, batch_size=batch_size, shuffle=False, num_workers=2)
 
     best_val_loss = float("inf")
-    prev_train_loss = None
-    prev_val_loss = None
+    epoch_log = _build_epoch_log()
     last_saved_panel = Panel("No model saved yet", border_style="dim")
 
     progress = _build_progress(epochs=epochs, train_loader_size=len(train_loader))
     epoch_task, batch_task = _progress_tasks(progress, epochs=epochs)
 
-    with Live(Group(progress, last_saved_panel), refresh_per_second=refresh_rate, transient=False) as live:
+    with Live(Group(epoch_log, progress, last_saved_panel), refresh_per_second=refresh_rate, transient=False) as live:
         for epoch in range(epochs):
             model.train()
             running_loss = 0.0
@@ -199,20 +212,27 @@ def _train_standard(model_name: str, config: dict[str, Any]) -> None:
             avg_train_loss = running_loss / len(train_loader)
             progress.advance(epoch_task)
             avg_val_loss, val_accuracy = _validate_standard(model, val_loader, criterion, device)
-            metrics_table = _build_standard_metrics_table(
-                epoch=epoch,
+            _append_training_csv_row(
+                training_csv_path,
+                epoch=epoch + 1,
+                loss=avg_train_loss,
+                metric=val_accuracy,
+            )
+            epoch_log = _append_epoch_log(
+                epoch_log,
+                epoch=epoch + 1,
                 epochs=epochs,
-                avg_train_loss=avg_train_loss,
-                avg_val_loss=avg_val_loss,
-                prev_train_loss=prev_train_loss,
-                prev_val_loss=prev_val_loss,
-                val_accuracy=val_accuracy,
+                values=[
+                    ("loss", avg_train_loss),
+                    ("val_loss", avg_val_loss),
+                    ("val_accuracy", val_accuracy),
+                ],
             )
 
             if avg_val_loss < best_val_loss:
                 best_val_loss = avg_val_loss
                 save_checkpoint(
-                    output_path,
+                    checkpoint_path,
                     model,
                     model_name=model_name,
                     family="standard",
@@ -220,16 +240,14 @@ def _train_standard(model_name: str, config: dict[str, Any]) -> None:
                     classes=classes,
                 )
                 last_saved_panel = Panel(
-                    f"[green]Saved new best model at {output_path}[/]",
+                    f"[green]Saved new best model at {checkpoint_path}[/]",
                     title="Checkpoint",
                     border_style="green",
                 )
             else:
                 last_saved_panel = Panel("No improvement", title="Checkpoint", border_style="dim")
 
-            live.update(Group(progress, metrics_table, last_saved_panel))
-            prev_train_loss = avg_train_loss
-            prev_val_loss = avg_val_loss
+            live.update(Group(epoch_log, progress, last_saved_panel))
 
     print_success("Standard classification training complete!")
 
@@ -285,16 +303,23 @@ def _render_test_output(title: str, output: torch.Tensor) -> None:
     console.print(table)
 
 
-def _validate_one_shot(model, val_loader, criterion, device: str) -> float:
+def _validate_one_shot(model, val_loader, criterion, device: str) -> tuple[float, float]:
     model.eval()
     val_loss = 0.0
+    correct = 0
+    total = 0
     with torch.no_grad():
         for img1, img2, label in val_loader:
             img1, img2, label = img1.to(device), img2.to(device), label.to(device)
             output = model(img1, img2)
             loss = criterion(output, label.unsqueeze(1))
             val_loss += loss.item()
-    return val_loss / len(val_loader)
+            predictions = (output >= 0.5).float().squeeze(1)
+            correct += int((predictions == label).sum().item())
+            total += int(label.numel())
+    avg_loss = val_loss / len(val_loader)
+    accuracy = correct / total if total else 0.0
+    return avg_loss, accuracy
 
 
 def _validate_standard(model, val_loader, criterion, device: str) -> tuple[float, float]:
@@ -336,60 +361,40 @@ def _progress_tasks(progress: Progress, *, epochs: int) -> tuple[int, int]:
     return progress.task_ids[0], progress.task_ids[1]
 
 
-def _build_loss_table(
+def _initialize_training_csv(csv_path: Path) -> None:
+    csv_path.parent.mkdir(parents=True, exist_ok=True)
+    with csv_path.open("w", newline="", encoding="utf-8") as csv_file:
+        writer = csv.writer(csv_file)
+        writer.writerow(["epoch", "loss", "metric"])
+
+
+def _apply_random_seed(config: dict[str, Any]) -> None:
+    random_seed = config.get("random_seed")
+    if random_seed is None:
+        return
+    torch.manual_seed(random_seed)
+    if torch.cuda.is_available():
+        torch.cuda.manual_seed_all(random_seed)
+    print_info(f"Using PyTorch random seed={random_seed}")
+
+
+def _append_training_csv_row(csv_path: Path, *, epoch: int, loss: float, metric: float) -> None:
+    with csv_path.open("a", newline="", encoding="utf-8") as csv_file:
+        writer = csv.writer(csv_file)
+        writer.writerow([epoch, f"{loss:.6f}", f"{metric:.6f}"])
+
+
+def _build_epoch_log() -> Text:
+    return Text("Epoch Results\n", style="bold")
+
+
+def _append_epoch_log(
+    epoch_log: Text,
     *,
     epoch: int,
     epochs: int,
-    avg_train_loss: float,
-    avg_val_loss: float,
-    prev_train_loss: float | None,
-    prev_val_loss: float | None,
-) -> Table:
-    table = Table(title=f"Epoch {epoch + 1}/{epochs}", show_lines=True)
-    table.add_column("Metric", justify="center", style="cyan")
-    table.add_column("Previous", justify="center", style="yellow")
-    table.add_column("Current", justify="center", style="magenta")
-    table.add_column("Delta", justify="center", style="bright_black")
-    table.add_row(
-        "Train Loss",
-        f"{prev_train_loss:.6f}" if prev_train_loss is not None else "-",
-        f"{avg_train_loss:.6f}",
-        _loss_delta(prev_train_loss, avg_train_loss),
-    )
-    table.add_row(
-        "Val Loss",
-        f"{prev_val_loss:.6f}" if prev_val_loss is not None else "-",
-        f"{avg_val_loss:.6f}",
-        _loss_delta(prev_val_loss, avg_val_loss),
-    )
-    return table
-
-
-def _build_standard_metrics_table(
-    *,
-    epoch: int,
-    epochs: int,
-    avg_train_loss: float,
-    avg_val_loss: float,
-    prev_train_loss: float | None,
-    prev_val_loss: float | None,
-    val_accuracy: float,
-) -> Table:
-    table = _build_loss_table(
-        epoch=epoch,
-        epochs=epochs,
-        avg_train_loss=avg_train_loss,
-        avg_val_loss=avg_val_loss,
-        prev_train_loss=prev_train_loss,
-        prev_val_loss=prev_val_loss,
-    )
-    table.add_row("Val Accuracy", "-", f"{val_accuracy:.4f}", "-")
-    return table
-
-
-def _loss_delta(previous: float | None, current: float) -> str:
-    if previous is None:
-        return "-"
-    if current < previous:
-        return f"↓ {previous - current:.4f}"
-    return f"↑ {current - previous:.4f}"
+    values: list[tuple[str, float]],
+) -> Text:
+    formatted_values = "  ".join(f"{label}: {value:.6f}" for label, value in values)
+    epoch_log.append(f"Epoch {epoch}/{epochs}  {formatted_values}\n")
+    return epoch_log

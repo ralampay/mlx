@@ -71,6 +71,25 @@ It interactively creates `train/`, `val/`, and `test/` splits in a new output di
 
 ## Training
 
+For image-classification training, `--output` is treated as an artifact directory. MLX creates the directory if needed and writes:
+
+```text
+<output>/
+├── {model}.pth
+└── training.csv
+```
+
+`training.csv` contains one row per epoch with this schema:
+
+```text
+epoch,loss,metric
+```
+
+Metric semantics depend on the model family:
+
+- Standard classifiers: `metric` is validation accuracy.
+- One-shot classifiers: `metric` is validation loss.
+
 ### Standard Classification
 
 Example:
@@ -81,7 +100,7 @@ python -m mlx \
     --model resnet18 \
     --action train \
     --dataset ~/datasets/animals \
-    --output ./model.pth \
+    --output ./artifacts/resnet18 \
     --epochs 50 \
     --batch-size 16 \
     --device cuda:0 \
@@ -92,10 +111,12 @@ Important arguments:
 
 - `--model`: standard classifier such as `resnet18` or `resnet50`.
 - `--dataset`: dataset root containing `train/` and `val/`.
-- `--output`: output checkpoint file, for example `model.pth`.
+- `--output`: output artifact directory. Training writes `{model}.pth` and `training.csv` inside it.
 - `--epochs`, `--batch-size`, `--device`, `--lr`: standard training controls.
+- `--random-seed`: optional integer seed passed to PyTorch for reproducible runs.
 - `--pretrained`: enable pretrained initialization for supported torchvision backbones.
 - `--height`, `--width`: input dimensions used to build `input_size`.
+- The terminal UI prints one completed epoch per line above the training progress bars, including training loss, validation loss, and validation accuracy.
 
 ### One-Shot Classification
 
@@ -107,7 +128,7 @@ python -m mlx \
     --model siamese-le-net \
     --action train \
     --dataset ~/datasets/omniglot \
-    --output ./siamese.pth \
+    --output ./artifacts/siamese \
     --epochs 50 \
     --batch-size 8 \
     --device cuda:0
@@ -117,14 +138,16 @@ Important arguments:
 
 - `--model`: one-shot model name, currently `siamese-le-net`.
 - `--dataset`: dataset root containing `train/` and `val/`.
-- `--output`: output checkpoint file, for example `siamese.pth`.
+- `--output`: output artifact directory. Training writes `{model}.pth` and `training.csv` inside it.
 - `--embedding-size`: Siamese embedding width.
 - `--epochs`, `--batch-size`, `--device`, `--lr`: training controls.
+- `--random-seed`: optional integer seed passed to PyTorch for reproducible runs.
 - `--height`, `--width`: input dimensions used to build `input_size`.
+- The terminal UI prints one completed epoch per line above the training progress bars, including training loss, validation loss, and validation accuracy.
 
 ## Available Actions
 
-- `train`: train the selected model and write the best checkpoint to `--output`.
+- `train`: train the selected model and write artifacts to `--output`, including `{model}.pth` and `training.csv`.
 - `test`: run a random-tensor smoke test for the configured model.
 - `benchmark`: evaluate a trained checkpoint against a dataset directory. Standard models classify labels directly; one-shot models evaluate pair similarity.
 - `infer-image`: run inference for one input image. Standard models output class probabilities; one-shot models compare against a reference dataset and show the best matches.

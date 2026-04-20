@@ -60,11 +60,16 @@ def save_checkpoint(
     )
 
 
-def resolve_train_output_path(config: dict[str, Any]) -> Path:
+def resolve_train_output_paths(config: dict[str, Any], *, model_name: str) -> dict[str, Path]:
     output_path = config.get("output_path")
     if not output_path:
-        raise MLXUserError("Training requires --output pointing to the model file to write.")
-    return Path(output_path).expanduser()
+        raise MLXUserError("Training requires --output pointing to the directory where artifacts will be written.")
+    output_dir = Path(output_path).expanduser()
+    return {
+        "output_dir": output_dir,
+        "checkpoint_path": output_dir / f"{model_name}.pth",
+        "training_csv_path": output_dir / "training.csv",
+    }
 
 
 def load_checkpoint_bundle(config: dict[str, Any]) -> tuple[Any, dict[str, Any]]:

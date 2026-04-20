@@ -110,14 +110,22 @@ python -m mlx \
 Important arguments:
 
 - `--model`: standard classifier such as `resnet18` or `resnet50`.
-- Supported standard models: `resnet18`, `resnet50`, `densenet121`, `mobilenet_v3_large`, `efficientnet_b0`, `convnext_tiny`.
 - `--dataset`: dataset root containing `train/` and `val/`.
 - `--output`: output artifact directory. Training writes `{model}.pth` and `training.csv` inside it.
 - `--epochs`, `--batch-size`, `--device`, `--lr`: standard training controls.
-- `--random-seed`: optional integer seed passed to PyTorch for reproducible runs.
+- `--seed` / `--random-seed`: optional integer seed passed to PyTorch for reproducible runs.
 - `--pretrained`: enable pretrained initialization for supported torchvision backbones.
 - `--height`, `--width`: input dimensions used to build `input_size`.
 - The terminal UI prints one completed epoch per line above the training progress bars, including training loss, validation loss, and validation accuracy.
+
+Supported standard models:
+
+- `resnet18`
+- `resnet50`
+- `densenet121`
+- `mobilenet_v3_large`
+- `efficientnet_b0`
+- `convnext_tiny`
 
 ### One-Shot Classification
 
@@ -137,14 +145,18 @@ python -m mlx \
 
 Important arguments:
 
-- `--model`: one-shot model name, currently `siamese-le-net`.
+- `--model`: one-shot model name.
 - `--dataset`: dataset root containing `train/` and `val/`.
 - `--output`: output artifact directory. Training writes `{model}.pth` and `training.csv` inside it.
 - `--embedding-size`: Siamese embedding width.
 - `--epochs`, `--batch-size`, `--device`, `--lr`: training controls.
-- `--random-seed`: optional integer seed passed to PyTorch for reproducible runs.
+- `--seed` / `--random-seed`: optional integer seed passed to PyTorch for reproducible runs.
 - `--height`, `--width`: input dimensions used to build `input_size`.
 - The terminal UI prints one completed epoch per line above the training progress bars, including training loss, validation loss, and validation accuracy.
+
+Supported one-shot models:
+
+- `siamese-le-net`
 
 ## Available Actions
 

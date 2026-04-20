@@ -22,6 +22,7 @@ from rich.table import Table
 from torch import nn, optim
 from torch.utils.data import DataLoader
 
+from mlx.core.random import apply_torch_seed
 from mlx.core.ui import console, print_info, print_success
 from mlx.modes.image_classification.data import (
     load_one_shot_datasets,
@@ -370,13 +371,7 @@ def _initialize_training_csv(csv_path: Path) -> None:
 
 
 def _apply_random_seed(config: dict[str, Any]) -> None:
-    random_seed = config.get("random_seed")
-    if random_seed is None:
-        return
-    torch.manual_seed(random_seed)
-    if torch.cuda.is_available():
-        torch.cuda.manual_seed_all(random_seed)
-    print_info(f"Using PyTorch random seed={random_seed}")
+    apply_torch_seed(config.get("random_seed"))
 
 
 def _append_training_csv_row(csv_path: Path, *, epoch: int, loss: float, metric: float) -> None:

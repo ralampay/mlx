@@ -73,8 +73,8 @@ Examples:
 ```bash
 python -m mlx --mode object_detection --action train --dataset-path ./dataset --model ultralytics/cfg/models/ext/cad_yolo12.yaml
 python -m mlx --mode object_detection --action infer-camera --model ultralytics/cfg/models/ext/cad_yolo12.yaml --model-path ./runs/train/weights/best.pt
-python -m mlx --mode image_classification --action train --output ./artifacts/resnet18 --dataset ./dataset --model resnet18 --random-seed 42
-python -m mlx --mode image_classification --action train --output ./artifacts/siamese --dataset ./omniglot --model siamese-le-net --random-seed 42
+python -m mlx --mode image_classification --action train --output ./artifacts/resnet18 --dataset ./dataset --model resnet18 --seed 42
+python -m mlx --mode image_classification --action train --output ./artifacts/siamese --dataset ./omniglot --model siamese-le-net --seed 42
 python -m mlx --mode image_classification --action build-dataset --dataset ./raw-dataset
 python -m mlx --mode segmentation --action train --dataset ./dataset --model unet --output ./unet-seg.pt
 python -m mlx --mode segmentation --action infer-image --model-path ./unet-seg.pt --input-img ./sample.jpg

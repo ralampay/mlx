@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import csv
+from collections import deque
 from pathlib import Path
 from typing import Any
 
@@ -93,7 +94,7 @@ def _train_one_shot(model_name: str, config: dict[str, Any]) -> None:
     progress = _build_progress(epochs=epochs, train_loader_size=len(train_loader))
     epoch_task, batch_task = _progress_tasks(progress, epochs=epochs)
 
-    with Live(Group(epoch_log, progress, last_saved_panel), refresh_per_second=refresh_rate, transient=False) as live:
+    with Live(_render_training_view(epoch_log, progress, last_saved_panel), refresh_per_second=refresh_rate, transient=False) as live:
         for epoch in range(epochs):
             model.train()
             running_loss = 0.0
@@ -148,7 +149,7 @@ def _train_one_shot(model_name: str, config: dict[str, Any]) -> None:
             else:
                 last_saved_panel = Panel("No improvement", title="Checkpoint", border_style="dim")
 
-            live.update(Group(epoch_log, progress, last_saved_panel))
+            live.update(_render_training_view(epoch_log, progress, last_saved_panel))
 
     print_success("One-shot training complete!")
 
@@ -191,7 +192,7 @@ def _train_standard(model_name: str, config: dict[str, Any]) -> None:
     progress = _build_progress(epochs=epochs, train_loader_size=len(train_loader))
     epoch_task, batch_task = _progress_tasks(progress, epochs=epochs)
 
-    with Live(Group(epoch_log, progress, last_saved_panel), refresh_per_second=refresh_rate, transient=False) as live:
+    with Live(_render_training_view(epoch_log, progress, last_saved_panel), refresh_per_second=refresh_rate, transient=False) as live:
         for epoch in range(epochs):
             model.train()
             running_loss = 0.0
@@ -247,7 +248,7 @@ def _train_standard(model_name: str, config: dict[str, Any]) -> None:
             else:
                 last_saved_panel = Panel("No improvement", title="Checkpoint", border_style="dim")
 
-            live.update(Group(epoch_log, progress, last_saved_panel))
+            live.update(_render_training_view(epoch_log, progress, last_saved_panel))
 
     print_success("Standard classification training complete!")
 
@@ -384,17 +385,33 @@ def _append_training_csv_row(csv_path: Path, *, epoch: int, loss: float, metric:
         writer.writerow([epoch, f"{loss:.6f}", f"{metric:.6f}"])
 
 
-def _build_epoch_log() -> Text:
-    return Text("Epoch Results\n", style="bold")
+def _build_epoch_log(*, max_entries: int = 12) -> deque[str]:
+    return deque(maxlen=max_entries)
 
 
 def _append_epoch_log(
-    epoch_log: Text,
+    epoch_log: deque[str],
     *,
     epoch: int,
     epochs: int,
     values: list[tuple[str, float]],
-) -> Text:
+) -> deque[str]:
     formatted_values = "  ".join(f"{label}: {value:.6f}" for label, value in values)
-    epoch_log.append(f"Epoch {epoch}/{epochs}  {formatted_values}\n")
+    epoch_log.append(f"Epoch {epoch}/{epochs}  {formatted_values}")
     return epoch_log
+
+
+def _render_training_view(epoch_log: deque[str], progress: Progress, last_saved_panel: Panel) -> Group:
+    return Group(
+        _render_epoch_log_panel(epoch_log),
+        progress,
+        last_saved_panel,
+    )
+
+
+def _render_epoch_log_panel(epoch_log: deque[str]) -> Panel:
+    if epoch_log:
+        body = Text("\n".join(epoch_log))
+    else:
+        body = Text("Waiting for completed epochs...", style="dim")
+    return Panel(body, title="Epoch Results", border_style="blue")

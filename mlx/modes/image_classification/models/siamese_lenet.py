@@ -2,6 +2,7 @@ import torch
 import torch.nn as nn
 
 from mlx.modes.image_classification.models.base import BaseImageSimilarityModel
+from mlx.modes.image_classification.models.blocks import ConvActivationBlock, ConvActivationPoolBlock
 
 
 class SiameseLeNet(BaseImageSimilarityModel):
@@ -12,17 +13,10 @@ class SiameseLeNet(BaseImageSimilarityModel):
         self.embedding_size = embedding_size
 
         self.embedding = nn.Sequential(
-            nn.Conv2d(channels, 64, kernel_size=10),
-            nn.ReLU(),
-            nn.MaxPool2d(2),
-            nn.Conv2d(64, 128, kernel_size=7),
-            nn.ReLU(),
-            nn.MaxPool2d(2),
-            nn.Conv2d(128, 128, kernel_size=4),
-            nn.ReLU(),
-            nn.MaxPool2d(2),
-            nn.Conv2d(128, 256, kernel_size=4),
-            nn.ReLU(),
+            ConvActivationPoolBlock(channels, 64, kernel_size=10),
+            ConvActivationPoolBlock(64, 128, kernel_size=7),
+            ConvActivationPoolBlock(128, 128, kernel_size=4),
+            ConvActivationBlock(128, 256, kernel_size=4),
             nn.AdaptiveAvgPool2d((6, 6)),
             nn.Flatten(),
             nn.Linear(256 * 6 * 6, embedding_size),

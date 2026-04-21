@@ -3,6 +3,12 @@ from __future__ import annotations
 from typing import Any
 
 from mlx.core.exceptions import MLXUserError
+from mlx.modes.segmentation.models.blocks import (
+    ConvNormAct,
+    DoubleConvBlock,
+    DownsampleConvBlock,
+    UpsampleSkipConvBlock,
+)
 from mlx.modes.segmentation.models.unet import UNet
 
 DEFAULT_MODEL = "unet"
@@ -31,5 +37,14 @@ def build_segmentation_model(
     )
 
 
-__all__ = ["DEFAULT_MODEL", "MODEL_NAMES", "UNet", "build_segmentation_model", "supported_model_names"]
-
+__all__ = [
+    "ConvNormAct",
+    "DEFAULT_MODEL",
+    "DoubleConvBlock",
+    "DownsampleConvBlock",
+    "MODEL_NAMES",
+    "UNet",
+    "UpsampleSkipConvBlock",
+    "build_segmentation_model",
+    "supported_model_names",
+]

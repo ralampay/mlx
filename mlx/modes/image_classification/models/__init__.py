@@ -4,6 +4,7 @@ from typing import Any
 
 from mlx.core.exceptions import MLXUserError
 from mlx.modes.image_classification.models.base import BaseImageSimilarityModel
+from mlx.modes.image_classification.models.blocks import ConvActivationBlock, ConvActivationPoolBlock
 from mlx.modes.image_classification.models.siamese_lenet import SiameseLeNet
 from mlx.modes.image_classification.models.standard import (
     build_standard_model,
@@ -64,6 +65,8 @@ def build_image_classification_model(
 
 __all__ = [
     "BaseImageSimilarityModel",
+    "ConvActivationBlock",
+    "ConvActivationPoolBlock",
     "DEFAULT_MODEL",
     "ONE_SHOT_MODEL_NAMES",
     "STANDARD_MODEL_NAMES",

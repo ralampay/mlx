@@ -29,9 +29,16 @@ The source is organized by responsibility:
 This mode supports two training setups:
 
 - One-shot similarity models: `siamese-le-net`
-- Standard classification models: `resnet18`, `resnet50`, `densenet121`, `mobilenet_v3_large`, `efficientnet_b0`, `convnext_tiny`
+- Standard classification models: `resnet18`, `resnet50`, `densenet121`, `mobilenet_v3_large`, `efficientnet_b0`, `convnext_tiny`, `convnext_small`, `convnext_base`, `convnext_large`, `draxnet`
 
 The selected `--model` determines which training, benchmarking, and inference path is used. Torchvision-backed standard models are loaded by name and their classifier heads are adapted to the dataset class count. Additional custom standard classifiers can be plugged in later through the model registry.
+
+All standard classifiers share the same preprocessing family:
+
+- Training: `Resize`, `RandomHorizontalFlip`, `RandomRotation(10)`, `ToTensor`, `Normalize`
+- Validation / benchmark / inference: `Resize`, `ToTensor`, `Normalize`
+- RGB normalization uses ImageNet mean/std: `(0.485, 0.456, 0.406)` / `(0.229, 0.224, 0.225)`
+- Grayscale normalization uses mean/std: `(0.5,)` / `(0.5,)`
 
 ## Dataset Expectations
 
@@ -116,7 +123,7 @@ Important arguments:
 - `--seed` / `--random-seed`: optional integer seed passed to PyTorch for reproducible runs.
 - `--pretrained`: enable pretrained initialization for supported torchvision backbones.
 - `--height`, `--width`: input dimensions used to build `input_size`.
-- The terminal UI prints one completed epoch per line above the training progress bars, including training loss, validation loss, and validation accuracy.
+- The terminal UI prints one completed epoch per line above the training progress bars, including training loss, validation loss, accuracy, precision, recall, and F1.
 
 Supported standard models:
 
@@ -126,6 +133,31 @@ Supported standard models:
 - `mobilenet_v3_large`
 - `efficientnet_b0`
 - `convnext_tiny`
+- `convnext_small`
+- `convnext_base`
+- `convnext_large`
+- `draxnet`
+
+Parameter counts for the available standard classifiers, using the current implementations with a 1000-class classifier head:
+
+| Model | Parameters | Special Properties |
+| --- | ---: | --- |
+| `efficientnet_b0` | 5,288,548 | <ul><li>Smallest standard backbone in this repo</li><li>Compound-scaled EfficientNet family</li><li>Good baseline for efficiency-focused runs</li></ul> |
+| `mobilenet_v3_large` | 5,483,032 | <ul><li>Mobile-oriented architecture</li><li>Uses inverted residual blocks</li><li>Good low-parameter benchmark</li></ul> |
+| `densenet121` | 7,978,856 | <ul><li>Feature reuse through dense connections</li><li>Lower parameter count than ResNet-18</li><li>Strong classical CNN baseline</li></ul> |
+| `resnet18` | 11,689,512 | <ul><li>Smallest ResNet variant available here</li><li>Clean apples-to-apples baseline for `draxnet`</li><li>Standard residual basic blocks</li></ul> |
+| `draxnet` | 16,994,856 | <ul><li>Local `ResNet-18`-style implementation</li><li>Current default uses `CAXResidualBlock` in `layer4`</li><li>Designed for custom block experimentation</li></ul> |
+| `resnet50` | 25,557,032 | <ul><li>Deeper ResNet with bottleneck blocks</li><li>Common strong baseline</li><li>Larger than `draxnet` and `resnet18`</li></ul> |
+| `convnext_tiny` | 28,589,128 | <ul><li>Smallest ConvNeXt variant available here</li><li>Modern conv backbone</li><li>Larger than `resnet50` in parameter count</li></ul> |
+| `convnext_small` | 50,223,688 | <ul><li>Mid-sized ConvNeXt variant</li><li>Substantially larger than `convnext_tiny`</li><li>Useful for capacity scaling comparisons</li></ul> |
+| `convnext_base` | 88,591,464 | <ul><li>Large ConvNeXt backbone</li><li>High-capacity benchmark</li><li>Much heavier training/inference footprint</li></ul> |
+| `convnext_large` | 197,767,336 | <ul><li>Largest backbone currently exposed</li><li>Very high parameter count</li><li>Best suited for heavyweight benchmarking</li></ul> |
+
+### DraxNet Notes
+
+`draxnet` is currently a local `ResNet-18` implementation.
+
+This gives the project a stable baseline architecture that matches `resnet18`, but keeps the code local so custom residual blocks can be introduced later without depending on `torchvision` internals.
 
 ### One-Shot Classification
 
@@ -152,7 +184,7 @@ Important arguments:
 - `--epochs`, `--batch-size`, `--device`, `--lr`: training controls.
 - `--seed` / `--random-seed`: optional integer seed passed to PyTorch for reproducible runs.
 - `--height`, `--width`: input dimensions used to build `input_size`.
-- The terminal UI prints one completed epoch per line above the training progress bars, including training loss, validation loss, and validation accuracy.
+- The terminal UI prints one completed epoch per line above the training progress bars, including training loss, validation loss, accuracy, precision, recall, and F1.
 
 Supported one-shot models:
 

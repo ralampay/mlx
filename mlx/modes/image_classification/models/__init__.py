@@ -4,7 +4,16 @@ from typing import Any
 
 from mlx.core.exceptions import MLXUserError
 from mlx.modes.image_classification.models.base import BaseImageSimilarityModel
-from mlx.modes.image_classification.models.blocks import ConvActivationBlock, ConvActivationPoolBlock
+from mlx.modes.image_classification.models.blocks import (
+    CAXBlock,
+    ConvActivationBlock,
+    ConvActivationPoolBlock,
+    ConvNeXtBlock,
+    DropPath,
+    LayerNorm2D,
+    SelfAttention2D,
+)
+from mlx.modes.image_classification.models.draxnet import DraxNet, build_draxnet
 from mlx.modes.image_classification.models.siamese_lenet import SiameseLeNet
 from mlx.modes.image_classification.models.standard import (
     build_standard_model,
@@ -15,13 +24,19 @@ from mlx.modes.image_classification.models.standard import (
 DEFAULT_MODEL = "resnet18"
 ONE_SHOT_MODEL_NAMES = {"siamese-le-net"}
 STANDARD_MODEL_NAMES = {
+    "convnext_base",
+    "convnext_large",
+    "convnext_small",
     "convnext_tiny",
     "densenet121",
+    "draxnet",
     "efficientnet_b0",
     "mobilenet_v3_large",
     "resnet18",
     "resnet50",
 }
+
+register_standard_model("draxnet", build_draxnet)
 
 
 def supported_model_names() -> list[str]:
@@ -60,18 +75,26 @@ def build_image_classification_model(
         num_classes=num_classes,
         colored=config.get("colored", True),
         pretrained=bool(config.get("pretrained", False)),
+        config=config,
     )
 
 
 __all__ = [
     "BaseImageSimilarityModel",
+    "CAXBlock",
     "ConvActivationBlock",
     "ConvActivationPoolBlock",
+    "ConvNeXtBlock",
     "DEFAULT_MODEL",
+    "DraxNet",
+    "DropPath",
+    "LayerNorm2D",
     "ONE_SHOT_MODEL_NAMES",
     "STANDARD_MODEL_NAMES",
+    "SelfAttention2D",
     "SiameseLeNet",
     "build_image_classification_model",
+    "build_draxnet",
     "model_family_for",
     "register_standard_model",
     "supported_model_names",

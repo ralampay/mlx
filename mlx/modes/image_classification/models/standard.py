@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from collections.abc import Callable
+import inspect
 
 from torch import nn
 
@@ -14,6 +15,9 @@ SUPPORTED_TORCHVISION_MODELS = {
     "densenet121",
     "mobilenet_v3_large",
     "efficientnet_b0",
+    "convnext_small",
+    "convnext_base",
+    "convnext_large",
     "convnext_tiny",
 }
 
@@ -32,14 +36,18 @@ def build_standard_model(
     num_classes: int,
     colored: bool,
     pretrained: bool,
+    config: dict | None = None,
 ):
     custom_builder = CUSTOM_STANDARD_MODEL_BUILDERS.get(model_name)
     if custom_builder is not None:
-        return custom_builder(
-            num_classes=num_classes,
-            colored=colored,
-            pretrained=pretrained,
-        )
+        builder_params = {
+            "num_classes": num_classes,
+            "colored": colored,
+            "pretrained": pretrained,
+        }
+        if "config" in inspect.signature(custom_builder).parameters:
+            builder_params["config"] = config or {}
+        return custom_builder(**builder_params)
 
     if model_name in SUPPORTED_TORCHVISION_MODELS:
         try:
@@ -83,6 +91,15 @@ def _build_torchvision_model(*, model_name: str, torchvision_models, pretrained:
     if model_name == "convnext_tiny":
         weights = torchvision_models.ConvNeXt_Tiny_Weights.DEFAULT if pretrained else None
         return torchvision_models.convnext_tiny(weights=weights), "features.0.0"
+    if model_name == "convnext_small":
+        weights = torchvision_models.ConvNeXt_Small_Weights.DEFAULT if pretrained else None
+        return torchvision_models.convnext_small(weights=weights), "features.0.0"
+    if model_name == "convnext_base":
+        weights = torchvision_models.ConvNeXt_Base_Weights.DEFAULT if pretrained else None
+        return torchvision_models.convnext_base(weights=weights), "features.0.0"
+    if model_name == "convnext_large":
+        weights = torchvision_models.ConvNeXt_Large_Weights.DEFAULT if pretrained else None
+        return torchvision_models.convnext_large(weights=weights), "features.0.0"
 
     raise MLXUserError(f"Unsupported standard image-classification model '{model_name}'.")
 
@@ -127,7 +144,7 @@ def _replace_classifier_head(model, model_name: str, num_classes: int) -> None:
             nn.Linear(model.classifier[1].in_features, num_classes),
         )
         return
-    if model_name == "convnext_tiny":
+    if model_name.startswith("convnext_"):
         model.classifier[2] = nn.Linear(model.classifier[2].in_features, num_classes)
         return
     raise MLXUserError(f"Unsupported standard image-classification model '{model_name}'.")

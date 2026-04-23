@@ -32,6 +32,7 @@ def checkpoint_payload(
         "embedding_size": int(config.get("embedding_size", 4096)),
         "family": family,
         "input_size": tuple(config.get("input_size", (224, 224))),
+        "model_config": dict(config),
         "model_name": model_name,
         "num_classes": len(classes) if classes else None,
         "state_dict": model.state_dict(),
@@ -91,7 +92,8 @@ def load_checkpoint_bundle(config: dict[str, Any]) -> tuple[Any, dict[str, Any]]
             f"Checkpoint family '{checkpoint_family}' does not match requested model '{model_name}'."
         )
 
-    runtime_config = dict(config)
+    runtime_config = dict(checkpoint.get("model_config") or {})
+    runtime_config.update(config)
     runtime_config["colored"] = checkpoint.get("colored", runtime_config.get("colored", True))
     runtime_config["embedding_size"] = checkpoint.get(
         "embedding_size", runtime_config.get("embedding_size", 4096)

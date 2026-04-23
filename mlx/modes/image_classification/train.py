@@ -115,7 +115,7 @@ def _train_one_shot(model_name: str, config: dict[str, Any]) -> None:
 
             avg_train_loss = running_loss / len(train_loader)
             progress.advance(epoch_task)
-            avg_val_loss, val_accuracy = _validate_one_shot(model, val_loader, criterion, device)
+            avg_val_loss, val_metrics = _validate_one_shot(model, val_loader, criterion, device)
             _append_training_csv_row(
                 training_csv_path,
                 epoch=epoch + 1,
@@ -129,7 +129,10 @@ def _train_one_shot(model_name: str, config: dict[str, Any]) -> None:
                 values=[
                     ("loss", avg_train_loss),
                     ("val_loss", avg_val_loss),
-                    ("val_accuracy", val_accuracy),
+                    ("accuracy", val_metrics["accuracy"]),
+                    ("precision", val_metrics["precision"]),
+                    ("recall", val_metrics["recall"]),
+                    ("f1", val_metrics["f1"]),
                 ],
             )
 
@@ -213,12 +216,12 @@ def _train_standard(model_name: str, config: dict[str, Any]) -> None:
 
             avg_train_loss = running_loss / len(train_loader)
             progress.advance(epoch_task)
-            avg_val_loss, val_accuracy = _validate_standard(model, val_loader, criterion, device)
+            avg_val_loss, val_metrics = _validate_standard(model, val_loader, criterion, device)
             _append_training_csv_row(
                 training_csv_path,
                 epoch=epoch + 1,
                 loss=avg_train_loss,
-                metric=val_accuracy,
+                metric=val_metrics["accuracy"],
             )
             epoch_log = _append_epoch_log(
                 epoch_log,
@@ -227,7 +230,10 @@ def _train_standard(model_name: str, config: dict[str, Any]) -> None:
                 values=[
                     ("loss", avg_train_loss),
                     ("val_loss", avg_val_loss),
-                    ("val_accuracy", val_accuracy),
+                    ("accuracy", val_metrics["accuracy"]),
+                    ("precision", val_metrics["precision"]),
+                    ("recall", val_metrics["recall"]),
+                    ("f1", val_metrics["f1"]),
                 ],
             )
 
@@ -305,11 +311,11 @@ def _render_test_output(title: str, output: torch.Tensor) -> None:
     console.print(table)
 
 
-def _validate_one_shot(model, val_loader, criterion, device: str) -> tuple[float, float]:
+def _validate_one_shot(model, val_loader, criterion, device: str) -> tuple[float, dict[str, float]]:
     model.eval()
     val_loss = 0.0
-    correct = 0
-    total = 0
+    preds: list[int] = []
+    targets_all: list[int] = []
     with torch.no_grad():
         for img1, img2, label in val_loader:
             img1, img2, label = img1.to(device), img2.to(device), label.to(device)
@@ -317,18 +323,17 @@ def _validate_one_shot(model, val_loader, criterion, device: str) -> tuple[float
             loss = criterion(output, label.unsqueeze(1))
             val_loss += loss.item()
             predictions = (output >= 0.5).float().squeeze(1)
-            correct += int((predictions == label).sum().item())
-            total += int(label.numel())
+            preds.extend(int(item) for item in predictions.cpu().tolist())
+            targets_all.extend(int(item) for item in label.cpu().tolist())
     avg_loss = val_loss / len(val_loader)
-    accuracy = correct / total if total else 0.0
-    return avg_loss, accuracy
+    return avg_loss, _compute_classification_metrics(targets_all, preds)
 
 
-def _validate_standard(model, val_loader, criterion, device: str) -> tuple[float, float]:
+def _validate_standard(model, val_loader, criterion, device: str) -> tuple[float, dict[str, float]]:
     model.eval()
     val_loss = 0.0
-    correct = 0
-    total = 0
+    preds: list[int] = []
+    targets_all: list[int] = []
     with torch.no_grad():
         for images, targets in val_loader:
             images, targets = images.to(device), targets.to(device)
@@ -336,12 +341,49 @@ def _validate_standard(model, val_loader, criterion, device: str) -> tuple[float
             loss = criterion(logits, targets)
             val_loss += loss.item()
             predictions = logits.argmax(dim=1)
-            correct += int((predictions == targets).sum().item())
-            total += int(targets.numel())
+            preds.extend(int(item) for item in predictions.cpu().tolist())
+            targets_all.extend(int(item) for item in targets.cpu().tolist())
 
     avg_loss = val_loss / len(val_loader)
-    accuracy = correct / total if total else 0.0
-    return avg_loss, accuracy
+    return avg_loss, _compute_classification_metrics(targets_all, preds)
+
+
+def _compute_classification_metrics(targets: list[int], preds: list[int]) -> dict[str, float]:
+    if not targets:
+        return {
+            "accuracy": 0.0,
+            "precision": 0.0,
+            "recall": 0.0,
+            "f1": 0.0,
+        }
+
+    labels = sorted(set(targets) | set(preds))
+    total = len(targets)
+    accuracy = sum(int(target == pred) for target, pred in zip(targets, preds, strict=True)) / total
+
+    macro_precision = 0.0
+    macro_recall = 0.0
+    macro_f1 = 0.0
+    for label in labels:
+        tp = sum(1 for target, pred in zip(targets, preds, strict=True) if target == label and pred == label)
+        fp = sum(1 for target, pred in zip(targets, preds, strict=True) if target != label and pred == label)
+        fn = sum(1 for target, pred in zip(targets, preds, strict=True) if target == label and pred != label)
+
+        precision = tp / (tp + fp) if tp + fp else 0.0
+        recall = tp / (tp + fn) if tp + fn else 0.0
+        f1 = 2 * precision * recall / (precision + recall) if precision + recall else 0.0
+
+        macro_precision += precision
+        macro_recall += recall
+        macro_f1 += f1
+
+    num_labels = len(labels)
+    return {
+        "accuracy": accuracy,
+        "precision": macro_precision / num_labels,
+        "recall": macro_recall / num_labels,
+        "f1": macro_f1 / num_labels,
+    }
 
 
 def _build_progress(*, epochs: int, train_loader_size: int) -> Progress:

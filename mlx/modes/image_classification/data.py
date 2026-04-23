@@ -186,11 +186,33 @@ def _default_classification_transform(
     *,
     input_size: Tuple[int, int],
     colored: bool,
+    is_training: bool = False,
 ):
     transform_steps = [transforms.Resize(input_size)]
+    if is_training:
+        transform_steps.extend(
+            [
+                transforms.RandomHorizontalFlip(),
+                transforms.RandomRotation(10),
+            ]
+        )
     if not colored:
         transform_steps.append(transforms.Grayscale(num_output_channels=1))
     transform_steps.append(transforms.ToTensor())
+    if colored:
+        transform_steps.append(
+            transforms.Normalize(
+                mean=(0.485, 0.456, 0.406),
+                std=(0.229, 0.224, 0.225),
+            )
+        )
+    else:
+        transform_steps.append(
+            transforms.Normalize(
+                mean=(0.5,),
+                std=(0.5,),
+            )
+        )
     return transforms.Compose(transform_steps)
 
 
@@ -248,14 +270,20 @@ def load_standard_classification_datasets(
     if not label_names:
         raise MLXUserError(f"No label directories were found under: {train_dir}")
 
-    transform = _default_classification_transform(
+    train_transform = _default_classification_transform(
         input_size=input_size,
         colored=colored,
+        is_training=True,
+    )
+    val_transform = _default_classification_transform(
+        input_size=input_size,
+        colored=colored,
+        is_training=False,
     )
     train_dataset = ImageClassificationDataset(
         dataset_root,
         split="train",
-        transform=transform,
+        transform=train_transform,
         input_size=input_size,
         colored=colored,
         label_names=label_names,
@@ -263,7 +291,7 @@ def load_standard_classification_datasets(
     val_dataset = ImageClassificationDataset(
         dataset_root,
         split="val",
-        transform=transform,
+        transform=val_transform,
         input_size=input_size,
         colored=colored,
         label_names=label_names,

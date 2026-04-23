@@ -6,10 +6,10 @@ import torch
 from torch import nn
 
 from mlx.core.exceptions import MLXUserError
-from mlx.modes.image_classification.models.blocks import CAXBlock
+from mlx.modes.image_classification.models.blocks import DraxBlock
 
 
-class DraxBlock(nn.Module):
+class BasicResidualBlock(nn.Module):
     expansion = 1
 
     def __init__(
@@ -52,7 +52,7 @@ class DraxBlock(nn.Module):
         return self.relu(x)
 
 
-class CAXResidualBlock(nn.Module):
+class DraxResidualBlock(nn.Module):
     expansion = 1
 
     def __init__(
@@ -76,7 +76,7 @@ class CAXResidualBlock(nn.Module):
         )
         self.bn1 = nn.BatchNorm2d(out_channels)
         self.relu = nn.ReLU(inplace=True)
-        self.cax = CAXBlock(
+        self.drax = DraxBlock(
             dim=out_channels,
             use_attention=use_attention,
             efficient=efficient_attention,
@@ -92,7 +92,7 @@ class CAXResidualBlock(nn.Module):
         x = self.bn1(x)
         x = self.relu(x)
 
-        x = self.cax(x)
+        x = self.drax(x)
         x = self.proj(x)
         x = self.bn2(x)
 
@@ -109,9 +109,9 @@ class DraxNet(nn.Module):
         *,
         in_channels: int,
         num_classes: int,
-        block: type[DraxBlock] = DraxBlock,
+        block: type[BasicResidualBlock] = BasicResidualBlock,
         layers: Sequence[int] = (2, 2, 2, 2),
-        stage_block_types: Sequence[str] = ("basic", "basic", "basic", "cax"),
+        stage_block_types: Sequence[str] = ("basic", "basic", "basic", "drax"),
         zero_init_residual: bool = False,
     ) -> None:
         super().__init__()
@@ -139,17 +139,17 @@ class DraxNet(nn.Module):
 
         if zero_init_residual:
             for module in self.modules():
-                if isinstance(module, DraxBlock):
+                if isinstance(module, BasicResidualBlock):
                     nn.init.constant_(module.bn2.weight, 0)
-                elif isinstance(module, CAXResidualBlock):
+                elif isinstance(module, DraxResidualBlock):
                     nn.init.constant_(module.bn2.weight, 0)
 
-    def _resolve_stage_block(self, block_type: str, *, default_block: type[DraxBlock]) -> type[nn.Module]:
+    def _resolve_stage_block(self, block_type: str, *, default_block: type[BasicResidualBlock]) -> type[nn.Module]:
         normalized = block_type.strip().lower()
         if normalized == "basic":
             return default_block
-        if normalized == "cax":
-            return CAXResidualBlock
+        if normalized in {"cax", "drax"}:
+            return DraxResidualBlock
         raise ValueError(f"Unsupported DraxNet stage block type '{block_type}'.")
 
     def _make_layer(
@@ -209,11 +209,11 @@ def build_draxnet(*, num_classes: int, colored: bool, pretrained: bool, config: 
     model = DraxNet(
         in_channels=3 if colored else 1,
         num_classes=num_classes,
-        stage_block_types=tuple(config.get("draxnet_stage_blocks", "basic,basic,basic,cax").split(",")),
+        stage_block_types=tuple(config.get("draxnet_stage_blocks", "basic,basic,basic,drax").split(",")),
     )
 
     if pretrained:
-        if tuple(config.get("draxnet_stage_blocks", "basic,basic,basic,cax").split(",")) != ("basic", "basic", "basic", "basic"):
+        if tuple(config.get("draxnet_stage_blocks", "basic,basic,basic,drax").split(",")) != ("basic", "basic", "basic", "basic"):
             raise MLXUserError("Pretrained DraxNet weights currently require all stages to use basic blocks.")
         try:
             from torchvision import models as torchvision_models

@@ -40,6 +40,10 @@ All standard classifiers share the same preprocessing family:
 - RGB normalization uses ImageNet mean/std: `(0.485, 0.456, 0.406)` / `(0.229, 0.224, 0.225)`
 - Grayscale normalization uses mean/std: `(0.5,)` / `(0.5,)`
 
+Experimental custom-block documentation:
+
+- [Experimental Blocks](./experimental_blocks.md)
+
 ## Dataset Expectations
 
 ### Training
@@ -146,7 +150,7 @@ Parameter counts for the available standard classifiers, using the current imple
 | `mobilenet_v3_large` | 5,483,032 | <ul><li>Mobile-oriented architecture</li><li>Uses inverted residual blocks</li><li>Good low-parameter benchmark</li></ul> |
 | `densenet121` | 7,978,856 | <ul><li>Feature reuse through dense connections</li><li>Lower parameter count than ResNet-18</li><li>Strong classical CNN baseline</li></ul> |
 | `resnet18` | 11,689,512 | <ul><li>Smallest ResNet variant available here</li><li>Clean apples-to-apples baseline for `draxnet`</li><li>Standard residual basic blocks</li></ul> |
-| `draxnet` | 16,994,856 | <ul><li>Local `ResNet-18`-style implementation</li><li>Current default uses `CAXResidualBlock` in `layer4`</li><li>Designed for custom block experimentation</li></ul> |
+| `draxnet` | 16,994,856 | <ul><li>Local `ResNet-18`-style implementation</li><li>Current default uses `DraxResidualBlock` in `layer4`</li><li>Designed for custom block experimentation</li></ul> |
 | `resnet50` | 25,557,032 | <ul><li>Deeper ResNet with bottleneck blocks</li><li>Common strong baseline</li><li>Larger than `draxnet` and `resnet18`</li></ul> |
 | `convnext_tiny` | 28,589,128 | <ul><li>Smallest ConvNeXt variant available here</li><li>Modern conv backbone</li><li>Larger than `resnet50` in parameter count</li></ul> |
 | `convnext_small` | 50,223,688 | <ul><li>Mid-sized ConvNeXt variant</li><li>Substantially larger than `convnext_tiny`</li><li>Useful for capacity scaling comparisons</li></ul> |
@@ -155,9 +159,21 @@ Parameter counts for the available standard classifiers, using the current imple
 
 ### DraxNet Notes
 
-`draxnet` is currently a local `ResNet-18` implementation.
+`draxnet` is currently a local `ResNet-18`-style backbone with a configurable per-stage block layout.
 
-This gives the project a stable baseline architecture that matches `resnet18`, but keeps the code local so custom residual blocks can be introduced later without depending on `torchvision` internals.
+Current default:
+
+```text
+basic,basic,basic,drax
+```
+
+That means the first three stages use plain residual blocks and `layer4` uses `DraxResidualBlock`.
+
+`Drax` stands for `Dynamic Residual Attention eXchange`.
+
+Detailed architecture, naming, and benchmarking notes are documented in:
+
+- [Experimental Blocks](./experimental_blocks.md)
 
 ### One-Shot Classification
 

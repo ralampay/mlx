@@ -5,10 +5,10 @@ from typing import Any
 from mlx.core.exceptions import MLXUserError
 from mlx.modes.image_classification.models.base import BaseImageSimilarityModel
 from mlx.modes.image_classification.models.blocks import (
-    CAXBlock,
     ConvActivationBlock,
     ConvActivationPoolBlock,
     ConvNeXtBlock,
+    DraxBlock,
     DropPath,
     LayerNorm2D,
     SelfAttention2D,
@@ -81,11 +81,11 @@ def build_image_classification_model(
 
 __all__ = [
     "BaseImageSimilarityModel",
-    "CAXBlock",
     "ConvActivationBlock",
     "ConvActivationPoolBlock",
     "ConvNeXtBlock",
     "DEFAULT_MODEL",
+    "DraxBlock",
     "DraxNet",
     "DropPath",
     "LayerNorm2D",

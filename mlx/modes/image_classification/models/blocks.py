@@ -138,7 +138,7 @@ def _resolve_efficient_dim(dim: int) -> int:
     return reduced_dim
 
 
-class CAXBlock(nn.Module):
+class DraxBlock(nn.Module):
     def __init__(
         self,
         dim: int = 128,

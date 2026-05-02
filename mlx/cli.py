@@ -111,7 +111,7 @@ def _render_help() -> None:
     options.add_row("--model", "None", "Model identifier, YAML path, or architecture name.")
     options.add_row("--action", "mode-specific", "Sub-action such as train, infer-video, benchmark, or build-dataset.")
     options.add_row("--dataset", "./tmp/dataset", "Dataset root used by training and dataset utilities.")
-    options.add_row("--output", "None", "Output directory written by train. Image classification stores artifacts inside it.")
+    options.add_row("--output", "None", "Output directory written by train or benchmark. Image classification stores artifacts inside it.")
     options.add_row("--train-count", "None", "Images per label assigned to the train split when building classification datasets.")
     options.add_row("--val-count", "None", "Images per label assigned to the val split when building classification datasets.")
     options.add_row("--test-count", "None", "Images per label assigned to the test split when building classification datasets.")

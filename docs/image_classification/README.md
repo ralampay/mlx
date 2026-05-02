@@ -346,10 +346,18 @@ python -m mlx \
     --action benchmark \
     --model-path ~/datasets/animals/checkpoints/best_epoch_12.pt \
     --dataset ~/datasets/animals/test \
+    --output ./benchmark-results \
     --device cpu
 ```
 
-For standard classifiers, `benchmark` loads class labels from the checkpoint metadata and evaluates accuracy, precision, recall, and F1 against the labelled images in `--dataset`. If `--dataset` points to the dataset root and a `test/` directory exists, MLX evaluates that `test/` directory automatically.
+For standard classifiers, `benchmark` loads class labels from the checkpoint metadata and evaluates accuracy, precision, recall, F1, and ROC AUC against the labelled images in `--dataset`. If `--dataset` points to the dataset root and a `test/` directory exists, MLX evaluates that `test/` directory automatically.
+
+If `--output` is set for `benchmark`, MLX writes benchmark artifacts to that directory:
+
+- `metrics.csv`: aggregate metrics including accuracy, precision, recall, F1, and available ROC AUC values
+- `confusion_matrix.csv`: raw confusion-matrix counts with multi-class support
+- `confusion_matrix.png`: rendered confusion-matrix heatmap
+- `roc_curve.png`: ROC curve plot. For multi-class classification, MLX renders one-vs-rest curves per class.
 
 ### One-Shot Classification
 
@@ -361,10 +369,11 @@ python -m mlx \
     --action benchmark \
     --dataset ~/datasets/omniglot/test \
     --model-path ~/datasets/omniglot/checkpoints/best_epoch_10.pt \
+    --output ./benchmark-results \
     --device cpu
 ```
 
-For one-shot models, `benchmark` requires `--model-path` and evaluates similarity pairs built from the provided dataset directory.
+For one-shot models, `benchmark` requires `--model-path` and evaluates similarity pairs built from the provided dataset directory. When `--output` is set, MLX writes the same benchmark artifacts, using binary confusion-matrix and ROC outputs.
 
 ## Image Inference
 

@@ -258,6 +258,35 @@ python -m mlx \
     --dataset ~/datasets/animals-raw
 ```
 
+To build the split dataset in one command without prompts, pass the split counts and output path:
+
+```bash
+python -m mlx \
+    --mode image_classification \
+    --action build-dataset \
+    --dataset ~/datasets/animals-raw \
+    --output ~/datasets/animals \
+    --train-count 100 \
+    --val-count 20 \
+    --test-count 20 \
+    --overwrite \
+    --seed 42
+```
+
+Non-interactive build-dataset flags:
+
+- `--train-count`: images per label copied into `train/`
+- `--val-count`: images per label copied into `val/`
+- `--test-count`: images per label copied into `test/`
+- `--output`: destination directory for the split dataset
+- `--overwrite`: replace an existing output directory without prompting
+- `--seed` / `--random-seed`: deterministic shuffle seed for reproducible splits
+
+Behavior notes:
+
+- If any of `--train-count`, `--val-count`, `--test-count`, or `--output` are omitted, MLX prompts only for the missing values.
+- If `--output` already exists in non-interactive mode, MLX raises an error unless `--overwrite` is set.
+
 Example interactive flow:
 
 ```text

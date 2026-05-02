@@ -322,12 +322,28 @@ def _label_directories(dataset_path: Path) -> List[Path]:
     return sorted(path for path in dataset_path.iterdir() if path.is_dir())
 
 
-def build_image_classification_dataset(dataset_path: str) -> None:
+def _resolve_split_count(value: int | None, prompt: str) -> int:
+    return prompt_int(prompt) if value is None else value
+
+
+def build_image_classification_dataset(
+    dataset_path: str,
+    *,
+    train_count: int | None = None,
+    val_count: int | None = None,
+    test_count: int | None = None,
+    output_path: str | os.PathLike[str] | None = None,
+    overwrite: bool = False,
+    random_seed: int | None = None,
+) -> None:
     dataset_root = Path(dataset_path)
     if not dataset_root.exists():
         raise MLXUserError(f"Dataset path not found: {dataset_root}")
 
     label_dirs = _label_directories(dataset_root)
+    if not label_dirs:
+        raise MLXUserError(f"No label directories were found under: {dataset_root}")
+
     print_info(f"Found {len(label_dirs)} label(s) under {dataset_root.name}")
 
     table = Table(title="Label Summary", show_lines=True)
@@ -342,9 +358,12 @@ def build_image_classification_dataset(dataset_path: str) -> None:
 
     console.print(table)
 
-    train_count = prompt_int("How many images per label for TRAIN?")
-    val_count = prompt_int("How many images per label for VAL?")
-    test_count = prompt_int("How many images per label for TEST?")
+    train_count = _resolve_split_count(train_count, "How many images per label for TRAIN?")
+    val_count = _resolve_split_count(val_count, "How many images per label for VAL?")
+    test_count = _resolve_split_count(test_count, "How many images per label for TEST?")
+
+    if train_count < 0 or val_count < 0 or test_count < 0:
+        raise MLXUserError("Split counts must be zero or greater.")
 
     total_needed = train_count + val_count + test_count
     for label, count in label_counts.items():
@@ -353,19 +372,35 @@ def build_image_classification_dataset(dataset_path: str) -> None:
                 f"Label '{label}' has only {count} images, less than requested total {total_needed}."
             )
 
-    output_path = Path(prompt_text("Enter output path for split dataset"))
-    if output_path.exists():
-        confirm_action(f"Output directory '{output_path}' already exists. Overwrite?", abort=True)
-        shutil.rmtree(output_path)
-    output_path.mkdir(parents=True, exist_ok=True)
+    interactive_output = output_path is None
+    resolved_output_path = (
+        Path(prompt_text("Enter output path for split dataset"))
+        if interactive_output
+        else Path(output_path)
+    )
+    if resolved_output_path.exists():
+        if interactive_output and not overwrite:
+            confirm_action(
+                f"Output directory '{resolved_output_path}' already exists. Overwrite?",
+                abort=True,
+            )
+        elif not overwrite:
+            raise MLXUserError(
+                f"Output directory '{resolved_output_path}' already exists. "
+                "Re-run with --overwrite to replace it."
+            )
+        shutil.rmtree(resolved_output_path)
+    resolved_output_path.mkdir(parents=True, exist_ok=True)
 
     for split in ("train", "val", "test"):
-        (output_path / split).mkdir(exist_ok=True)
+        (resolved_output_path / split).mkdir(exist_ok=True)
+
+    rng = random.Random(random_seed)
 
     print_info("Splitting dataset...")
     for label_dir in label_dirs:
         images = _iter_image_paths(label_dir)
-        random.shuffle(images)
+        rng.shuffle(images)
         splits = {
             "train": images[:train_count],
             "val": images[train_count : train_count + val_count],
@@ -375,12 +410,12 @@ def build_image_classification_dataset(dataset_path: str) -> None:
         }
 
         for split, split_images in splits.items():
-            out_dir = output_path / split / label_dir.name
+            out_dir = resolved_output_path / split / label_dir.name
             out_dir.mkdir(parents=True, exist_ok=True)
             for image_path in split_images:
                 shutil.copy2(image_path, out_dir / image_path.name)
 
-    print_success(f"Dataset created successfully at {output_path}")
+    print_success(f"Dataset created successfully at {resolved_output_path}")
 
 
 def resolve_evaluation_dir(dataset_path: os.PathLike[str] | str) -> Path:

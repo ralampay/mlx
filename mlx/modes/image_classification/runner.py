@@ -31,7 +31,15 @@ DEFAULT_CONFIG = {
 
 ACTION_HANDLERS = {
     "benchmark": benchmark_image_classification,
-    "build-dataset": lambda config: build_image_classification_dataset(config["dataset_path"]),
+    "build-dataset": lambda config: build_image_classification_dataset(
+        config["dataset_path"],
+        train_count=config.get("train_count"),
+        val_count=config.get("val_count"),
+        test_count=config.get("test_count"),
+        output_path=config.get("output_path"),
+        overwrite=config.get("overwrite", False),
+        random_seed=config.get("random_seed"),
+    ),
     "infer-image": infer_image_classification,
     "test": smoke_test_image_classification,
     "train": train_image_classification,

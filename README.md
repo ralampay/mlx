@@ -76,6 +76,7 @@ python -m mlx --mode object_detection --action infer-camera --model ultralytics/
 python -m mlx --mode image_classification --action train --output ./artifacts/resnet18 --dataset ./dataset --model resnet18 --seed 42
 python -m mlx --mode image_classification --action train --output ./artifacts/siamese --dataset ./omniglot --model siamese-le-net --seed 42
 python -m mlx --mode image_classification --action build-dataset --dataset ./raw-dataset
+python -m mlx --mode image_classification --action build-dataset --dataset ./raw-dataset --output ./dataset --train-count 100 --val-count 20 --test-count 20 --overwrite --seed 42
 python -m mlx --mode segmentation --action train --dataset ./dataset --model unet --output ./unet-seg.pt
 python -m mlx --mode segmentation --action infer-image --model-path ./unet-seg.pt --input-img ./sample.jpg
 ```

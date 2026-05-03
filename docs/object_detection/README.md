@@ -21,7 +21,17 @@ The source is split by responsibility:
 
 ## Dataset Format
 
-Training expects a YOLO-style dataset root containing `data.yaml` plus the usual image and label folders referenced by that manifest.
+Training accepts any of these dataset sources:
+
+- a local YOLO dataset root containing `data.yaml`
+- a direct dataset YAML path
+- a built-in Ultralytics dataset alias such as `coco8` or `coco128`
+
+For this repository, `coco8` is the best default example dataset. It is small, ships with an auto-download manifest in Ultralytics, and is fast enough for smoke-testing both `yolo26` and `draxnet-yolo26`.
+
+If you want a slightly less trivial quick-start dataset, use `coco128`. For real training, point `--dataset` to your own YOLO-format dataset root.
+
+Local dataset example:
 
 Minimal example:
 
@@ -34,32 +44,58 @@ names:
   1: class-b
 ```
 
-Pass `--dataset-path` as the directory that contains `data.yaml`.
+Pass `--dataset-path` as the directory that contains `data.yaml`, or pass `--dataset coco8` / `--dataset coco128` to use a built-in dataset YAML.
+
+## Model Selection
+
+`--model` accepts either a YAML path or one of the friendly aliases resolved by `mlx`:
+
+- `yolo26`
+- `yolov26`
+- `draxnet-yolo26`
+
+`draxnet-yolo26` maps to the custom DraxNet backbone YAML added in the `ralampay/ultralytics` fork.
 
 ## Training
 
-Example:
+Baseline YOLO26 example:
 
 ```bash
 python -m mlx \
     --mode object-detection \
     --action train \
-    --dataset-path ~/datasets/roboflow-yolo \
-    --model ultralytics/cfg/models/ext/cad_yolo12.yaml \
-    --epochs 100 \
-    --batch-size 16 \
-    --device cuda:0
+    --dataset coco8 \
+    --model yolo26 \
+    --epochs 10 \
+    --batch-size 8 \
+    --device cuda:0 \
+    --output ./runs/yolo26
+```
+
+DraxNet-backed YOLO26 example:
+
+```bash
+python -m mlx \
+    --mode object-detection \
+    --action train \
+    --dataset coco8 \
+    --model draxnet-yolo26 \
+    --epochs 10 \
+    --batch-size 8 \
+    --device cuda:0 \
+    --output ./runs/draxnet-yolo26
 ```
 
 Important arguments:
 
-- `--dataset-path`: required YOLO dataset root.
-- `--model`: required architecture YAML.
+- `--dataset` / `--dataset-path`: required dataset source. Use `coco8` for the documented smoke-test path.
+- `--model`: required architecture YAML or alias such as `yolo26` or `draxnet-yolo26`.
 - `--model-path`: optional checkpoint for warm-start training.
 - `--epochs`, `--batch-size`, `--device`: core training controls.
 - `--pretrained`: enable Ultralytics pretrained initialization.
 - `--lr0`, `--optimizer`, `--nbs`, `--warmup-epochs`, `--loss-clip`, `--amp`: trainer overrides.
-- `--run-name`: output folder name under `<dataset-path>/runs`.
+- `--output`: optional Ultralytics project directory. If omitted for a local dataset root, runs go under `<dataset>/runs`. Otherwise they default to `./runs/object_detection`.
+- `--run-name`: output folder name inside the Ultralytics project directory.
 
 ## Webcam Inference
 
@@ -69,8 +105,8 @@ Example:
 python -m mlx \
     --mode object-detection \
     --action infer-camera \
-    --model ultralytics/cfg/models/ext/cad_yolo12.yaml \
-    --model-path ./runs/train/weights/best.pt \
+    --model draxnet-yolo26 \
+    --model-path ./runs/draxnet-yolo26/exp/weights/best.pt \
     --device cpu \
     --confidence 0.35 \
     --camera-index 0
@@ -78,7 +114,7 @@ python -m mlx \
 
 Important arguments:
 
-- `--model`: required architecture YAML for rebuilding the network.
+- `--model`: required architecture YAML or alias for rebuilding the network.
 - `--model-path`: required trained checkpoint.
 - `--confidence`: minimum confidence threshold to render.
 - `--camera-index`: OpenCV camera device index.
@@ -91,8 +127,8 @@ Example:
 python -m mlx \
     --mode object-detection \
     --action infer-video \
-    --model ultralytics/cfg/models/ext/cad_yolo12.yaml \
-    --model-path ./runs/train/weights/best.pt \
+    --model draxnet-yolo26 \
+    --model-path ./runs/draxnet-yolo26/exp/weights/best.pt \
     --file-path ~/videos/sample.mp4 \
     --device cpu \
     --confidence 0.35
@@ -106,7 +142,7 @@ Additional arguments:
 
 ## Dependencies
 
-- `ultralytics`
+- `ultralytics` from the `ralampay/ultralytics` fork, because `draxnet-yolo26` is defined there
 - `opencv-python` for webcam or video inference
 
 Run `python -m mlx --help` for the full CLI reference.

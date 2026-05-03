@@ -1,35 +1,31 @@
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Any
+from typing import Any, Optional
 
 from rich.panel import Panel
 from rich.table import Table
 
-from mlx.core.exceptions import MLXUserError
 from mlx.core.ui import console, print_info, print_success
-from mlx.modes.object_detection.ultralytics.utils import initialize_model, resolve_model_paths
+from mlx.modes.object_detection.ultralytics.utils import (
+    initialize_model,
+    resolve_dataset_source,
+    resolve_model_paths,
+)
 
 
 def train_object_detection(config: dict[str, Any]):
-    dataset_dir = Path(config.get("dataset_path", "")).expanduser()
-    if not dataset_dir.exists():
-        raise MLXUserError(f"Dataset path does not exist: {dataset_dir}")
-
-    data_yaml = dataset_dir / "data.yaml"
-    if not data_yaml.exists():
-        raise MLXUserError(f"Expected YOLO data.yaml at: {data_yaml}")
-
     resolved_cfg, resolved_weights = resolve_model_paths(
         config,
         require_yaml=True,
         require_weights=False,
     )
+    resolved_dataset = resolve_dataset_source(config)
     epochs = config.get("epochs", 100)
     batch_size = config.get("batch_size", 16)
     device = config.get("device", "cpu")
     imgsz = max(config.get("height", 640), config.get("width", 640))
-    project_dir = dataset_dir / "runs"
+    project_dir = resolved_dataset.project_dir
     project_dir.mkdir(parents=True, exist_ok=True)
     run_name = config.get("run_name", "mlx-ultralytics")
     lr0 = config.get("lr0")
@@ -39,8 +35,8 @@ def train_object_detection(config: dict[str, Any]):
     console.print(_training_summary_table(
         resolved_cfg=resolved_cfg,
         resolved_weights=resolved_weights,
-        dataset_dir=dataset_dir,
-        data_yaml=data_yaml,
+        dataset_source=resolved_dataset.source,
+        dataset_root=resolved_dataset.root_dir,
         epochs=epochs,
         batch_size=batch_size,
         device=device,
@@ -67,7 +63,7 @@ def train_object_detection(config: dict[str, Any]):
 
     train_kwargs = {
         "batch": batch_size,
-        "data": str(data_yaml),
+        "data": resolved_dataset.data,
         "device": device,
         "epochs": epochs,
         "exist_ok": True,
@@ -93,8 +89,8 @@ def _training_summary_table(
     *,
     resolved_cfg,
     resolved_weights,
-    dataset_dir: Path,
-    data_yaml: Path,
+    dataset_source: str,
+    dataset_root: Optional[Path],
     epochs: int,
     batch_size: int,
     device: str,
@@ -108,8 +104,8 @@ def _training_summary_table(
     summary.add_column("Value", style="magenta")
     summary.add_row("Init Weights", str(resolved_weights) if resolved_weights else "random init")
     summary.add_row("Model YAML", str(resolved_cfg) if resolved_cfg else "not set")
-    summary.add_row("Dataset", str(dataset_dir))
-    summary.add_row("Data YAML", str(data_yaml))
+    summary.add_row("Dataset", dataset_source)
+    summary.add_row("Dataset Root", str(dataset_root) if dataset_root else "managed by dataset YAML")
     summary.add_row("Epochs", str(epochs))
     summary.add_row("Batch Size", str(batch_size))
     summary.add_row("Device", str(device))

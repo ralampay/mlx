@@ -71,8 +71,9 @@ python -m mlx --mode <mode-name> --action <action-name>
 Examples:
 
 ```bash
-python -m mlx --mode object_detection --action train --dataset-path ./dataset --model ultralytics/cfg/models/ext/cad_yolo12.yaml
-python -m mlx --mode object_detection --action infer-camera --model ultralytics/cfg/models/ext/cad_yolo12.yaml --model-path ./runs/train/weights/best.pt
+python -m mlx --mode object_detection --action train --dataset coco8 --model yolo26
+python -m mlx --mode object_detection --action train --dataset coco8 --model draxnet-yolo26 --output ./runs/draxnet
+python -m mlx --mode object_detection --action infer-camera --model draxnet-yolo26 --model-path ./runs/draxnet/exp/weights/best.pt
 python -m mlx --mode image_classification --action train --output ./artifacts/resnet18 --dataset ./dataset --model resnet18 --seed 42
 python -m mlx --mode image_classification --action train --output ./artifacts/siamese --dataset ./omniglot --model siamese-le-net --seed 42
 python -m mlx --mode image_classification --action build-dataset --dataset ./raw-dataset
@@ -82,6 +83,8 @@ python -m mlx --mode segmentation --action infer-image --model-path ./unet-seg.p
 ```
 
 Run `python -m mlx --help` for the complete CLI reference.
+
+For object detection, `--model` now accepts built-in aliases such as `yolo26`, `yolov26`, and `draxnet-yolo26`. `--dataset` or `--dataset-path` accepts a local YOLO dataset root, a dataset YAML, or built-in Ultralytics aliases such as `coco8` and `coco128`.
 
 ## Modes
 

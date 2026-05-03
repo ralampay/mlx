@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import hashlib
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Optional, Union
 
@@ -24,6 +25,70 @@ except ImportError as exc:
     ) from exc
 
 
+MODEL_ALIASES = {
+    "yolo26": "yolo26.yaml",
+    "yolo26.yaml": "yolo26.yaml",
+    "yolov26": "yolo26.yaml",
+    "yolov26.yaml": "yolo26.yaml",
+    "draxnet-yolo26": "draxnet-yolo26.yaml",
+    "draxnet-yolo26.yaml": "draxnet-yolo26.yaml",
+}
+
+DATASET_ALIASES = {
+    "coco8": "coco8.yaml",
+    "coco8.yaml": "coco8.yaml",
+    "coco128": "coco128.yaml",
+    "coco128.yaml": "coco128.yaml",
+}
+
+
+@dataclass(frozen=True)
+class ResolvedDataset:
+    data: str
+    source: str
+    root_dir: Optional[Path]
+    project_dir: Path
+
+
+def _ultralytics_package_root() -> Path:
+    return Path(ultralytics.__file__).resolve().parent
+
+
+def _resolve_with_candidates(candidates: list[Path]) -> Optional[Path]:
+    for candidate in candidates:
+        if candidate.exists():
+            return candidate.resolve()
+    return None
+
+
+def _resolve_yaml_in_package(
+    source: str,
+    *,
+    package_subdir: str,
+    aliases: dict[str, str],
+) -> Optional[Path]:
+    package_root = _ultralytics_package_root()
+    normalized = aliases.get(source.lower(), source)
+    candidates = []
+    expanded = Path(normalized).expanduser()
+
+    if expanded.is_absolute():
+        candidates.append(expanded)
+    else:
+        candidates.extend((Path.cwd() / expanded, package_root / expanded))
+        if expanded.parts and expanded.parts[0] == "ultralytics":
+            candidates.append(package_root / Path(*expanded.parts[1:]))
+        package_dir = package_root / package_subdir
+        candidates.append(package_dir / expanded.name)
+        if expanded.suffix:
+            candidates.extend(package_dir.rglob(expanded.name))
+        else:
+            candidates.extend(package_dir.rglob(f"{expanded.name}.yaml"))
+            candidates.extend(package_dir.rglob(f"{expanded.name}.yml"))
+
+    return _resolve_with_candidates(candidates)
+
+
 def resolve_weights_source(weights_source: Union[str, Path, None]) -> Union[str, Path, None]:
     if weights_source is None:
         return None
@@ -37,17 +102,21 @@ def resolve_weights_source(weights_source: Union[str, Path, None]) -> Union[str,
         return expanded
 
     if expanded.suffix in {".yaml", ".yml"}:
-        package_root = Path(ultralytics.__file__).resolve().parent
-        candidates = []
-        if expanded.is_absolute():
-            candidates.append(expanded)
-        else:
-            candidates.extend((Path.cwd() / expanded, package_root / expanded))
-            if expanded.parts and expanded.parts[0] == "ultralytics":
-                candidates.append(package_root / Path(*expanded.parts[1:]))
-        for candidate in candidates:
-            if candidate.exists():
-                return candidate
+        resolved_yaml = _resolve_yaml_in_package(
+            weights_source,
+            package_subdir="cfg/models",
+            aliases=MODEL_ALIASES,
+        )
+        if resolved_yaml is not None:
+            return resolved_yaml
+
+    resolved_model = _resolve_yaml_in_package(
+        weights_source,
+        package_subdir="cfg/models",
+        aliases=MODEL_ALIASES,
+    )
+    if resolved_model is not None:
+        return resolved_model
 
     return weights_source
 
@@ -73,6 +142,67 @@ def resolve_model_paths(
         raise MLXUserError(f"Model weights not found: {resolved_weights}")
 
     return resolved_cfg, resolved_weights
+
+
+def resolve_dataset_source(config: dict[str, Any]) -> ResolvedDataset:
+    dataset_source = config.get("dataset_path", "")
+    if not dataset_source:
+        raise MLXUserError("This action requires --dataset or --dataset-path.")
+
+    output_path = config.get("output_path")
+    dataset_path = Path(dataset_source).expanduser()
+    if dataset_path.exists():
+        if dataset_path.is_dir():
+            data_yaml = dataset_path / "data.yaml"
+            if not data_yaml.exists():
+                raise MLXUserError(f"Expected YOLO data.yaml at: {data_yaml}")
+            project_dir = (
+                Path(output_path).expanduser()
+                if output_path
+                else dataset_path / "runs"
+            )
+            return ResolvedDataset(
+                data=str(data_yaml),
+                source=str(data_yaml),
+                root_dir=dataset_path.resolve(),
+                project_dir=project_dir.resolve(),
+            )
+
+        if dataset_path.suffix in {".yaml", ".yml"}:
+            project_dir = (
+                Path(output_path).expanduser()
+                if output_path
+                else Path.cwd() / "runs" / "object_detection"
+            )
+            return ResolvedDataset(
+                data=str(dataset_path.resolve()),
+                source=str(dataset_path.resolve()),
+                root_dir=None,
+                project_dir=project_dir.resolve(),
+            )
+
+    resolved_dataset_yaml = _resolve_yaml_in_package(
+        dataset_source,
+        package_subdir="cfg/datasets",
+        aliases=DATASET_ALIASES,
+    )
+    if resolved_dataset_yaml is None:
+        raise MLXUserError(
+            "Dataset source not found. Pass a YOLO dataset directory containing data.yaml, "
+            "a dataset YAML path, or a built-in alias such as 'coco8' or 'coco128'."
+        )
+
+    project_dir = (
+        Path(output_path).expanduser()
+        if output_path
+        else Path.cwd() / "runs" / "object_detection"
+    )
+    return ResolvedDataset(
+        data=str(resolved_dataset_yaml),
+        source=str(resolved_dataset_yaml),
+        root_dir=None,
+        project_dir=project_dir.resolve(),
+    )
 
 
 def initialize_model(

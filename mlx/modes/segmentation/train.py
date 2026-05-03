@@ -18,7 +18,6 @@ from rich.table import Table
 from torch import nn, optim
 from torch.utils.data import DataLoader
 
-from mlx.core.random import apply_torch_seed
 from mlx.core.ui import console, print_info, print_success
 from mlx.modes.segmentation.data import load_segmentation_datasets
 from mlx.modes.segmentation.models import build_segmentation_model
@@ -33,7 +32,6 @@ from mlx.modes.segmentation.utils import (
 
 
 def train_segmentation(config: dict[str, Any]) -> None:
-    apply_torch_seed(config.get("random_seed"))
     model_name = resolve_model_name(config)
     device = config["device"]
     batch_size = config.get("batch_size", 4)
@@ -125,7 +123,6 @@ def train_segmentation(config: dict[str, Any]) -> None:
 
 
 def smoke_test_segmentation(config: dict[str, Any]) -> None:
-    apply_torch_seed(config.get("random_seed"))
     model_name = resolve_model_name(config)
     batch = config["batch_size"]
     width, height = config["input_size"]

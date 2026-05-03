@@ -8,6 +8,7 @@ from rich.panel import Panel
 from rich.table import Table
 
 from mlx.core.exceptions import MLXAbort, MLXUserError
+from mlx.core.random import apply_global_seed
 from mlx.core.ui import console, print_error, print_startup, print_warning
 
 try:
@@ -134,7 +135,7 @@ def _render_help() -> None:
     options.add_row("--nbs", "64", "Nominal batch size for LR scaling.")
     options.add_row("--warmup-epochs", "3.0", "Warmup epoch count.")
     options.add_row("--loss-clip", "None", "Optional gradient clipping value.")
-    options.add_row("--seed / --random-seed", "None", "PyTorch random seed used for reproducible experiments.")
+    options.add_row("--seed / --random-seed", "None", "Global random seed applied across Python, NumPy, and PyTorch.")
     options.add_row("--run-name", "None", "Optional Ultralytics run folder name.")
     options.add_row("--num-classes", "2", "Number of segmentation classes expected in the masks.")
     options.add_row("--mask-threshold", "0.5", "Threshold used when rendering binary segmentation masks.")
@@ -200,6 +201,7 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
         return 2
 
     config = _build_config(namespace)
+    apply_global_seed(config.get("random_seed"))
     print_startup(config["mode"], config.get("action"), config["model"])
 
     try:

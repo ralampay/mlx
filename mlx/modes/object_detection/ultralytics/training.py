@@ -7,13 +7,11 @@ from rich.panel import Panel
 from rich.table import Table
 
 from mlx.core.exceptions import MLXUserError
-from mlx.core.random import apply_torch_seed
 from mlx.core.ui import console, print_info, print_success
 from mlx.modes.object_detection.ultralytics.utils import initialize_model, resolve_model_paths
 
 
 def train_object_detection(config: dict[str, Any]):
-    apply_torch_seed(config.get("random_seed"))
     dataset_dir = Path(config.get("dataset_path", "")).expanduser()
     if not dataset_dir.exists():
         raise MLXUserError(f"Dataset path does not exist: {dataset_dir}")

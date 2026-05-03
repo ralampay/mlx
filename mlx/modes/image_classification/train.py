@@ -22,7 +22,6 @@ from rich.table import Table
 from torch import nn, optim
 from torch.utils.data import DataLoader
 
-from mlx.core.random import apply_torch_seed
 from mlx.core.ui import console, print_info, print_success
 from mlx.modes.image_classification.data import (
     load_one_shot_datasets,
@@ -40,7 +39,6 @@ from mlx.modes.image_classification.utils import (
 
 
 def train_image_classification(config: dict[str, Any]) -> None:
-    _apply_random_seed(config)
     model_name = resolve_model_name(config)
     family = model_family_for(model_name)
     if family == "one-shot":
@@ -50,7 +48,6 @@ def train_image_classification(config: dict[str, Any]) -> None:
 
 
 def smoke_test_image_classification(config: dict[str, Any]) -> None:
-    _apply_random_seed(config)
     model_name = resolve_model_name(config)
     family = model_family_for(model_name)
     if family == "one-shot":
@@ -410,11 +407,6 @@ def _initialize_training_csv(csv_path: Path) -> None:
     with csv_path.open("w", newline="", encoding="utf-8") as csv_file:
         writer = csv.writer(csv_file)
         writer.writerow(["epoch", "loss", "metric"])
-
-
-def _apply_random_seed(config: dict[str, Any]) -> None:
-    apply_torch_seed(config.get("random_seed"))
-
 
 def _append_training_csv_row(csv_path: Path, *, epoch: int, loss: float, metric: float) -> None:
     with csv_path.open("a", newline="", encoding="utf-8") as csv_file:

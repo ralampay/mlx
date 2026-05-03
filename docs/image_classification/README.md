@@ -124,7 +124,7 @@ Important arguments:
 - `--dataset`: dataset root containing `train/` and `val/`.
 - `--output`: output artifact directory. Training writes `{model}.pth` and `training.csv` inside it.
 - `--epochs`, `--batch-size`, `--device`, `--lr`: standard training controls.
-- `--seed` / `--random-seed`: optional integer seed passed to PyTorch for reproducible runs.
+- `--seed` / `--random-seed`: optional integer seed applied globally across Python, NumPy, and PyTorch for reproducible runs.
 - `--pretrained`: enable pretrained initialization for supported torchvision backbones.
 - `--height`, `--width`: input dimensions used to build `input_size`.
 - The terminal UI prints one completed epoch per line above the training progress bars, including training loss, validation loss, accuracy, precision, recall, and F1.
@@ -198,7 +198,7 @@ Important arguments:
 - `--output`: output artifact directory. Training writes `{model}.pth` and `training.csv` inside it.
 - `--embedding-size`: Siamese embedding width.
 - `--epochs`, `--batch-size`, `--device`, `--lr`: training controls.
-- `--seed` / `--random-seed`: optional integer seed passed to PyTorch for reproducible runs.
+- `--seed` / `--random-seed`: optional integer seed applied globally across Python, NumPy, and PyTorch for reproducible runs.
 - `--height`, `--width`: input dimensions used to build `input_size`.
 - The terminal UI prints one completed epoch per line above the training progress bars, including training loss, validation loss, accuracy, precision, recall, and F1.
 
@@ -280,7 +280,7 @@ Non-interactive build-dataset flags:
 - `--test-count`: images per label copied into `test/`
 - `--output`: destination directory for the split dataset
 - `--overwrite`: replace an existing output directory without prompting
-- `--seed` / `--random-seed`: deterministic shuffle seed for reproducible splits
+- `--seed` / `--random-seed`: global seed value; dataset splitting uses it for deterministic shuffling
 
 Behavior notes:
 

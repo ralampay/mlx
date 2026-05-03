@@ -69,3 +69,8 @@ __test_output__/
 
 # Ignore tmp folder
 tmp/
+
+# Jupyter notebook artifacts
+**/.ipynb_checkpoints/
+*.nbconvert.ipynb
+.virtual_documents/

@@ -7,4 +7,5 @@ scikit-learn
 torch
 torchvision
 tqdm
+jupyter
 ultralytics @ git+https://github.com/ralampay/ultralytics

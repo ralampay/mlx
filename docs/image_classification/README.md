@@ -149,6 +149,7 @@ Parameter counts for the available standard classifiers, using the current imple
 | --- | ---: | --- |
 | `efficientnet_b0` | 5,288,548 | <ul><li>Smallest standard backbone in this repo</li><li>Compound-scaled EfficientNet family</li><li>Good baseline for efficiency-focused runs</li></ul> |
 | `mobilenet_v3_large` | 5,483,032 | <ul><li>Mobile-oriented architecture</li><li>Uses inverted residual blocks</li><li>Good low-parameter benchmark</li></ul> |
+| `drax_mobilenet_v3_large` | 6,058,232 | <ul><li>MobileNetV3 Large backbone with a bottlenecked late-stage `DraxBlock` refiner</li><li>Preserves the pretrained MobileNet feature extractor and classifier path</li><li>Adds moderate capacity with much lower overhead than full-width Drax insertion</li></ul> |
 | `densenet121` | 7,978,856 | <ul><li>Feature reuse through dense connections</li><li>Lower parameter count than ResNet-18</li><li>Strong classical CNN baseline</li></ul> |
 | `resnet18` | 11,689,512 | <ul><li>Smallest ResNet variant available here</li><li>Clean apples-to-apples baseline for `draxnet`</li><li>Standard residual basic blocks</li></ul> |
 | `draxnet` | 16,994,856 | <ul><li>Local `ResNet-18`-style implementation</li><li>Current default uses `DraxResidualBlock` in `layer4`</li><li>Designed for custom block experimentation</li></ul> |

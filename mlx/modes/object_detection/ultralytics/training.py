@@ -30,11 +30,18 @@ def train_object_detection(config: dict[str, Any]):
     run_name = config.get("run_name", "mlx-ultralytics")
     lr0 = config.get("lr0")
     loss_clip = config.get("loss_clip")
+    auto_resume_checkpoint, auto_warm_start_weights = _detect_existing_training_artifacts(
+        project_dir=project_dir,
+        run_name=run_name,
+        explicit_weights=resolved_weights,
+    )
+    effective_weights = resolved_weights or auto_warm_start_weights
 
     console.print(Panel.fit("Ultralytics Object Detection - Training", border_style="cyan"))
     console.print(_training_summary_table(
         resolved_cfg=resolved_cfg,
-        resolved_weights=resolved_weights,
+        resolved_weights=effective_weights,
+        resume_checkpoint=auto_resume_checkpoint,
         dataset_source=resolved_dataset.source,
         dataset_root=resolved_dataset.root_dir,
         epochs=epochs,
@@ -46,8 +53,16 @@ def train_object_detection(config: dict[str, Any]):
         config=config,
     ))
 
+    if auto_resume_checkpoint is not None:
+        print_info(
+            "Continuing training from existing output directory "
+            f"using checkpoint: {auto_resume_checkpoint}"
+        )
+    elif auto_warm_start_weights is not None:
+        print_info(f"Warm-starting from checkpoint found in output directory: {auto_warm_start_weights}")
+
     print_info("Loading Ultralytics model...")
-    model = initialize_model(resolved_cfg, resolved_weights, prefer_cfg=True)
+    model = initialize_model(resolved_cfg, effective_weights, prefer_cfg=True)
     overrides = getattr(model, "overrides", {})
     overrides["pretrained"] = bool(config.get("pretrained", False))
     overrides["model"] = str(resolved_cfg) if resolved_cfg else overrides.get("model")
@@ -59,7 +74,7 @@ def train_object_detection(config: dict[str, Any]):
     )
     overrides["amp"] = bool(config.get("amp", overrides.get("amp", True)))
     model.overrides = overrides
-    model.ckpt_path = str(resolved_weights) if resolved_weights else None
+    model.ckpt_path = str(effective_weights) if effective_weights else None
 
     train_kwargs = {
         "batch": batch_size,
@@ -72,6 +87,8 @@ def train_object_detection(config: dict[str, Any]):
         "pretrained": overrides["pretrained"],
         "project": str(project_dir),
     }
+    if auto_resume_checkpoint is not None:
+        train_kwargs["resume"] = str(auto_resume_checkpoint)
     if lr0 is not None:
         train_kwargs["lr0"] = float(lr0)
     if loss_clip is not None:
@@ -85,10 +102,68 @@ def train_object_detection(config: dict[str, Any]):
     return results
 
 
+def _detect_existing_training_artifacts(
+    *,
+    project_dir: Path,
+    run_name: Optional[str],
+    explicit_weights: Optional[Path],
+) -> tuple[Optional[Path], Optional[Path]]:
+    if explicit_weights is not None or not project_dir.exists():
+        return None, None
+
+    run_dir = project_dir / run_name if run_name else None
+    resume_checkpoint = _find_existing_checkpoint(
+        project_dir=project_dir,
+        run_dir=run_dir,
+        file_name="last.pt",
+    )
+    if resume_checkpoint is not None:
+        return resume_checkpoint, None
+
+    warm_start_weights = _find_existing_checkpoint(
+        project_dir=project_dir,
+        run_dir=run_dir,
+        file_name="best.pt",
+    )
+    if warm_start_weights is not None:
+        return None, warm_start_weights
+
+    warm_start_weights = _find_latest_checkpoint(project_dir, pattern="*.pt")
+    if warm_start_weights is not None:
+        return None, warm_start_weights
+
+    return None, None
+
+
+def _find_existing_checkpoint(
+    *,
+    project_dir: Path,
+    run_dir: Optional[Path],
+    file_name: str,
+) -> Optional[Path]:
+    preferred_candidates = []
+    if run_dir is not None:
+        preferred_candidates.extend((run_dir / "weights" / file_name, run_dir / file_name))
+
+    for candidate in preferred_candidates:
+        if candidate.exists():
+            return candidate.resolve()
+
+    return _find_latest_checkpoint(project_dir, pattern=file_name)
+
+
+def _find_latest_checkpoint(project_dir: Path, *, pattern: str) -> Optional[Path]:
+    matches = [path for path in project_dir.rglob(pattern) if path.is_file()]
+    if not matches:
+        return None
+    return max(matches, key=lambda path: (path.stat().st_mtime_ns, str(path))).resolve()
+
+
 def _training_summary_table(
     *,
     resolved_cfg,
     resolved_weights,
+    resume_checkpoint: Optional[Path],
     dataset_source: str,
     dataset_root: Optional[Path],
     epochs: int,
@@ -102,7 +177,12 @@ def _training_summary_table(
     summary = Table(title="Training Configuration", show_lines=True)
     summary.add_column("Key", justify="right", style="cyan", no_wrap=True)
     summary.add_column("Value", style="magenta")
+    summary.add_row(
+        "Training Mode",
+        "continue existing run" if resume_checkpoint else "new run",
+    )
     summary.add_row("Init Weights", str(resolved_weights) if resolved_weights else "random init")
+    summary.add_row("Resume From", str(resume_checkpoint) if resume_checkpoint else "disabled")
     summary.add_row("Model YAML", str(resolved_cfg) if resolved_cfg else "not set")
     summary.add_row("Dataset", dataset_source)
     summary.add_row("Dataset Root", str(dataset_root) if dataset_root else "managed by dataset YAML")

@@ -54,6 +54,10 @@ def _ultralytics_package_root() -> Path:
     return Path(ultralytics.__file__).resolve().parent
 
 
+def _ultralytics_models_root() -> Path:
+    return _ultralytics_package_root() / "cfg" / "models"
+
+
 def _resolve_with_candidates(candidates: list[Path]) -> Optional[Path]:
     for candidate in candidates:
         if candidate.exists():
@@ -132,7 +136,7 @@ def resolve_model_paths(
     if require_yaml and resolved_cfg is None:
         raise MLXUserError("This action requires --model pointing to the model YAML.")
     if resolved_cfg and not resolved_cfg.exists():
-        raise MLXUserError(f"Model YAML not found: {resolved_cfg}")
+        raise MLXUserError(_build_missing_model_yaml_message(model_cfg, resolved_cfg))
 
     weights_path = config.get("model_path")
     resolved_weights = Path(resolve_weights_source(weights_path)) if weights_path else None
@@ -142,6 +146,36 @@ def resolve_model_paths(
         raise MLXUserError(f"Model weights not found: {resolved_weights}")
 
     return resolved_cfg, resolved_weights
+
+
+def _build_missing_model_yaml_message(model_cfg: Any, resolved_cfg: Path) -> str:
+    requested = str(model_cfg)
+    normalized = MODEL_ALIASES.get(requested.lower(), requested)
+    models_root = _ultralytics_models_root()
+
+    if normalized == "draxnet-yolo26.yaml":
+        yolo26_yaml = _resolve_yaml_in_package(
+            "yolo26.yaml",
+            package_subdir="cfg/models",
+            aliases=MODEL_ALIASES,
+        )
+        if yolo26_yaml is not None:
+            return (
+                "Model YAML not found: draxnet-yolo26. "
+                f"The alias resolves to `{normalized}`, but that file is not present under "
+                f"`{models_root}` in the installed `ultralytics` package. "
+                "Your current environment has `yolo26.yaml`, but not the custom DraxNet variant. "
+                "Reinstall the pinned `ultralytics` dependency for this repo, use a direct path to "
+                "`draxnet-yolo26.yaml`, or switch to `--model yolo26`."
+            )
+
+    if requested.lower() in MODEL_ALIASES:
+        return (
+            f"Model YAML not found: {requested}. "
+            f"The alias resolves to `{normalized}`, but that file is not present under `{models_root}`."
+        )
+
+    return f"Model YAML not found: {resolved_cfg}"
 
 
 def resolve_dataset_source(config: dict[str, Any]) -> ResolvedDataset:

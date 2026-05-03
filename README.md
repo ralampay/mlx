@@ -86,6 +86,8 @@ Run `python -m mlx --help` for the complete CLI reference.
 
 For object detection, `--model` now accepts built-in aliases such as `yolo26`, `yolov26`, and `draxnet-yolo26`. `--dataset` or `--dataset-path` accepts a local YOLO dataset root, a dataset YAML, or built-in Ultralytics aliases such as `coco8` and `coco128`.
 
+Object-detection training also reuses checkpoints already present under the selected `--output` directory when `--model-path` is omitted. If a resumable `last.pt` is found, MLX continues the existing run and says so in the training output; otherwise it warm-starts from the newest `.pt` it finds there.
+
 ## Modes
 
 | Mode | Package | Actions | Docs |

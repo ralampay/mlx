@@ -108,6 +108,10 @@ The important rule is simple: pass the directory that contains `data.yaml`, not 
 
 `draxnet-yolo26` maps to the custom DraxNet backbone YAML added in the `ralampay/ultralytics` fork.
 
+If you see `Model YAML not found: draxnet-yolo26`, your installed `ultralytics` package does not
+currently expose `draxnet-yolo26.yaml`. In that case, reinstall the pinned dependency for this
+repo, pass a direct filesystem path to that YAML, or switch to `--model yolo26`.
+
 ## Training
 
 Baseline YOLO26 example:
@@ -148,6 +152,10 @@ Important arguments:
 - `--lr0`, `--optimizer`, `--nbs`, `--warmup-epochs`, `--loss-clip`, `--amp`: trainer overrides.
 - `--output`: optional Ultralytics project directory. If omitted for a local dataset root, runs go under `<dataset>/runs`. Otherwise they default to `./runs/object_detection`.
 - `--run-name`: output folder name inside the Ultralytics project directory.
+
+If `--model-path` is not provided and the chosen `--output` directory already contains checkpoints, MLX now reuses them automatically. It resumes from the newest `last.pt` it finds under that output tree; if only other `.pt` files are present, it warm-starts from the newest one instead of starting from random initialization.
+
+When a resumable `last.pt` is found, the trainer explicitly reports that it is continuing the existing run and shows the checkpoint path. The training summary also marks the run as `continue existing run` instead of `new run`.
 
 ## Webcam Inference
 

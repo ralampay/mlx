@@ -65,6 +65,7 @@ def _train_one_shot(model_name: str, config: dict[str, Any]) -> None:
     input_size = config.get("input_size", (105, 105))
     colored = config.get("colored", True)
     refresh_rate = config.get("refresh_per_second", 2)
+    verbose = bool(config.get("verbose", False))
     output_paths = resolve_train_output_paths(config, model_name=model_name)
     checkpoint_path = output_paths["checkpoint_path"]
     training_csv_path = output_paths["training_csv_path"]
@@ -89,15 +90,22 @@ def _train_one_shot(model_name: str, config: dict[str, Any]) -> None:
     epoch_log = _build_epoch_log()
     last_saved_panel = Panel("No model saved yet", border_style="dim")
 
-    progress = _build_progress(epochs=epochs, train_loader_size=len(train_loader))
-    epoch_task, batch_task = _progress_tasks(progress, epochs=epochs)
+    progress = _build_progress(epochs=epochs, train_loader_size=len(train_loader)) if verbose else None
+    epoch_task, batch_task = _progress_tasks(progress) if progress is not None else (None, None)
 
-    with Live(_render_training_view(epoch_log, progress, last_saved_panel), refresh_per_second=refresh_rate, transient=False) as live:
+    live = (
+        Live(_render_training_view(epoch_log, progress, last_saved_panel), refresh_per_second=refresh_rate, transient=False)
+        if verbose and progress is not None
+        else None
+    )
+
+    with (live or _nullcontext()):
         for epoch in range(epochs):
             model.train()
             running_loss = 0.0
-            progress.reset(batch_task)
-            progress.update(epoch_task, description=f"[magenta]Epoch {epoch + 1}/{epochs}")
+            if progress is not None and batch_task is not None and epoch_task is not None:
+                progress.reset(batch_task)
+                progress.update(epoch_task, description=f"[magenta]Epoch {epoch + 1}/{epochs}")
 
             for batch_index, (img1, img2, label) in enumerate(train_loader, start=1):
                 img1, img2, label = img1.to(device), img2.to(device), label.to(device)
@@ -107,11 +115,13 @@ def _train_one_shot(model_name: str, config: dict[str, Any]) -> None:
                 loss.backward()
                 optimizer.step()
                 running_loss += loss.item()
-                progress.advance(batch_task)
-                progress.update(batch_task, description=f"[cyan]Batch {batch_index}/{len(train_loader)}")
+                if progress is not None and batch_task is not None:
+                    progress.advance(batch_task)
+                    progress.update(batch_task, description=f"[cyan]Batch {batch_index}/{len(train_loader)}")
 
             avg_train_loss = running_loss / len(train_loader)
-            progress.advance(epoch_task)
+            if progress is not None and epoch_task is not None:
+                progress.advance(epoch_task)
             avg_val_loss, val_metrics = _validate_one_shot(model, val_loader, criterion, device)
             _append_training_csv_row(
                 training_csv_path,
@@ -147,10 +157,28 @@ def _train_one_shot(model_name: str, config: dict[str, Any]) -> None:
                     title="Checkpoint",
                     border_style="green",
                 )
+                saved_checkpoint = True
             else:
                 last_saved_panel = Panel("No improvement", title="Checkpoint", border_style="dim")
+                saved_checkpoint = False
 
-            live.update(_render_training_view(epoch_log, progress, last_saved_panel))
+            if live is not None and progress is not None:
+                live.update(_render_training_view(epoch_log, progress, last_saved_panel))
+            else:
+                _print_epoch_summary(
+                    epoch=epoch + 1,
+                    epochs=epochs,
+                    values=[
+                        ("loss", avg_train_loss),
+                        ("val_loss", avg_val_loss),
+                        ("accuracy", val_metrics["accuracy"]),
+                        ("precision", val_metrics["precision"]),
+                        ("recall", val_metrics["recall"]),
+                        ("f1", val_metrics["f1"]),
+                    ],
+                    checkpoint_path=checkpoint_path,
+                    saved_checkpoint=saved_checkpoint,
+                )
 
     print_success("One-shot training complete!")
 
@@ -164,6 +192,7 @@ def _train_standard(model_name: str, config: dict[str, Any]) -> None:
     input_size = config.get("input_size", (224, 224))
     colored = config.get("colored", True)
     refresh_rate = config.get("refresh_per_second", 2)
+    verbose = bool(config.get("verbose", False))
     output_paths = resolve_train_output_paths(config, model_name=model_name)
     checkpoint_path = output_paths["checkpoint_path"]
     training_csv_path = output_paths["training_csv_path"]
@@ -190,15 +219,22 @@ def _train_standard(model_name: str, config: dict[str, Any]) -> None:
     epoch_log = _build_epoch_log()
     last_saved_panel = Panel("No model saved yet", border_style="dim")
 
-    progress = _build_progress(epochs=epochs, train_loader_size=len(train_loader))
-    epoch_task, batch_task = _progress_tasks(progress, epochs=epochs)
+    progress = _build_progress(epochs=epochs, train_loader_size=len(train_loader)) if verbose else None
+    epoch_task, batch_task = _progress_tasks(progress) if progress is not None else (None, None)
 
-    with Live(_render_training_view(epoch_log, progress, last_saved_panel), refresh_per_second=refresh_rate, transient=False) as live:
+    live = (
+        Live(_render_training_view(epoch_log, progress, last_saved_panel), refresh_per_second=refresh_rate, transient=False)
+        if verbose and progress is not None
+        else None
+    )
+
+    with (live or _nullcontext()):
         for epoch in range(epochs):
             model.train()
             running_loss = 0.0
-            progress.reset(batch_task)
-            progress.update(epoch_task, description=f"[magenta]Epoch {epoch + 1}/{epochs}")
+            if progress is not None and batch_task is not None and epoch_task is not None:
+                progress.reset(batch_task)
+                progress.update(epoch_task, description=f"[magenta]Epoch {epoch + 1}/{epochs}")
 
             for batch_index, (images, targets) in enumerate(train_loader, start=1):
                 images, targets = images.to(device), targets.to(device)
@@ -208,11 +244,13 @@ def _train_standard(model_name: str, config: dict[str, Any]) -> None:
                 loss.backward()
                 optimizer.step()
                 running_loss += loss.item()
-                progress.advance(batch_task)
-                progress.update(batch_task, description=f"[cyan]Batch {batch_index}/{len(train_loader)}")
+                if progress is not None and batch_task is not None:
+                    progress.advance(batch_task)
+                    progress.update(batch_task, description=f"[cyan]Batch {batch_index}/{len(train_loader)}")
 
             avg_train_loss = running_loss / len(train_loader)
-            progress.advance(epoch_task)
+            if progress is not None and epoch_task is not None:
+                progress.advance(epoch_task)
             avg_val_loss, val_metrics = _validate_standard(model, val_loader, criterion, device)
             _append_training_csv_row(
                 training_csv_path,
@@ -249,10 +287,28 @@ def _train_standard(model_name: str, config: dict[str, Any]) -> None:
                     title="Checkpoint",
                     border_style="green",
                 )
+                saved_checkpoint = True
             else:
                 last_saved_panel = Panel("No improvement", title="Checkpoint", border_style="dim")
+                saved_checkpoint = False
 
-            live.update(_render_training_view(epoch_log, progress, last_saved_panel))
+            if live is not None and progress is not None:
+                live.update(_render_training_view(epoch_log, progress, last_saved_panel))
+            else:
+                _print_epoch_summary(
+                    epoch=epoch + 1,
+                    epochs=epochs,
+                    values=[
+                        ("loss", avg_train_loss),
+                        ("val_loss", avg_val_loss),
+                        ("accuracy", val_metrics["accuracy"]),
+                        ("precision", val_metrics["precision"]),
+                        ("recall", val_metrics["recall"]),
+                        ("f1", val_metrics["f1"]),
+                    ],
+                    checkpoint_path=checkpoint_path,
+                    saved_checkpoint=saved_checkpoint,
+                )
 
     print_success("Standard classification training complete!")
 
@@ -398,7 +454,7 @@ def _build_progress(*, epochs: int, train_loader_size: int) -> Progress:
     return progress
 
 
-def _progress_tasks(progress: Progress, *, epochs: int) -> tuple[int, int]:
+def _progress_tasks(progress: Progress) -> tuple[int, int]:
     return progress.task_ids[0], progress.task_ids[1]
 
 
@@ -428,6 +484,28 @@ def _append_epoch_log(
     formatted_values = "  ".join(f"{label}: {value:.6f}" for label, value in values)
     epoch_log.append(f"Epoch {epoch}/{epochs}  {formatted_values}")
     return epoch_log
+
+
+def _print_epoch_summary(
+    *,
+    epoch: int,
+    epochs: int,
+    values: list[tuple[str, float]],
+    checkpoint_path: Path,
+    saved_checkpoint: bool,
+) -> None:
+    formatted_values = "  ".join(f"{label}: {value:.6f}" for label, value in values)
+    print_info(f"Epoch {epoch}/{epochs}  {formatted_values}")
+    if saved_checkpoint:
+        print_success(f"Saved new best model at {checkpoint_path}")
+
+
+class _nullcontext:
+    def __enter__(self):
+        return None
+
+    def __exit__(self, exc_type, exc, tb):
+        return False
 
 
 def _render_training_view(epoch_log: deque[str], progress: Progress, last_saved_panel: Panel) -> Group:

@@ -27,6 +27,7 @@ DEFAULT_CONFIG = {
     "pretrained": False,
     "random_seed": None,
     "refresh_per_second": 2,
+    "verbose": False,
 }
 
 ACTION_HANDLERS = {

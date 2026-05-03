@@ -29,7 +29,7 @@ The source is organized by responsibility:
 This mode supports two training setups:
 
 - One-shot similarity models: `siamese-le-net`
-- Standard classification models: `resnet18`, `resnet50`, `densenet121`, `mobilenet_v3_large`, `efficientnet_b0`, `convnext_tiny`, `convnext_small`, `convnext_base`, `convnext_large`, `draxnet`
+- Standard classification models: `resnet18`, `resnet50`, `densenet121`, `mobilenet_v3_large`, `efficientnet_b0`, `convnext_tiny`, `convnext_small`, `convnext_base`, `convnext_large`, `draxnet`, `drax_mobilenet_v3_large`
 
 The selected `--model` determines which training, benchmarking, and inference path is used. Torchvision-backed standard models are loaded by name and their classifier heads are adapted to the dataset class count. Additional custom standard classifiers can be plugged in later through the model registry.
 
@@ -141,6 +141,7 @@ Supported standard models:
 - `convnext_base`
 - `convnext_large`
 - `draxnet`
+- `drax_mobilenet_v3_large`
 
 Parameter counts for the available standard classifiers, using the current implementations with a 1000-class classifier head:
 
@@ -160,6 +161,8 @@ Parameter counts for the available standard classifiers, using the current imple
 ### DraxNet Notes
 
 `draxnet` is currently a local `ResNet-18`-style backbone with a configurable per-stage block layout.
+
+`drax_mobilenet_v3_large` keeps the torchvision `mobilenet_v3_large` backbone and inserts a bottlenecked `DraxBlock` refiner after the final feature stage. This is intended for late-stage feature mixing experiments while preserving MobileNet's efficient scaffold and pretrained initialization path.
 
 Current default:
 

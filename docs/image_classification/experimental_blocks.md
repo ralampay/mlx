@@ -163,3 +163,32 @@ This separates:
 - the baseline `ResNet-18` scaffold
 - the effect of the project-specific block substitution
 - the comparison against a stronger modern conv backbone
+
+## Drax MobileNet V3 Large
+
+`drax_mobilenet_v3_large` is a hybrid that keeps the standard `mobilenet_v3_large` feature extractor and adds a bottlenecked `DraxBlock` refiner after the final `960`-channel feature stage.
+
+Conceptually:
+
+```text
+MobileNetV3 features
+  ↓
+1x1 down-project
+  ↓
+DraxBlock x N
+  ↓
+1x1 up-project
+  ↓
+Residual add back to MobileNet features
+  ↓
+Global Avg Pool
+  ↓
+Classifier
+```
+
+This design is intentional:
+
+- it preserves the pretrained MobileNet backbone
+- it applies Drax where the spatial map is already compact
+- it avoids replacing internal inverted residual blocks, which would break more pretrained structure
+- it keeps parameter growth controlled through the adapter bottleneck instead of running Drax at full `960` channels

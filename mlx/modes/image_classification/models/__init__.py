@@ -13,6 +13,10 @@ from mlx.modes.image_classification.models.blocks import (
     LayerNorm2D,
     SelfAttention2D,
 )
+from mlx.modes.image_classification.models.drax_mobilenet import (
+    DraxMobileNetV3Large,
+    build_drax_mobilenet_v3_large,
+)
 from mlx.modes.image_classification.models.draxnet import DraxNet, build_draxnet
 from mlx.modes.image_classification.models.siamese_lenet import SiameseLeNet
 from mlx.modes.image_classification.models.standard import (
@@ -29,6 +33,7 @@ STANDARD_MODEL_NAMES = {
     "convnext_small",
     "convnext_tiny",
     "densenet121",
+    "drax_mobilenet_v3_large",
     "draxnet",
     "efficientnet_b0",
     "mobilenet_v3_large",
@@ -37,6 +42,7 @@ STANDARD_MODEL_NAMES = {
 }
 
 register_standard_model("draxnet", build_draxnet)
+register_standard_model("drax_mobilenet_v3_large", build_drax_mobilenet_v3_large)
 
 
 def supported_model_names() -> list[str]:
@@ -86,6 +92,7 @@ __all__ = [
     "ConvNeXtBlock",
     "DEFAULT_MODEL",
     "DraxBlock",
+    "DraxMobileNetV3Large",
     "DraxNet",
     "DropPath",
     "LayerNorm2D",
@@ -94,6 +101,7 @@ __all__ = [
     "SelfAttention2D",
     "SiameseLeNet",
     "build_image_classification_model",
+    "build_drax_mobilenet_v3_large",
     "build_draxnet",
     "model_family_for",
     "register_standard_model",

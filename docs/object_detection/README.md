@@ -46,6 +46,58 @@ names:
 
 Pass `--dataset-path` as the directory that contains `data.yaml`, or pass `--dataset coco8` / `--dataset coco128` to use a built-in dataset YAML.
 
+### Expected Local Directory Structure
+
+When `--dataset` points to a local directory, `mlx` expects that directory itself to be the YOLO dataset root. In practice, this means `data.yaml` must live directly inside the path you pass on the command line.
+
+Example:
+
+```text
+my-detection-dataset/
+├── data.yaml
+├── images/
+│   ├── train/
+│   ├── val/
+│   └── test/          # optional
+└── labels/
+    ├── train/
+    ├── val/
+    └── test/          # optional
+```
+
+Typical command:
+
+```bash
+python -m mlx \
+    --mode object-detection \
+    --action train \
+    --dataset /path/to/my-detection-dataset \
+    --model draxnet-yolo26 \
+    --epochs 100 \
+    --batch-size 16 \
+    --device cuda:0
+```
+
+That command assumes:
+
+- `/path/to/my-detection-dataset/data.yaml` exists
+- `data.yaml` references paths relative to that dataset root, such as `images/train` and `images/val`
+- each image in `images/<split>/` has a matching YOLO label file in `labels/<split>/`
+
+Example `data.yaml` for that layout:
+
+```yaml
+path: .
+train: images/train
+val: images/val
+test: images/test
+names:
+  0: class-a
+  1: class-b
+```
+
+The important rule is simple: pass the directory that contains `data.yaml`, not the `images/` directory and not the `labels/` directory.
+
 ## Model Selection
 
 `--model` accepts either a YAML path or one of the friendly aliases resolved by `mlx`:

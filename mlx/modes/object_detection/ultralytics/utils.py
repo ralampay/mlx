@@ -50,6 +50,12 @@ class ResolvedDataset:
     project_dir: Path
 
 
+def resolve_imgsz(config: dict[str, Any]) -> Union[int, tuple[int, int]]:
+    height = int(config.get("height", 640))
+    width = int(config.get("width", 640))
+    return height if height == width else (height, width)
+
+
 def _ultralytics_package_root() -> Path:
     return Path(ultralytics.__file__).resolve().parent
 

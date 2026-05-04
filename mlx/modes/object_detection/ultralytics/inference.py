@@ -10,6 +10,7 @@ from mlx.core.ui import console, print_info, print_warning
 from mlx.modes.object_detection.ultralytics.utils import (
     annotate_detections,
     initialize_model,
+    resolve_imgsz,
     resolve_model_paths,
 )
 
@@ -26,7 +27,7 @@ class StreamInferenceRunner:
         self.config = config
         self.source = source
         self.device = config.get("device", "cpu")
-        self.imgsz = max(config.get("height", 640), config.get("width", 640))
+        self.imgsz = resolve_imgsz(config)
         self.resolved_cfg, self.resolved_weights = resolve_model_paths(
             config,
             require_yaml=True,

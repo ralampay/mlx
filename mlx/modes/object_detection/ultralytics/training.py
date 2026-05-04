@@ -1,15 +1,16 @@
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Any, Optional
+from typing import Any, Optional, Union
 
 from rich.panel import Panel
 from rich.table import Table
 
-from mlx.core.ui import console, print_info, print_success
+from mlx.core.ui import console, print_info, print_success, print_warning
 from mlx.modes.object_detection.ultralytics.utils import (
     initialize_model,
     resolve_dataset_source,
+    resolve_imgsz,
     resolve_model_paths,
 )
 
@@ -24,7 +25,14 @@ def train_object_detection(config: dict[str, Any]):
     epochs = config.get("epochs", 100)
     batch_size = config.get("batch_size", 16)
     device = config.get("device", "cpu")
-    imgsz = max(config.get("height", 640), config.get("width", 640))
+    requested_imgsz = resolve_imgsz(config)
+    imgsz = requested_imgsz
+    if isinstance(requested_imgsz, tuple):
+        imgsz = max(requested_imgsz)
+        print_warning(
+            "Ultralytics training currently uses square image sizes. "
+            f"Requested imgsz={requested_imgsz} will fall back to imgsz={imgsz}."
+        )
     project_dir = resolved_dataset.project_dir
     project_dir.mkdir(parents=True, exist_ok=True)
     run_name = config.get("run_name", "mlx-ultralytics")
@@ -169,7 +177,7 @@ def _training_summary_table(
     epochs: int,
     batch_size: int,
     device: str,
-    imgsz: int,
+    imgsz: Union[int, tuple[int, int]],
     project_dir: Path,
     run_name: str,
     config: dict[str, Any],

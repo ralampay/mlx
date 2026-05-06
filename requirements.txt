@@ -1,5 +1,6 @@
 matplotlib
 numpy
+onnxruntime
 opencv-python
 python-dotenv
 rich

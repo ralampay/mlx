@@ -71,9 +71,10 @@ python -m mlx --mode <mode-name> --action <action-name>
 Examples:
 
 ```bash
-python -m mlx --mode object_detection --action train --dataset coco8 --model yolo26
 python -m mlx --mode object_detection --action train --dataset coco8 --model draxnet-yolo26 --output ./runs/draxnet
-python -m mlx --mode object_detection --action infer-camera --model draxnet-yolo26 --model-path ./runs/draxnet/exp/weights/best.pt
+python -m mlx --mode object_detection --action convert --model-path ./runs/draxnet/exp/weights/best.pt --output ./exports
+python -m mlx --mode object_detection --action infer-camera --model-path ./exports/best.onnx
+python -m mlx --mode object_detection --action infer-video --model-path ./exports/best.onnx --file-path ~/videos/sample.mp4
 python -m mlx --mode image_classification --action train --output ./artifacts/resnet18 --dataset ./dataset --model resnet18 --seed 42
 python -m mlx --mode image_classification --action train --output ./artifacts/siamese --dataset ./omniglot --model siamese-le-net --seed 42
 python -m mlx --mode image_classification --action build-dataset --dataset ./raw-dataset
@@ -87,12 +88,14 @@ Run `python -m mlx --help` for the complete CLI reference.
 For object detection, `--model` now accepts built-in aliases such as `yolo26`, `yolov26`, and `draxnet-yolo26`. `--dataset` or `--dataset-path` accepts a local YOLO dataset root, a dataset YAML, or built-in Ultralytics aliases such as `coco8` and `coco128`.
 
 Object-detection training also reuses checkpoints already present under the selected `--output` directory when `--model-path` is omitted. If a resumable `last.pt` is found, MLX continues the existing run and says so in the training output; otherwise it warm-starts from the newest `.pt` it finds there.
+For object-detection inference, `.pt` checkpoints continue to use Ultralytics, while `.onnx` model paths now run through ONNX Runtime without requiring `--model`.
+The documented deployment path is now: train with Ultralytics, convert the resulting `.pt` checkpoint to `.onnx`, then run inference against that `.onnx` model.
 
 ## Modes
 
 | Mode | Package | Actions | Docs |
 | --- | --- | --- | --- |
-| `object_detection` | `mlx.modes.object_detection.ultralytics` | `train`, `infer-camera`, `infer-video` | [Object detection](./docs/object_detection/README.md) |
+| `object_detection` | `mlx.modes.object_detection.ultralytics` | `train`, `infer-camera`, `infer-video`, `convert` | [Object detection](./docs/object_detection/README.md) |
 | `image_classification` | `mlx.modes.image_classification` | `train`, `test`, `benchmark`, `infer-image`, `build-dataset` | [Image classification](./docs/image_classification/README.md) |
 | `segmentation` | `mlx.modes.segmentation` | `train`, `test`, `infer-image`, `infer-camera`, `infer-video` | [Segmentation](./docs/segmentation/README.md) |
 

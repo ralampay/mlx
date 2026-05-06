@@ -139,13 +139,15 @@ def resolve_model_paths(
 ) -> tuple[Optional[Path], Optional[Path]]:
     model_cfg = config.get("model")
     resolved_cfg = Path(resolve_weights_source(model_cfg)) if model_cfg else None
-    if require_yaml and resolved_cfg is None:
+    weights_path = config.get("model_path")
+    resolved_weights = Path(resolve_weights_source(weights_path)) if weights_path else None
+    weights_suffix = resolved_weights.suffix.lower() if resolved_weights else None
+    requires_cfg_for_runtime = require_yaml and weights_suffix != ".onnx"
+
+    if requires_cfg_for_runtime and resolved_cfg is None:
         raise MLXUserError("This action requires --model pointing to the model YAML.")
     if resolved_cfg and not resolved_cfg.exists():
         raise MLXUserError(_build_missing_model_yaml_message(model_cfg, resolved_cfg))
-
-    weights_path = config.get("model_path")
-    resolved_weights = Path(resolve_weights_source(weights_path)) if weights_path else None
     if require_weights and resolved_weights is None:
         raise MLXUserError("This action requires --model-path pointing to trained weights (.pt).")
     if resolved_weights and not resolved_weights.exists():
@@ -277,23 +279,49 @@ def initialize_model(
 
 def annotate_detections(frame, result):
     annotated = frame.copy()
-    if result is None or result.boxes is None or len(result.boxes) == 0:
+    if result is None:
         return annotated
 
-    names = result.names or {}
-    boxes = result.boxes
-    xyxy = boxes.xyxy.cpu().numpy()
-    confs = boxes.conf.cpu().numpy() if boxes.conf is not None else np.zeros(len(xyxy))
-    classes = (
-        boxes.cls.cpu().numpy().astype(int)
-        if boxes.cls is not None
-        else np.zeros(len(xyxy), dtype=int)
-    )
+    if hasattr(result, "detections"):
+        names = getattr(result, "names", {}) or {}
+        detections = getattr(result, "detections", []) or []
+    else:
+        if result.boxes is None or len(result.boxes) == 0:
+            return annotated
+        names = result.names or {}
+        boxes = result.boxes
+        xyxy = boxes.xyxy.cpu().numpy()
+        confs = boxes.conf.cpu().numpy() if boxes.conf is not None else np.zeros(len(xyxy))
+        classes = (
+            boxes.cls.cpu().numpy().astype(int)
+            if boxes.cls is not None
+            else np.zeros(len(xyxy), dtype=int)
+        )
+        detections = [
+            {
+                "xyxy": tuple(map(int, coords)),
+                "confidence": float(confidence),
+                "class_id": int(class_id),
+                "label": names.get(int(class_id), str(int(class_id))),
+            }
+            for coords, confidence, class_id in zip(xyxy, confs, classes)
+        ]
+
+    if not detections:
+        return annotated
 
     palette = _color_palette(names)
-    for (x1, y1, x2, y2), confidence, class_id in zip(xyxy, confs, classes):
-        x1, y1, x2, y2 = map(int, (x1, y1, x2, y2))
-        label = names.get(int(class_id), str(int(class_id)))
+    for detection in detections:
+        if hasattr(detection, "xyxy"):
+            x1, y1, x2, y2 = detection.xyxy
+            confidence = detection.confidence
+            class_id = detection.class_id
+            label = detection.label
+        else:
+            x1, y1, x2, y2 = detection["xyxy"]
+            confidence = detection["confidence"]
+            class_id = detection["class_id"]
+            label = detection["label"]
         text = f"{label}: {confidence:.2f}"
         color = palette.get(label, palette.get(int(class_id), (0, 255, 0)))
         cv2.rectangle(annotated, (x1, y1), (x2, y2), color, 2)

@@ -17,6 +17,8 @@ The source is split by responsibility:
 - `runner.py`: action dispatch.
 - `training.py`: training workflow.
 - `inference.py`: webcam and video inference.
+- `adapters.py`: runtime adapters for Ultralytics `.pt` and ONNX Runtime `.onnx` inference.
+- `conversion.py`: Ultralytics `.pt` to ONNX export.
 - `utils.py`: model-path resolution, model initialization, and annotation helpers.
 
 ## Dataset Format
@@ -112,6 +114,84 @@ If you see `Model YAML not found: draxnet-yolo26`, your installed `ultralytics` 
 currently expose `draxnet-yolo26.yaml`. In that case, reinstall the pinned dependency for this
 repo, pass a direct filesystem path to that YAML, or switch to `--model yolo26`.
 
+## End-to-End Workflow
+
+The typical object-detection deployment path in this repository is:
+
+1. Train with Ultralytics using a `.yaml` model definition and produce a `.pt` checkpoint.
+2. Convert that trained `.pt` checkpoint to `.onnx`.
+3. Run camera or video inference from the exported `.onnx` model through ONNX Runtime.
+
+Concrete example:
+
+### Step 1: Train with Ultralytics
+
+```bash
+python -m mlx \
+    --mode object-detection \
+    --action train \
+    --dataset coco8 \
+    --model draxnet-yolo26 \
+    --epochs 10 \
+    --batch-size 8 \
+    --device cuda:0 \
+    --output ./runs/draxnet-yolo26
+```
+
+Expected result:
+
+- Ultralytics writes a training run under `./runs/draxnet-yolo26/...`
+- the trained checkpoint is typically available at `./runs/draxnet-yolo26/<run-name>/weights/best.pt`
+
+### Step 2: Convert the trained checkpoint to ONNX
+
+```bash
+python -m mlx \
+    --mode object-detection \
+    --action convert \
+    --model-path ./runs/draxnet-yolo26/exp/weights/best.pt \
+    --output ./exports \
+    --device cpu
+```
+
+Expected result:
+
+- MLX loads the Ultralytics `.pt` checkpoint
+- Ultralytics exports an ONNX model
+- the final ONNX file is written to `./exports/best.onnx`
+
+### Step 3: Use the exported ONNX model for inference
+
+Camera inference:
+
+```bash
+python -m mlx \
+    --mode object-detection \
+    --action infer-camera \
+    --model-path ./exports/best.onnx \
+    --device cpu \
+    --confidence 0.35 \
+    --camera-index 0
+```
+
+Video inference:
+
+```bash
+python -m mlx \
+    --mode object-detection \
+    --action infer-video \
+    --model-path ./exports/best.onnx \
+    --file-path ~/videos/sample.mp4 \
+    --device cpu \
+    --confidence 0.35
+```
+
+Important notes for this workflow:
+
+- `--model` is required for training because Ultralytics needs the model YAML or alias.
+- `--model` is not required for `.onnx` inference; MLX switches to ONNX Runtime when `--model-path` ends in `.onnx`.
+- if you want the ONNX export beside the checkpoint instead of under `./exports`, omit `--output`.
+
 ## Training
 
 Baseline YOLO26 example:
@@ -165,8 +245,7 @@ Example:
 python -m mlx \
     --mode object-detection \
     --action infer-camera \
-    --model draxnet-yolo26 \
-    --model-path ./runs/draxnet-yolo26/exp/weights/best.pt \
+    --model-path ./exports/best.onnx \
     --device cpu \
     --confidence 0.35 \
     --camera-index 0
@@ -174,8 +253,8 @@ python -m mlx \
 
 Important arguments:
 
-- `--model`: required architecture YAML or alias for rebuilding the network.
-- `--model-path`: required trained checkpoint.
+- `--model`: required only when `--model-path` points to a PyTorch checkpoint (`.pt`).
+- `--model-path`: required trained checkpoint or exported `.onnx` model.
 - `--confidence`: minimum confidence threshold to render.
 - `--camera-index`: OpenCV camera device index.
 
@@ -187,8 +266,7 @@ Example:
 python -m mlx \
     --mode object-detection \
     --action infer-video \
-    --model draxnet-yolo26 \
-    --model-path ./runs/draxnet-yolo26/exp/weights/best.pt \
+    --model-path ./exports/best.onnx \
     --file-path ~/videos/sample.mp4 \
     --device cpu \
     --confidence 0.35
@@ -197,12 +275,33 @@ python -m mlx \
 Additional arguments:
 
 - `--file-path`: required video path.
-- `--device`: inference backend.
+- `--device`: inference backend. `.pt` uses Ultralytics; `.onnx` uses ONNX Runtime.
 - `--confidence`: rendered detection threshold.
+
+## ONNX Conversion
+
+Example:
+
+```bash
+python -m mlx \
+    --mode object-detection \
+    --action convert \
+    --model-path ./runs/draxnet-yolo26/exp/weights/best.pt \
+    --output ./exports \
+    --device cpu
+```
+
+Important arguments:
+
+- `--model-path`: required Ultralytics PyTorch checkpoint (`.pt`) to export.
+- `--output`: optional destination directory or explicit `.onnx` file path. If omitted, MLX writes the ONNX file beside the checkpoint.
+- `--height`, `--width`: optional export image size. If equal, MLX passes a square `imgsz`; otherwise it passes the `(height, width)` tuple to Ultralytics.
+- `--device`: export backend such as `cpu` or `cuda:0`.
 
 ## Dependencies
 
 - `ultralytics` from the `ralampay/ultralytics` fork, because `draxnet-yolo26` is defined there
+- `onnxruntime` for `.onnx` inference
 - `opencv-python` for webcam or video inference
 
 Run `python -m mlx --help` for the full CLI reference.

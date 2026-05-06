@@ -7,9 +7,9 @@ from rich.panel import Panel
 
 from mlx.core.exceptions import MLXUserError
 from mlx.core.ui import console, print_info, print_warning
+from mlx.modes.object_detection.ultralytics.adapters import build_detection_adapter
 from mlx.modes.object_detection.ultralytics.utils import (
     annotate_detections,
-    initialize_model,
     resolve_imgsz,
     resolve_model_paths,
 )
@@ -46,7 +46,13 @@ class StreamInferenceRunner:
         if self.resolved_cfg:
             print_info(f"Model YAML: {self.resolved_cfg}")
         print_info(f"Loading weights from: {self.resolved_weights}")
-        self.model = initialize_model(self.resolved_cfg, self.resolved_weights, prefer_cfg=False)
+        self.adapter = build_detection_adapter(
+            resolved_cfg=self.resolved_cfg,
+            resolved_weights=self.resolved_weights,
+            device=self.device,
+            imgsz=self.imgsz,
+            confidence=self.confidence,
+        )
 
     def execute(self) -> None:
         print_info(
@@ -66,15 +72,8 @@ class StreamInferenceRunner:
                     )
                     break
 
-                result = self.model.predict(
-                    source=frame,
-                    imgsz=self.imgsz,
-                    conf=self.confidence,
-                    device=self.device,
-                    verbose=False,
-                    stream=False,
-                )
-                cv2.imshow(window_title, annotate_detections(frame, result[0]))
+                result = self.adapter.predict(frame)
+                cv2.imshow(window_title, annotate_detections(frame, result))
                 key = cv2.waitKey(1 if self.source == "camera" else 10) & 0xFF
                 if key in (ord("q"), 27):
                     print_info("Exiting inference.")

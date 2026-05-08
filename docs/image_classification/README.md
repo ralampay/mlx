@@ -231,7 +231,7 @@ Behavior:
 - The command scans each label directory under `--dataset-path`.
 - It prints a label summary showing how many images were found per label.
 - In count mode, it prompts for three values: images per label for `TRAIN`, `VAL`, and `TEST`.
-- In ratio mode, it prompts for three values: ratios for `TRAIN`, `VAL`, and `TEST`, then derives balanced per-label counts from the smallest label.
+- In ratio mode, it prompts for three values: ratios for `TRAIN`, `VAL`, and `TEST`, then splits each label independently using those ratios.
 - It finally prompts for the output path where the split dataset should be created.
 - If the output directory already exists, MLX asks for confirmation before overwriting it.
 - If a label has fewer images than the requested total, MLX prints a warning before continuing.
@@ -278,7 +278,7 @@ python -m mlx \
     --seed 42
 ```
 
-To build a balanced split from ratios, use `--split-mode ratios`. MLX derives per-label counts from the smallest label so every class is represented equally:
+To build a split from ratios, use `--split-mode ratios`. MLX applies the ratios within each label independently:
 
 ```bash
 python -m mlx \
@@ -312,10 +312,10 @@ Non-interactive build-dataset flags:
 - `--train-count`: images per label copied into `train/`
 - `--val-count`: images per label copied into `val/`
 - `--test-count`: images per label copied into `test/`
-- `--train-ratio`: train split ratio used in balanced ratio mode
-- `--val-ratio`: validation split ratio used in balanced ratio mode
-- `--test-ratio`: test split ratio used in balanced ratio mode
-- `--split-mode`: `counts` or `ratios`; ratio mode computes per-label counts from the smallest class
+- `--train-ratio`: train split ratio applied within each label
+- `--val-ratio`: validation split ratio applied within each label
+- `--test-ratio`: test split ratio applied within each label
+- `--split-mode`: `counts` or `ratios`; ratio mode splits each label independently using the provided ratios
 - `--output`: destination directory for the split dataset
 - `--overwrite`: replace an existing output directory without prompting
 - `--seed` / `--random-seed`: global seed value; dataset splitting uses it for deterministic shuffling
@@ -399,11 +399,11 @@ python -m mlx \
     --device cpu
 ```
 
-For standard classifiers, `benchmark` loads class labels from the checkpoint metadata and evaluates accuracy, precision, recall, F1, and ROC AUC against the labelled images in `--dataset`. If `--dataset` points to the dataset root and a `test/` directory exists, MLX evaluates that `test/` directory automatically.
+For standard classifiers, `benchmark` loads class labels from the checkpoint metadata and evaluates accuracy, average precision, average recall, F1, and ROC AUC against the labelled images in `--dataset`. It also reports per-class AUC, sensitivity, and specificity. If `--dataset` points to the dataset root and a `test/` directory exists, MLX evaluates that `test/` directory automatically.
 
 If `--output` is set for `benchmark`, MLX writes benchmark artifacts to that directory:
 
-- `metrics.csv`: aggregate metrics including accuracy, precision, recall, F1, and available ROC AUC values
+- `metrics.csv`: aggregate metrics including accuracy, average precision, average recall, F1, available ROC AUC values, plus per-class AUC, sensitivity, and specificity
 - `confusion_matrix.csv`: raw confusion-matrix counts with multi-class support
 - `confusion_matrix.png`: rendered confusion-matrix heatmap
 - `roc_curve.png`: ROC curve plot. For multi-class classification, MLX renders one-vs-rest curves per class.

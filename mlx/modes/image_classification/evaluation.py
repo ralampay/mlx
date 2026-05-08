@@ -135,6 +135,9 @@ def _render_metrics(
         "recall": recall_score(targets, preds, average="macro", zero_division=0),
         "f1": f1_score(targets, preds, average="macro", zero_division=0),
     }
+    results["avg_precision"] = results["precision"]
+    results["avg_recall"] = results["recall"]
+    results.update(_compute_classwise_metrics(targets, preds, class_names=class_names))
     roc_results = _compute_roc_metrics(targets, probabilities, class_names=class_names)
     results.update(roc_results)
 
@@ -142,14 +145,15 @@ def _render_metrics(
     table.add_column("Metric", style="dim", width=20)
     table.add_column("Score", justify="right")
     table.add_row("Accuracy", f"{results['accuracy']:.4f}")
-    table.add_row("Precision", f"{results['precision']:.4f}")
-    table.add_row("Recall", f"{results['recall']:.4f}")
+    table.add_row("Ave Precision", f"{results['avg_precision']:.4f}")
+    table.add_row("Ave Recall", f"{results['avg_recall']:.4f}")
     table.add_row("F1-score", f"{results['f1']:.4f}")
     if "roc_auc_macro_ovr" in results:
         table.add_row("ROC AUC (macro)", f"{results['roc_auc_macro_ovr']:.4f}")
     if "roc_auc_weighted_ovr" in results:
         table.add_row("ROC AUC (weighted)", f"{results['roc_auc_weighted_ovr']:.4f}")
     console.print(table)
+    _render_classwise_metrics_table(results, class_names=class_names)
     if output_dir is not None:
         _write_benchmark_artifacts(
             output_dir,
@@ -159,6 +163,36 @@ def _render_metrics(
             probabilities=probabilities,
             class_names=class_names,
         )
+    return results
+
+
+def _compute_classwise_metrics(
+    targets: list[int],
+    preds: list[int],
+    *,
+    class_names: list[str] | None,
+) -> dict[str, float]:
+    if len(targets) == 0:
+        return {}
+
+    labels = list(range(len(class_names))) if class_names else sorted(set(targets) | set(preds))
+    matrix = confusion_matrix(targets, preds, labels=labels)
+    total = matrix.sum()
+    resolved_names = class_names or [str(label) for label in labels]
+
+    results: dict[str, float] = {}
+    for class_index, class_name in enumerate(resolved_names):
+        tp = float(matrix[class_index, class_index])
+        fp = float(matrix[:, class_index].sum() - tp)
+        fn = float(matrix[class_index, :].sum() - tp)
+        tn = float(total - tp - fp - fn)
+
+        sensitivity = tp / (tp + fn) if tp + fn else 0.0
+        specificity = tn / (tn + fp) if tn + fp else 0.0
+        slug = _metric_slug(class_name)
+        results[f"sensitivity_{slug}"] = sensitivity
+        results[f"specificity_{slug}"] = specificity
+
     return results
 
 
@@ -180,20 +214,43 @@ def _compute_roc_metrics(
     try:
         if probabilities.ndim == 1 or (probabilities.ndim == 2 and probabilities.shape[1] == 1):
             positive_scores = probabilities.reshape(-1)
-            return {"roc_auc_macro_ovr": roc_auc_score(target_array, positive_scores)}
+            score = roc_auc_score(target_array, positive_scores)
+            results = {"roc_auc_macro_ovr": score}
+            if class_names and len(class_names) >= 2:
+                negative_scores = 1.0 - positive_scores
+                results[f"auc_{_metric_slug(class_names[0])}"] = roc_auc_score(
+                    (target_array == 0).astype(int),
+                    negative_scores,
+                )
+                results[f"auc_{_metric_slug(class_names[1])}"] = roc_auc_score(
+                    (target_array == 1).astype(int),
+                    positive_scores,
+                )
+            else:
+                positive_label = class_names[0] if class_names else "positive"
+                results[f"auc_{_metric_slug(positive_label)}"] = score
+            return results
 
         if probabilities.ndim == 2 and probabilities.shape[1] == 2:
             positive_scores = probabilities[:, 1]
             score = roc_auc_score(target_array, positive_scores)
-            return {
+            results = {
                 "roc_auc_macro_ovr": score,
                 "roc_auc_weighted_ovr": score,
             }
+            resolved_names = class_names or ["negative", "positive"]
+            for class_index in range(2):
+                class_label = resolved_names[class_index] if class_index < len(resolved_names) else f"class_{class_index}"
+                results[f"auc_{_metric_slug(class_label)}"] = roc_auc_score(
+                    (target_array == class_index).astype(int),
+                    probabilities[:, class_index],
+                )
+            return results
 
         class_count = probabilities.shape[1]
         classes = np.arange(class_count)
         binarized_targets = label_binarize(target_array, classes=classes)
-        return {
+        results = {
             "roc_auc_macro_ovr": roc_auc_score(
                 binarized_targets,
                 probabilities,
@@ -207,10 +264,58 @@ def _compute_roc_metrics(
                 average="weighted",
             ),
         }
+        resolved_names = class_names or [f"class_{index}" for index in range(class_count)]
+        for class_index in range(class_count):
+            if binarized_targets[:, class_index].max() == 0:
+                continue
+            class_label = (
+                resolved_names[class_index] if class_index < len(resolved_names) else f"class_{class_index}"
+            )
+            results[f"auc_{_metric_slug(class_label)}"] = roc_auc_score(
+                binarized_targets[:, class_index],
+                probabilities[:, class_index],
+            )
+        return results
     except ValueError as exc:
         class_summary = f" for classes {class_names}" if class_names else ""
         print_warning(f"ROC/AUC skipped{class_summary}: {exc}")
         return {}
+
+
+def _metric_slug(value: str) -> str:
+    return "".join(character.lower() if character.isalnum() else "_" for character in value).strip("_")
+
+
+def _render_classwise_metrics_table(results: dict[str, float], *, class_names: list[str] | None) -> None:
+    if not class_names:
+        return
+
+    rows: list[tuple[str, float | None, float | None, float | None]] = []
+    for class_name in class_names:
+        slug = _metric_slug(class_name)
+        auc_value = results.get(f"auc_{slug}")
+        sensitivity = results.get(f"sensitivity_{slug}")
+        specificity = results.get(f"specificity_{slug}")
+        if auc_value is None and sensitivity is None and specificity is None:
+            continue
+        rows.append((class_name, auc_value, sensitivity, specificity))
+
+    if not rows:
+        return
+
+    table = Table(title="Per-Class Metrics", show_header=True, header_style="bold cyan")
+    table.add_column("Class", style="dim")
+    table.add_column("AUC", justify="right")
+    table.add_column("Sensitivity", justify="right")
+    table.add_column("Specificity", justify="right")
+    for class_name, auc_value, sensitivity, specificity in rows:
+        table.add_row(
+            class_name,
+            f"{auc_value:.4f}" if auc_value is not None else "-",
+            f"{sensitivity:.4f}" if sensitivity is not None else "-",
+            f"{specificity:.4f}" if specificity is not None else "-",
+        )
+    console.print(table)
 
 
 def _write_benchmark_artifacts(

@@ -4,7 +4,7 @@ from typing import Optional
 
 from rich.console import Console
 from rich.panel import Panel
-from rich.prompt import Confirm, IntPrompt, Prompt
+from rich.prompt import Confirm, FloatPrompt, IntPrompt, Prompt
 
 from mlx.core.exceptions import MLXAbort
 
@@ -47,6 +47,12 @@ def prompt_int(message: str, default: Optional[int] = None) -> int:
     if default is None:
         return IntPrompt.ask(f"[bold green]{message}[/bold green]")
     return IntPrompt.ask(f"[bold green]{message}[/bold green]", default=default)
+
+
+def prompt_float(message: str, default: Optional[float] = None) -> float:
+    if default is None:
+        return FloatPrompt.ask(f"[bold green]{message}[/bold green]")
+    return FloatPrompt.ask(f"[bold green]{message}[/bold green]", default=default)
 
 
 def confirm_action(message: str, default: bool = False, abort: bool = False) -> bool:

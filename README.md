@@ -79,6 +79,7 @@ python -m mlx --mode image_classification --action train --output ./artifacts/re
 python -m mlx --mode image_classification --action train --output ./artifacts/siamese --dataset ./omniglot --model siamese-le-net --seed 42
 python -m mlx --mode image_classification --action build-dataset --dataset ./raw-dataset
 python -m mlx --mode image_classification --action build-dataset --dataset ./raw-dataset --output ./dataset --train-count 100 --val-count 20 --test-count 20 --overwrite --seed 42
+python -m mlx --mode image_classification --action build-dataset --dataset ./raw-dataset --split-mode ratios --train-ratio 0.7 --val-ratio 0.15 --test-ratio 0.15 --output ./dataset --overwrite --seed 42
 python -m mlx --mode segmentation --action train --dataset ./dataset --model unet --output ./unet-seg.pt
 python -m mlx --mode segmentation --action infer-image --model-path ./unet-seg.pt --input-img ./sample.jpg
 ```

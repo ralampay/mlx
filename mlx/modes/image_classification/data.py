@@ -3,6 +3,7 @@ from __future__ import annotations
 import os
 import random
 import shutil
+from math import floor
 from pathlib import Path
 from typing import Iterable, List, Sequence, Tuple
 
@@ -26,6 +27,7 @@ from mlx.core.ui import (
     print_info,
     print_success,
     print_warning,
+    prompt_float,
     prompt_int,
     prompt_text,
 )
@@ -326,12 +328,81 @@ def _resolve_split_count(value: int | None, prompt: str) -> int:
     return prompt_int(prompt) if value is None else value
 
 
+def _resolve_split_ratio(value: float | None, prompt: str) -> float:
+    return prompt_float(prompt) if value is None else value
+
+
+def _resolve_split_mode(
+    split_mode: str | None,
+    *,
+    train_count: int | None,
+    val_count: int | None,
+    test_count: int | None,
+    train_ratio: float | None,
+    val_ratio: float | None,
+    test_ratio: float | None,
+) -> str:
+    has_counts = any(value is not None for value in (train_count, val_count, test_count))
+    has_ratios = any(value is not None for value in (train_ratio, val_ratio, test_ratio))
+
+    if has_counts and has_ratios:
+        raise MLXUserError(
+            "Split counts and split ratios cannot be used together. Choose one mode."
+        )
+
+    resolved_mode = split_mode
+    if resolved_mode is None:
+        resolved_mode = "ratios" if has_ratios else "counts"
+
+    if resolved_mode == "counts" and has_ratios:
+        raise MLXUserError("Split mode 'counts' cannot be used with ratio arguments.")
+    if resolved_mode == "ratios" and has_counts:
+        raise MLXUserError("Split mode 'ratios' cannot be used with count arguments.")
+
+    return resolved_mode
+
+
+def _counts_from_ratios(
+    *,
+    train_ratio: float,
+    val_ratio: float,
+    test_ratio: float,
+    min_label_count: int,
+) -> tuple[int, int, int]:
+    ratios = [train_ratio, val_ratio, test_ratio]
+    if any(ratio < 0 for ratio in ratios):
+        raise MLXUserError("Split ratios must be zero or greater.")
+
+    ratio_total = sum(ratios)
+    if ratio_total <= 0:
+        raise MLXUserError("At least one split ratio must be greater than zero.")
+
+    normalized = [ratio / ratio_total for ratio in ratios]
+    raw_counts = [min_label_count * ratio for ratio in normalized]
+    counts = [floor(value) for value in raw_counts]
+    remainder = min_label_count - sum(counts)
+
+    ranked_indices = sorted(
+        range(len(raw_counts)),
+        key=lambda index: (raw_counts[index] - counts[index], -index),
+        reverse=True,
+    )
+    for index in ranked_indices[:remainder]:
+        counts[index] += 1
+
+    return counts[0], counts[1], counts[2]
+
+
 def build_image_classification_dataset(
     dataset_path: str,
     *,
     train_count: int | None = None,
     val_count: int | None = None,
     test_count: int | None = None,
+    train_ratio: float | None = None,
+    val_ratio: float | None = None,
+    test_ratio: float | None = None,
+    split_mode: str | None = None,
     output_path: str | os.PathLike[str] | None = None,
     overwrite: bool = False,
     random_seed: int | None = None,
@@ -358,9 +429,36 @@ def build_image_classification_dataset(
 
     console.print(table)
 
-    train_count = _resolve_split_count(train_count, "How many images per label for TRAIN?")
-    val_count = _resolve_split_count(val_count, "How many images per label for VAL?")
-    test_count = _resolve_split_count(test_count, "How many images per label for TEST?")
+    resolved_split_mode = _resolve_split_mode(
+        split_mode,
+        train_count=train_count,
+        val_count=val_count,
+        test_count=test_count,
+        train_ratio=train_ratio,
+        val_ratio=val_ratio,
+        test_ratio=test_ratio,
+    )
+
+    if resolved_split_mode == "ratios":
+        min_label_count = min(label_counts.values())
+        train_ratio = _resolve_split_ratio(train_ratio, "Train ratio?")
+        val_ratio = _resolve_split_ratio(val_ratio, "Validation ratio?")
+        test_ratio = _resolve_split_ratio(test_ratio, "Test ratio?")
+        train_count, val_count, test_count = _counts_from_ratios(
+            train_ratio=train_ratio,
+            val_ratio=val_ratio,
+            test_ratio=test_ratio,
+            min_label_count=min_label_count,
+        )
+        print_info(
+            "Ratio mode uses the smallest label count for a balanced split. "
+            f"Smallest label size: {min_label_count}. "
+            f"Computed per-label counts -> train: {train_count}, val: {val_count}, test: {test_count}."
+        )
+    else:
+        train_count = _resolve_split_count(train_count, "How many images per label for TRAIN?")
+        val_count = _resolve_split_count(val_count, "How many images per label for VAL?")
+        test_count = _resolve_split_count(test_count, "How many images per label for TEST?")
 
     if train_count < 0 or val_count < 0 or test_count < 0:
         raise MLXUserError("Split counts must be zero or greater.")

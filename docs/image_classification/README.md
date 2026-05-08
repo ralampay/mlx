@@ -230,7 +230,8 @@ Behavior:
 
 - The command scans each label directory under `--dataset-path`.
 - It prints a label summary showing how many images were found per label.
-- It then prompts for three values: images per label for `TRAIN`, `VAL`, and `TEST`.
+- In count mode, it prompts for three values: images per label for `TRAIN`, `VAL`, and `TEST`.
+- In ratio mode, it prompts for three values: ratios for `TRAIN`, `VAL`, and `TEST`, then derives balanced per-label counts from the smallest label.
 - It finally prompts for the output path where the split dataset should be created.
 - If the output directory already exists, MLX asks for confirmation before overwriting it.
 - If a label has fewer images than the requested total, MLX prints a warning before continuing.
@@ -277,11 +278,44 @@ python -m mlx \
     --seed 42
 ```
 
+To build a balanced split from ratios, use `--split-mode ratios`. MLX derives per-label counts from the smallest label so every class is represented equally:
+
+```bash
+python -m mlx \
+    --mode image_classification \
+    --action build-dataset \
+    --dataset ~/datasets/animals-raw \
+    --split-mode ratios \
+    --train-ratio 0.7 \
+    --val-ratio 0.15 \
+    --test-ratio 0.15 \
+    --output ~/datasets/animals \
+    --overwrite \
+    --seed 42
+```
+
+You can also pass only some ratio values on the command line and let MLX prompt for the rest:
+
+```bash
+python -m mlx \
+    --mode image_classification \
+    --action build-dataset \
+    --dataset ~/datasets/animals-raw \
+    --split-mode ratios \
+    --train-ratio 0.7 \
+    --output ~/datasets/animals \
+    --seed 42
+```
+
 Non-interactive build-dataset flags:
 
 - `--train-count`: images per label copied into `train/`
 - `--val-count`: images per label copied into `val/`
 - `--test-count`: images per label copied into `test/`
+- `--train-ratio`: train split ratio used in balanced ratio mode
+- `--val-ratio`: validation split ratio used in balanced ratio mode
+- `--test-ratio`: test split ratio used in balanced ratio mode
+- `--split-mode`: `counts` or `ratios`; ratio mode computes per-label counts from the smallest class
 - `--output`: destination directory for the split dataset
 - `--overwrite`: replace an existing output directory without prompting
 - `--seed` / `--random-seed`: global seed value; dataset splitting uses it for deterministic shuffling
@@ -289,6 +323,8 @@ Non-interactive build-dataset flags:
 Behavior notes:
 
 - If any of `--train-count`, `--val-count`, `--test-count`, or `--output` are omitted, MLX prompts only for the missing values.
+- If `--split-mode ratios` is used and any of `--train-ratio`, `--val-ratio`, `--test-ratio`, or `--output` are omitted, MLX prompts only for the missing values.
+- Count mode and ratio mode are mutually exclusive.
 - If `--output` already exists in non-interactive mode, MLX raises an error unless `--overwrite` is set.
 
 Example interactive flow:
@@ -297,6 +333,15 @@ Example interactive flow:
 How many images per label for TRAIN? 20
 How many images per label for VAL? 5
 How many images per label for TEST? 5
+Enter output path for split dataset ~/datasets/animals-split
+```
+
+Example interactive flow in ratio mode:
+
+```text
+Train ratio? 0.7
+Validation ratio? 0.15
+Test ratio? 0.15
 Enter output path for split dataset ~/datasets/animals-split
 ```
 

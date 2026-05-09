@@ -1,5 +1,8 @@
 from __future__ import annotations
 
+import csv
+from collections.abc import Iterable
+from numbers import Real
 from pathlib import Path
 from typing import Any, Optional, Union
 
@@ -92,6 +95,7 @@ def train_object_detection(config: dict[str, Any]):
         "exist_ok": True,
         "imgsz": imgsz,
         "name": run_name,
+        "plots": bool(config.get("plots", True)),
         "pretrained": overrides["pretrained"],
         "project": str(project_dir),
     }
@@ -106,6 +110,8 @@ def train_object_detection(config: dict[str, Any]):
 
     print_info("Starting training loop...")
     results = model.train(**train_kwargs)
+    _print_training_metrics(results)
+    _export_training_graphs(results, project_dir=project_dir, run_name=run_name)
     print_success("Training complete!")
     return results
 
@@ -211,3 +217,391 @@ def _training_summary_table(
         str(config.get("loss_clip")) if config.get("loss_clip") is not None else "disabled",
     )
     return summary
+
+
+def _print_training_metrics(results: Any) -> None:
+    metrics = _collect_training_metrics(results)
+    if not metrics:
+        print_warning("Training finished, but no validation metrics were exposed by Ultralytics.")
+        return
+
+    table = Table(title="Final Validation Metrics", show_lines=True)
+    table.add_column("Metric", style="cyan", no_wrap=True)
+    table.add_column("Value", justify="right", style="magenta")
+
+    prioritized_metrics = [
+        ("metrics/precision(B)", "Precision"),
+        ("metrics/recall(B)", "Recall"),
+        ("metrics/F1(B)", "F1"),
+        ("metrics/mAP50(B)", "mAP@0.50"),
+        ("metrics/mAP50-95(B)", "mAP@0.50:0.95"),
+        ("fitness", "Fitness"),
+        ("val/box_loss", "Val Box Loss"),
+        ("val/cls_loss", "Val Class Loss"),
+        ("val/dfl_loss", "Val DFL Loss"),
+        ("train/box_loss", "Train Box Loss"),
+        ("train/cls_loss", "Train Class Loss"),
+        ("train/dfl_loss", "Train DFL Loss"),
+    ]
+
+    rendered_keys: set[str] = set()
+    for key, label in prioritized_metrics:
+        if key not in metrics:
+            continue
+        table.add_row(label, _format_metric_value(metrics[key]))
+        rendered_keys.add(key)
+
+    auc_keys = _find_metric_keys(metrics, ("auc", "roc"))
+    for key in auc_keys:
+        if key in rendered_keys:
+            continue
+        table.add_row(_humanize_metric_label(key), _format_metric_value(metrics[key]))
+        rendered_keys.add(key)
+
+    remaining_keys = sorted(
+        key for key in metrics if key not in rendered_keys and _is_scalar_metric(metrics[key])
+    )
+    for key in remaining_keys:
+        table.add_row(_humanize_metric_label(key), _format_metric_value(metrics[key]))
+
+    console.print(table)
+    if not auc_keys:
+        print_info(
+            "ROC/AUC is not typically reported for object detection training. "
+            "Ultralytics detection validation is primarily driven by IoU-based precision, recall, and AP."
+        )
+
+
+def _export_training_graphs(results: Any, *, project_dir: Path, run_name: str) -> None:
+    output_dir = _resolve_training_output_dir(results, project_dir=project_dir, run_name=run_name)
+    output_dir.mkdir(parents=True, exist_ok=True)
+
+    plotted_files: list[Path] = []
+    plotted_files.extend(_write_results_csv_graphs(output_dir))
+
+    per_class_outputs = _write_per_class_map_artifacts(output_dir, results)
+    plotted_files.extend(per_class_outputs)
+
+    if plotted_files:
+        print_info(
+            "Saved training graphs to "
+            f"{output_dir}: {', '.join(path.name for path in plotted_files)}"
+        )
+    else:
+        print_warning(
+            "Training completed, but MLX could not generate additional graphs from the run artifacts."
+        )
+
+
+def _collect_training_metrics(results: Any) -> dict[str, float]:
+    metrics: dict[str, float] = {}
+    sources: list[dict[str, Any]] = []
+
+    if isinstance(results, dict):
+        sources.append(results)
+
+    results_dict = getattr(results, "results_dict", None)
+    if isinstance(results_dict, dict):
+        sources.append(results_dict)
+    elif callable(results_dict):
+        resolved = results_dict()
+        if isinstance(resolved, dict):
+            sources.append(resolved)
+
+    box_metrics = getattr(results, "box", None)
+    mean_results = getattr(box_metrics, "mean_results", None)
+    if callable(mean_results):
+        resolved = mean_results()
+        if isinstance(resolved, Iterable):
+            values = list(resolved)
+            aliases = [
+                ("metrics/precision(B)", 0),
+                ("metrics/recall(B)", 1),
+                ("metrics/mAP50(B)", 2),
+                ("metrics/mAP50-95(B)", 3),
+            ]
+            for key, index in aliases:
+                if index < len(values):
+                    metrics[key] = values[index]
+
+    for source in sources:
+        for key, value in source.items():
+            if _is_scalar_metric(value):
+                metrics[str(key)] = float(value)
+
+    speed = getattr(results, "speed", None)
+    if isinstance(speed, dict):
+        for key, value in speed.items():
+            if _is_scalar_metric(value):
+                metrics[f"speed/{key}"] = float(value)
+
+    maps = getattr(results, "maps", None)
+    if isinstance(maps, Iterable) and not isinstance(maps, (str, bytes, dict)):
+        map_values = [float(value) for value in maps if _is_scalar_metric(value)]
+        if map_values:
+            metrics["metrics/per_class_mAP50-95_mean"] = sum(map_values) / len(map_values)
+
+    return metrics
+
+
+def _resolve_training_output_dir(results: Any, *, project_dir: Path, run_name: str) -> Path:
+    save_dir = getattr(results, "save_dir", None)
+    if save_dir:
+        return Path(save_dir).expanduser().resolve()
+    return (project_dir / run_name).resolve()
+
+
+def _write_results_csv_graphs(output_dir: Path) -> list[Path]:
+    results_csv = output_dir / "results.csv"
+    if not results_csv.exists():
+        print_warning(f"Graph export skipped because {results_csv.name} was not found in {output_dir}.")
+        return []
+
+    plt = _load_pyplot()
+    if plt is None:
+        return []
+
+    rows = _read_results_csv(results_csv)
+    if not rows:
+        print_warning(f"Graph export skipped because {results_csv.name} did not contain any rows.")
+        return []
+
+    x_values = _epoch_axis(rows)
+    written: list[Path] = []
+
+    chart_specs = [
+        (
+            "loss_curves.png",
+            "Loss Curves",
+            "Loss",
+            [
+                "train/box_loss",
+                "train/cls_loss",
+                "train/dfl_loss",
+                "train/obj_loss",
+                "val/box_loss",
+                "val/cls_loss",
+                "val/dfl_loss",
+                "val/obj_loss",
+            ],
+        ),
+        (
+            "detection_metrics.png",
+            "Detection Metrics",
+            "Score",
+            [
+                "metrics/precision(B)",
+                "metrics/recall(B)",
+                "metrics/F1(B)",
+                "metrics/mAP50(B)",
+                "metrics/mAP50-95(B)",
+            ],
+        ),
+        (
+            "learning_rate.png",
+            "Learning Rate",
+            "LR",
+            _columns_with_prefix(rows, "lr/"),
+        ),
+        (
+            "speed_metrics.png",
+            "Speed Metrics",
+            "Milliseconds",
+            _columns_with_prefix(rows, "speed/"),
+        ),
+    ]
+
+    for file_name, title, y_label, columns in chart_specs:
+        output_path = output_dir / file_name
+        if _plot_training_series(
+            plt,
+            output_path=output_path,
+            rows=rows,
+            x_values=x_values,
+            title=title,
+            y_label=y_label,
+            columns=columns,
+        ):
+            written.append(output_path)
+
+    return written
+
+
+def _write_per_class_map_artifacts(output_dir: Path, results: Any) -> list[Path]:
+    maps = getattr(results, "maps", None)
+    if not isinstance(maps, Iterable) or isinstance(maps, (str, bytes, dict)):
+        return []
+
+    values = [float(value) for value in maps if _is_scalar_metric(value)]
+    if not values:
+        return []
+
+    names = getattr(results, "names", None) or {}
+    labels = []
+    for index in range(len(values)):
+        if isinstance(names, dict):
+            labels.append(str(names.get(index, index)))
+        elif isinstance(names, list) and index < len(names):
+            labels.append(str(names[index]))
+        else:
+            labels.append(str(index))
+
+    csv_path = output_dir / "per_class_map50_95.csv"
+    with csv_path.open("w", encoding="utf-8", newline="") as csv_file:
+        writer = csv.writer(csv_file)
+        writer.writerow(["class", "map50_95"])
+        for label, value in zip(labels, values):
+            writer.writerow([label, f"{value:.6f}"])
+
+    plt = _load_pyplot()
+    if plt is None:
+        return [csv_path]
+
+    figure_width = max(8, min(18, len(labels) * 0.75))
+    fig, ax = plt.subplots(figsize=(figure_width, 6))
+    ax.bar(labels, values, color="#1f77b4")
+    ax.set(
+        title="Per-Class mAP@0.50:0.95",
+        xlabel="Class",
+        ylabel="mAP@0.50:0.95",
+        ylim=(0.0, 1.0),
+    )
+    plt.setp(ax.get_xticklabels(), rotation=45, ha="right", rotation_mode="anchor")
+    fig.tight_layout()
+
+    output_path = output_dir / "per_class_map50_95.png"
+    fig.savefig(output_path, dpi=200, bbox_inches="tight")
+    plt.close(fig)
+    return [csv_path, output_path]
+
+
+def _read_results_csv(csv_path: Path) -> list[dict[str, float]]:
+    rows: list[dict[str, float]] = []
+    with csv_path.open("r", encoding="utf-8", newline="") as csv_file:
+        reader = csv.DictReader(csv_file)
+        for raw_row in reader:
+            normalized: dict[str, float] = {}
+            for key, value in raw_row.items():
+                if key is None:
+                    continue
+                cleaned_key = key.strip()
+                if value is None:
+                    continue
+                cleaned_value = value.strip()
+                if not cleaned_value:
+                    continue
+                try:
+                    normalized[cleaned_key] = float(cleaned_value)
+                except ValueError:
+                    continue
+            if normalized:
+                rows.append(normalized)
+    return rows
+
+
+def _epoch_axis(rows: list[dict[str, float]]) -> list[float]:
+    if rows and "epoch" in rows[0]:
+        return [row.get("epoch", float(index + 1)) for index, row in enumerate(rows)]
+    return [float(index + 1) for index in range(len(rows))]
+
+
+def _columns_with_prefix(rows: list[dict[str, float]], prefix: str) -> list[str]:
+    columns: set[str] = set()
+    for row in rows:
+        for key in row:
+            if key.startswith(prefix):
+                columns.add(key)
+    return sorted(columns)
+
+
+def _plot_training_series(
+    plt,
+    *,
+    output_path: Path,
+    rows: list[dict[str, float]],
+    x_values: list[float],
+    title: str,
+    y_label: str,
+    columns: list[str],
+) -> bool:
+    available_columns = [column for column in columns if any(column in row for row in rows)]
+    if not available_columns:
+        return False
+
+    fig, ax = plt.subplots(figsize=(10, 6))
+    plotted = False
+    for column in available_columns:
+        series = []
+        x_series = []
+        for x_value, row in zip(x_values, rows):
+            if column not in row:
+                continue
+            x_series.append(x_value)
+            series.append(row[column])
+        if not series:
+            continue
+        ax.plot(x_series, series, label=_humanize_metric_label(column), linewidth=2)
+        plotted = True
+
+    if not plotted:
+        plt.close(fig)
+        return False
+
+    ax.set(title=title, xlabel="Epoch", ylabel=y_label)
+    ax.grid(True, linestyle="--", linewidth=0.5, alpha=0.5)
+    ax.legend(loc="best", fontsize="small")
+    fig.tight_layout()
+    fig.savefig(output_path, dpi=200, bbox_inches="tight")
+    plt.close(fig)
+    return True
+
+
+def _load_pyplot():
+    try:
+        import matplotlib.pyplot as plt
+    except ImportError:
+        print_warning(
+            "matplotlib is not installed, so MLX could not generate training graphs in the run directory."
+        )
+        return None
+    return plt
+
+
+def _find_metric_keys(metrics: dict[str, float], patterns: tuple[str, ...]) -> list[str]:
+    pattern_set = tuple(pattern.lower() for pattern in patterns)
+    return sorted(
+        key for key in metrics if any(pattern in key.lower() for pattern in pattern_set)
+    )
+
+
+def _humanize_metric_label(key: str) -> str:
+    label = key.replace("(B)", "").replace("_", " ").replace("/", " / ")
+    replacements = {
+        "metrics / ": "",
+        "val / ": "Val ",
+        "train / ": "Train ",
+        "speed / ": "Speed ",
+        "map50-95": "mAP50-95",
+        "map50": "mAP50",
+        "auc": "AUC",
+        "roc": "ROC",
+        "dfl": "DFL",
+    }
+    lowered = label.lower()
+    for source, target in replacements.items():
+        lowered = lowered.replace(source, target)
+    words = []
+    for token in lowered.split():
+        if token.startswith("mAP") or token in {"AUC", "ROC", "DFL"}:
+            words.append(token)
+        else:
+            words.append(token.capitalize())
+    return " ".join(words)
+
+
+def _format_metric_value(value: float) -> str:
+    return f"{value:.4f}"
+
+
+def _is_scalar_metric(value: Any) -> bool:
+    return isinstance(value, Real) and not isinstance(value, bool)

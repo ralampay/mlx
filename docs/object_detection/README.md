@@ -237,6 +237,19 @@ If `--model-path` is not provided and the chosen `--output` directory already co
 
 When a resumable `last.pt` is found, the trainer explicitly reports that it is continuing the existing run and shows the checkpoint path. The training summary also marks the run as `continue existing run` instead of `new run`.
 
+After training completes, MLX now prints a final validation-metrics table when Ultralytics exposes the values. For detection runs, the most important metrics are typically precision, recall, `mAP@0.50`, `mAP@0.50:0.95`, and fitness; train/validation loss terms may also appear. ROC/AUC is only shown when the underlying metrics object reports it, which is uncommon for standard object-detection validation.
+
+MLX also now writes extra training graphs into the resolved run directory, alongside Ultralytics artifacts. When available, this includes:
+
+- `loss_curves.png`: train/validation loss curves from `results.csv`
+- `detection_metrics.png`: precision, recall, F1, `mAP@0.50`, and `mAP@0.50:0.95`
+- `learning_rate.png`: learning-rate schedule curves
+- `speed_metrics.png`: per-epoch speed metrics if Ultralytics records them
+- `per_class_map50_95.csv`: per-class `mAP@0.50:0.95` values
+- `per_class_map50_95.png`: bar chart of per-class `mAP@0.50:0.95`
+
+Ultralytics plotting is also explicitly enabled for training runs, so native artifacts such as PR/F1/P/R curves and confusion-matrix plots should continue to land in the same run directory when supported by the installed Ultralytics version.
+
 ## Webcam Inference
 
 Example:

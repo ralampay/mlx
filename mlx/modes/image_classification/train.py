@@ -65,6 +65,7 @@ def _train_one_shot(model_name: str, config: dict[str, Any]) -> None:
     input_size = config.get("input_size", (105, 105))
     colored = config.get("colored", True)
     refresh_rate = config.get("refresh_per_second", 2)
+    use_best = bool(config.get("use_best", False))
     verbose = bool(config.get("verbose", False))
     output_paths = resolve_train_output_paths(config, model_name=model_name)
     checkpoint_path = output_paths["checkpoint_path"]
@@ -143,8 +144,11 @@ def _train_one_shot(model_name: str, config: dict[str, Any]) -> None:
                 ],
             )
 
-            if avg_val_loss < best_val_loss:
+            improved = avg_val_loss < best_val_loss
+            if improved:
                 best_val_loss = avg_val_loss
+            saved_checkpoint = not use_best or improved
+            if saved_checkpoint:
                 save_checkpoint(
                     checkpoint_path,
                     model,
@@ -152,15 +156,19 @@ def _train_one_shot(model_name: str, config: dict[str, Any]) -> None:
                     family="one-shot",
                     config=config,
                 )
+                checkpoint_message = (
+                    f"Saved new best model at {checkpoint_path}"
+                    if use_best
+                    else f"Saved epoch {epoch + 1} model at {checkpoint_path}"
+                )
                 last_saved_panel = Panel(
-                    f"[green]Saved new best model at {checkpoint_path}[/]",
+                    f"[green]{checkpoint_message}[/]",
                     title="Checkpoint",
                     border_style="green",
                 )
-                saved_checkpoint = True
             else:
+                checkpoint_message = None
                 last_saved_panel = Panel("No improvement", title="Checkpoint", border_style="dim")
-                saved_checkpoint = False
 
             if live is not None and progress is not None:
                 live.update(_render_training_view(epoch_log, progress, last_saved_panel))
@@ -178,6 +186,7 @@ def _train_one_shot(model_name: str, config: dict[str, Any]) -> None:
                     ],
                     checkpoint_path=checkpoint_path,
                     saved_checkpoint=saved_checkpoint,
+                    checkpoint_message=checkpoint_message,
                 )
 
     print_success("One-shot training complete!")
@@ -193,6 +202,7 @@ def _train_standard(model_name: str, config: dict[str, Any]) -> None:
     colored = config.get("colored", True)
     apply_transformations = bool(config.get("apply_transformations", False))
     refresh_rate = config.get("refresh_per_second", 2)
+    use_best = bool(config.get("use_best", False))
     verbose = bool(config.get("verbose", False))
     output_paths = resolve_train_output_paths(config, model_name=model_name)
     checkpoint_path = output_paths["checkpoint_path"]
@@ -274,8 +284,11 @@ def _train_standard(model_name: str, config: dict[str, Any]) -> None:
                 ],
             )
 
-            if avg_val_loss < best_val_loss:
+            improved = avg_val_loss < best_val_loss
+            if improved:
                 best_val_loss = avg_val_loss
+            saved_checkpoint = not use_best or improved
+            if saved_checkpoint:
                 save_checkpoint(
                     checkpoint_path,
                     model,
@@ -284,15 +297,19 @@ def _train_standard(model_name: str, config: dict[str, Any]) -> None:
                     config=config,
                     classes=classes,
                 )
+                checkpoint_message = (
+                    f"Saved new best model at {checkpoint_path}"
+                    if use_best
+                    else f"Saved epoch {epoch + 1} model at {checkpoint_path}"
+                )
                 last_saved_panel = Panel(
-                    f"[green]Saved new best model at {checkpoint_path}[/]",
+                    f"[green]{checkpoint_message}[/]",
                     title="Checkpoint",
                     border_style="green",
                 )
-                saved_checkpoint = True
             else:
+                checkpoint_message = None
                 last_saved_panel = Panel("No improvement", title="Checkpoint", border_style="dim")
-                saved_checkpoint = False
 
             if live is not None and progress is not None:
                 live.update(_render_training_view(epoch_log, progress, last_saved_panel))
@@ -310,6 +327,7 @@ def _train_standard(model_name: str, config: dict[str, Any]) -> None:
                     ],
                     checkpoint_path=checkpoint_path,
                     saved_checkpoint=saved_checkpoint,
+                    checkpoint_message=checkpoint_message,
                 )
 
     print_success("Standard classification training complete!")
@@ -495,11 +513,12 @@ def _print_epoch_summary(
     values: list[tuple[str, float]],
     checkpoint_path: Path,
     saved_checkpoint: bool,
+    checkpoint_message: str | None = None,
 ) -> None:
     formatted_values = "  ".join(f"{label}: {value:.6f}" for label, value in values)
     print_info(f"Epoch {epoch}/{epochs}  {formatted_values}")
     if saved_checkpoint:
-        print_success(f"Saved new best model at {checkpoint_path}")
+        print_success(checkpoint_message or f"Saved model at {checkpoint_path}")
 
 
 class _nullcontext:

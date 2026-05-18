@@ -126,6 +126,7 @@ Important arguments:
 - `--epochs`, `--batch-size`, `--device`, `--lr`: standard training controls.
 - `--seed` / `--random-seed`: optional integer seed applied globally across Python, NumPy, and PyTorch for reproducible runs.
 - `--pretrained`: enable pretrained initialization for supported torchvision backbones.
+- `--use-best`: save only the best validation-loss checkpoint. By default, training saves every epoch to the final model path, so the last epoch is the final model.
 - `--height`, `--width`: input dimensions used to build `input_size`.
 - The terminal UI prints one completed epoch per line above the training progress bars, including training loss, validation loss, accuracy, precision, recall, and F1.
 

@@ -73,6 +73,12 @@ def build_parser() -> RichArgumentParser:
     parser.add_argument("--camera-index", type=int, default=0, dest="camera_index")
     parser.add_argument("--pretrained", action=argparse.BooleanOptionalAction, default=False)
     parser.add_argument("--verbose", action=argparse.BooleanOptionalAction, default=False)
+    parser.add_argument(
+        "--apply-transformations",
+        action=argparse.BooleanOptionalAction,
+        default=False,
+        dest="apply_transformations",
+    )
     parser.add_argument("--lr", type=float, default=None)
     parser.add_argument("--lr0", type=float, default=None)
     parser.add_argument("--optimizer", default="auto")
@@ -141,6 +147,11 @@ def _render_help() -> None:
     options.add_row("--camera-index", "0", "Camera index for webcam inference.")
     options.add_row("--pretrained / --no-pretrained", "False", "Toggle Ultralytics pretrained initialization.")
     options.add_row("--verbose / --no-verbose", "False", "Show per-epoch live progress bars when supported.")
+    options.add_row(
+        "--apply-transformations / --no-apply-transformations",
+        "False",
+        "Apply image-classification training augmentations: RandomHorizontalFlip and RandomRotation(10).",
+    )
     options.add_row("--lr", "None", "Learning rate for image-classification training.")
     options.add_row("--amp / --no-amp", "True", "Toggle mixed precision for Ultralytics training.")
     options.add_row("--lr0", "None", "Override initial learning rate.")

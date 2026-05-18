@@ -15,6 +15,7 @@ from mlx.modes.image_classification.train import (
 
 DEFAULT_CONFIG = {
     "action": "test",
+    "apply_transformations": False,
     "batch_size": 1,
     "colored": True,
     "dataset_path": "",

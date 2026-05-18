@@ -256,6 +256,7 @@ def load_standard_classification_datasets(
     *,
     input_size: Tuple[int, int] = (224, 224),
     colored: bool = True,
+    apply_transformations: bool = False,
 ) -> tuple[ImageClassificationDataset, ImageClassificationDataset, list[str]]:
     dataset_root = Path(dataset_path)
     train_dir = dataset_root / "train"
@@ -275,7 +276,7 @@ def load_standard_classification_datasets(
     train_transform = _default_classification_transform(
         input_size=input_size,
         colored=colored,
-        is_training=True,
+        is_training=apply_transformations,
     )
     val_transform = _default_classification_transform(
         input_size=input_size,

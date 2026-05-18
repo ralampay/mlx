@@ -35,7 +35,7 @@ The selected `--model` determines which training, benchmarking, and inference pa
 
 All standard classifiers share the same preprocessing family:
 
-- Training: `Resize`, `RandomHorizontalFlip`, `RandomRotation(10)`, `ToTensor`, `Normalize`
+- Training: `Resize`, `ToTensor`, `Normalize`. Add `--apply-transformations` to include `RandomHorizontalFlip` and `RandomRotation(10)`.
 - Validation / benchmark / inference: `Resize`, `ToTensor`, `Normalize`
 - RGB normalization uses ImageNet mean/std: `(0.485, 0.456, 0.406)` / `(0.229, 0.224, 0.225)`
 - Grayscale normalization uses mean/std: `(0.5,)` / `(0.5,)`

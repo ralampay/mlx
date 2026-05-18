@@ -191,6 +191,7 @@ def _train_standard(model_name: str, config: dict[str, Any]) -> None:
     learning_rate = config.get("lr") or 1e-3
     input_size = config.get("input_size", (224, 224))
     colored = config.get("colored", True)
+    apply_transformations = bool(config.get("apply_transformations", False))
     refresh_rate = config.get("refresh_per_second", 2)
     verbose = bool(config.get("verbose", False))
     output_paths = resolve_train_output_paths(config, model_name=model_name)
@@ -203,6 +204,7 @@ def _train_standard(model_name: str, config: dict[str, Any]) -> None:
         dataset_path,
         input_size=input_size,
         colored=colored,
+        apply_transformations=apply_transformations,
     )
     model = build_image_classification_model(
         model_name,

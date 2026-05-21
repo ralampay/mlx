@@ -228,6 +228,7 @@ Important arguments:
 - `--model`: required architecture YAML or alias such as `yolo26` or `draxnet-yolo26`.
 - `--model-path`: optional checkpoint for warm-start training.
 - `--epochs`, `--batch-size`, `--device`: core training controls.
+- `--use-best` / `--no-use-best`: select `weights/best.pt` after training by default. Use `--no-use-best` to prefer `weights/last.pt` instead.
 - `--pretrained`: enable Ultralytics pretrained initialization.
 - `--lr0`, `--optimizer`, `--nbs`, `--warmup-epochs`, `--loss-clip`, `--amp`: trainer overrides.
 - `--output`: optional Ultralytics project directory. If omitted for a local dataset root, runs go under `<dataset>/runs`. Otherwise they default to `./runs/object_detection`.
@@ -236,6 +237,8 @@ Important arguments:
 If `--model-path` is not provided and the chosen `--output` directory already contains checkpoints, MLX now reuses them automatically. It resumes from the newest `last.pt` it finds under that output tree; if only other `.pt` files are present, it warm-starts from the newest one instead of starting from random initialization.
 
 When a resumable `last.pt` is found, the trainer explicitly reports that it is continuing the existing run and shows the checkpoint path. The training summary also marks the run as `continue existing run` instead of `new run`.
+
+After training completes, MLX selects the checkpoint to use downstream. By default `--use-best` is enabled, so object detection selects `weights/best.pt` when Ultralytics writes it, stores that path in the returned training result as `model_path` / `checkpoint_path`, and prints the selected checkpoint. If `--no-use-best` is passed, MLX prefers `weights/last.pt`.
 
 After training completes, MLX now prints a final validation-metrics table when Ultralytics exposes the values. For detection runs, the most important metrics are typically precision, recall, `mAP@0.50`, `mAP@0.50:0.95`, and fitness; train/validation loss terms may also appear. ROC/AUC is only shown when the underlying metrics object reports it, which is uncommon for standard object-detection validation.
 

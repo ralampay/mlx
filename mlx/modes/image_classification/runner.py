@@ -28,7 +28,7 @@ DEFAULT_CONFIG = {
     "pretrained": False,
     "random_seed": None,
     "refresh_per_second": 2,
-    "use_best": False,
+    "use_best": True,
     "verbose": False,
 }
 

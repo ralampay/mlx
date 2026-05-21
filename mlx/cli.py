@@ -73,7 +73,7 @@ def build_parser() -> RichArgumentParser:
     parser.add_argument("--camera-index", type=int, default=0, dest="camera_index")
     parser.add_argument("--pretrained", action=argparse.BooleanOptionalAction, default=False)
     parser.add_argument("--verbose", action=argparse.BooleanOptionalAction, default=False)
-    parser.add_argument("--use-best", action=argparse.BooleanOptionalAction, default=False, dest="use_best")
+    parser.add_argument("--use-best", action=argparse.BooleanOptionalAction, default=True, dest="use_best")
     parser.add_argument(
         "--apply-transformations",
         action=argparse.BooleanOptionalAction,
@@ -150,8 +150,8 @@ def _render_help() -> None:
     options.add_row("--verbose / --no-verbose", "False", "Show per-epoch live progress bars when supported.")
     options.add_row(
         "--use-best / --no-use-best",
-        "False",
-        "For image-classification training, save only the best validation-loss checkpoint. When false, every epoch overwrites the final model.",
+        "True",
+        "Use the best validation checkpoint when training supports it. For image classification this saves only the best validation-loss checkpoint; for object detection this selects weights/best.pt after training.",
     )
     options.add_row(
         "--apply-transformations / --no-apply-transformations",

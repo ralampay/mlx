@@ -28,6 +28,7 @@ def train_object_detection(config: dict[str, Any]):
     epochs = config.get("epochs", 100)
     batch_size = config.get("batch_size", 16)
     device = config.get("device", "cpu")
+    use_best = bool(config.get("use_best", True))
     requested_imgsz = resolve_imgsz(config)
     imgsz = requested_imgsz
     if isinstance(requested_imgsz, tuple):
@@ -61,6 +62,7 @@ def train_object_detection(config: dict[str, Any]):
         imgsz=imgsz,
         project_dir=project_dir,
         run_name=run_name,
+        use_best=use_best,
         config=config,
     ))
 
@@ -112,6 +114,22 @@ def train_object_detection(config: dict[str, Any]):
     results = model.train(**train_kwargs)
     _print_training_metrics(results)
     _export_training_graphs(results, project_dir=project_dir, run_name=run_name)
+    selected_checkpoint = _select_training_checkpoint(
+        results,
+        project_dir=project_dir,
+        run_name=run_name,
+        use_best=use_best,
+    )
+    if selected_checkpoint is not None:
+        config["model_path"] = str(selected_checkpoint)
+        model.ckpt_path = str(selected_checkpoint)
+        try:
+            setattr(results, "model_path", selected_checkpoint)
+            setattr(results, "checkpoint_path", selected_checkpoint)
+        except Exception:
+            pass
+        checkpoint_label = "best" if use_best else "last"
+        print_success(f"Selected {checkpoint_label} checkpoint for downstream use: {selected_checkpoint}")
     print_success("Training complete!")
     return results
 
@@ -186,6 +204,7 @@ def _training_summary_table(
     imgsz: Union[int, tuple[int, int]],
     project_dir: Path,
     run_name: str,
+    use_best: bool,
     config: dict[str, Any],
 ) -> Table:
     summary = Table(title="Training Configuration", show_lines=True)
@@ -206,6 +225,7 @@ def _training_summary_table(
     summary.add_row("Image Size", str(imgsz))
     summary.add_row("Project", str(project_dir))
     summary.add_row("Run Name", run_name)
+    summary.add_row("Use Best Checkpoint", str(use_best))
     summary.add_row("Pretrained", str(bool(config.get("pretrained", False))))
     summary.add_row("lr0", str(config.get("lr0")) if config.get("lr0") is not None else "default")
     summary.add_row("Optimizer", config.get("optimizer", "auto"))
@@ -217,6 +237,45 @@ def _training_summary_table(
         str(config.get("loss_clip")) if config.get("loss_clip") is not None else "disabled",
     )
     return summary
+
+
+def _select_training_checkpoint(
+    results: Any,
+    *,
+    project_dir: Path,
+    run_name: str,
+    use_best: bool,
+) -> Optional[Path]:
+    output_dir = _resolve_training_output_dir(results, project_dir=project_dir, run_name=run_name)
+    preferred_name = "best.pt" if use_best else "last.pt"
+    fallback_name = "last.pt" if use_best else "best.pt"
+
+    preferred = _find_existing_checkpoint(
+        project_dir=output_dir,
+        run_dir=output_dir,
+        file_name=preferred_name,
+    )
+    if preferred is not None:
+        return preferred
+
+    fallback = _find_existing_checkpoint(
+        project_dir=output_dir,
+        run_dir=output_dir,
+        file_name=fallback_name,
+    )
+    if fallback is not None:
+        print_warning(
+            f"Preferred checkpoint {preferred_name} was not found; using {fallback_name} instead."
+        )
+        return fallback
+
+    latest = _find_latest_checkpoint(output_dir, pattern="*.pt")
+    if latest is not None:
+        print_warning(f"Preferred checkpoint {preferred_name} was not found; using newest checkpoint.")
+        return latest
+
+    print_warning("Training finished, but no .pt checkpoint was found in the run directory.")
+    return None
 
 
 def _print_training_metrics(results: Any) -> None:

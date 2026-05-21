@@ -400,6 +400,12 @@ def _collect_training_metrics(results: Any) -> dict[str, float]:
         if map_values:
             metrics["metrics/per_class_mAP50-95_mean"] = sum(map_values) / len(map_values)
 
+    per_class_map50, per_class_map50_95, _ = _collect_per_class_map_metrics(results)
+    if per_class_map50:
+        metrics["metrics/per_class_mAP50_mean"] = sum(per_class_map50) / len(per_class_map50)
+    if per_class_map50_95:
+        metrics["metrics/per_class_mAP50-95_mean"] = sum(per_class_map50_95) / len(per_class_map50_95)
+
     return metrics
 
 
@@ -487,51 +493,202 @@ def _write_results_csv_graphs(output_dir: Path) -> list[Path]:
 
 
 def _write_per_class_map_artifacts(output_dir: Path, results: Any) -> list[Path]:
-    maps = getattr(results, "maps", None)
-    if not isinstance(maps, Iterable) or isinstance(maps, (str, bytes, dict)):
+    map50_values, map50_95_values, labels = _collect_per_class_map_metrics(results)
+    if not map50_values and not map50_95_values:
         return []
 
-    values = [float(value) for value in maps if _is_scalar_metric(value)]
-    if not values:
-        return []
+    written: list[Path] = []
 
-    names = getattr(results, "names", None) or {}
-    labels = []
-    for index in range(len(values)):
-        if isinstance(names, dict):
-            labels.append(str(names.get(index, index)))
-        elif isinstance(names, list) and index < len(names):
-            labels.append(str(names[index]))
-        else:
-            labels.append(str(index))
-
-    csv_path = output_dir / "per_class_map50_95.csv"
-    with csv_path.open("w", encoding="utf-8", newline="") as csv_file:
+    combined_csv_path = output_dir / "per_class_map.csv"
+    with combined_csv_path.open("w", encoding="utf-8", newline="") as csv_file:
         writer = csv.writer(csv_file)
-        writer.writerow(["class", "map50_95"])
-        for label, value in zip(labels, values):
-            writer.writerow([label, f"{value:.6f}"])
+        writer.writerow(["class", "map50", "map50_95"])
+        for index, label in enumerate(labels):
+            writer.writerow([
+                label,
+                _format_optional_csv_metric(_value_at(map50_values, index)),
+                _format_optional_csv_metric(_value_at(map50_95_values, index)),
+            ])
+    written.append(combined_csv_path)
+
+    if map50_values:
+        map50_csv_path = output_dir / "per_class_map50.csv"
+        _write_per_class_metric_csv(
+            map50_csv_path,
+            labels=labels,
+            column_name="map50",
+            values=map50_values,
+        )
+        written.append(map50_csv_path)
+
+    if map50_95_values:
+        map50_95_csv_path = output_dir / "per_class_map50_95.csv"
+        _write_per_class_metric_csv(
+            map50_95_csv_path,
+            labels=labels,
+            column_name="map50_95",
+            values=map50_95_values,
+        )
+        written.append(map50_95_csv_path)
 
     plt = _load_pyplot()
     if plt is None:
-        return [csv_path]
+        return written
 
-    figure_width = max(8, min(18, len(labels) * 0.75))
+    if map50_values:
+        output_path = output_dir / "per_class_map50.png"
+        if _plot_per_class_metric(
+            plt,
+            output_path=output_path,
+            labels=labels,
+            values=map50_values,
+            title="Per-Class mAP@0.50",
+            y_label="mAP@0.50",
+            color="#2ca02c",
+        ):
+            written.append(output_path)
+
+    if map50_95_values:
+        output_path = output_dir / "per_class_map50_95.png"
+        if _plot_per_class_metric(
+            plt,
+            output_path=output_path,
+            labels=labels,
+            values=map50_95_values,
+            title="Per-Class mAP@0.50:0.95",
+            y_label="mAP@0.50:0.95",
+            color="#1f77b4",
+        ):
+            written.append(output_path)
+
+    return written
+
+
+def _collect_per_class_map_metrics(results: Any) -> tuple[list[float], list[float], list[str]]:
+    box_metrics = getattr(results, "box", None)
+    map50_values = _metric_sequence(getattr(box_metrics, "ap50", None))
+    map50_95_values = _metric_sequence(getattr(box_metrics, "ap", None))
+
+    all_ap = _metric_matrix(getattr(box_metrics, "all_ap", None))
+    if all_ap:
+        if not map50_values:
+            map50_values = [
+                row[0]
+                for row in all_ap
+                if row and _is_scalar_metric(row[0])
+            ]
+        if not map50_95_values:
+            map50_95_values = [
+                sum(row) / len(row)
+                for row in all_ap
+                if row and all(_is_scalar_metric(value) for value in row)
+            ]
+
+    if not map50_95_values:
+        map50_95_values = _metric_sequence(getattr(results, "maps", None))
+
+    value_count = max(len(map50_values), len(map50_95_values))
+    class_indices = _metric_sequence(getattr(box_metrics, "ap_class_index", None))
+    if len(class_indices) != value_count:
+        class_indices = [float(index) for index in range(value_count)]
+
+    labels = _per_class_labels(results, [int(index) for index in class_indices], value_count)
+    return map50_values, map50_95_values, labels
+
+
+def _write_per_class_metric_csv(
+    output_path: Path,
+    *,
+    labels: list[str],
+    column_name: str,
+    values: list[float],
+) -> None:
+    with output_path.open("w", encoding="utf-8", newline="") as csv_file:
+        writer = csv.writer(csv_file)
+        writer.writerow(["class", column_name])
+        for label, value in zip(labels, values):
+            writer.writerow([label, f"{value:.6f}"])
+
+
+def _plot_per_class_metric(
+    plt,
+    *,
+    output_path: Path,
+    labels: list[str],
+    values: list[float],
+    title: str,
+    y_label: str,
+    color: str,
+) -> bool:
+    if not values:
+        return False
+    chart_labels = labels[: len(values)]
+    figure_width = max(8, min(18, len(chart_labels) * 0.75))
     fig, ax = plt.subplots(figsize=(figure_width, 6))
-    ax.bar(labels, values, color="#1f77b4")
-    ax.set(
-        title="Per-Class mAP@0.50:0.95",
-        xlabel="Class",
-        ylabel="mAP@0.50:0.95",
-        ylim=(0.0, 1.0),
-    )
+    ax.bar(chart_labels, values, color=color)
+    ax.set(title=title, xlabel="Class", ylabel=y_label, ylim=(0.0, 1.0))
     plt.setp(ax.get_xticklabels(), rotation=45, ha="right", rotation_mode="anchor")
     fig.tight_layout()
-
-    output_path = output_dir / "per_class_map50_95.png"
     fig.savefig(output_path, dpi=200, bbox_inches="tight")
     plt.close(fig)
-    return [csv_path, output_path]
+    return True
+
+
+def _per_class_labels(results: Any, class_indices: list[int], value_count: int) -> list[str]:
+    names = getattr(results, "names", None) or {}
+    labels = []
+    for position in range(value_count):
+        class_index = class_indices[position] if position < len(class_indices) else position
+        if isinstance(names, dict):
+            labels.append(str(names.get(class_index, class_index)))
+        elif isinstance(names, list) and class_index < len(names):
+            labels.append(str(names[class_index]))
+        else:
+            labels.append(str(class_index))
+    return labels
+
+
+def _metric_sequence(value: Any) -> list[float]:
+    if value is None or isinstance(value, (str, bytes, dict)):
+        return []
+    if _is_scalar_metric(value):
+        return [float(value)]
+    if hasattr(value, "tolist"):
+        value = value.tolist()
+    if not isinstance(value, Iterable):
+        return []
+    return [float(item) for item in value if _is_scalar_metric(item)]
+
+
+def _metric_matrix(value: Any) -> list[list[float]]:
+    if value is None or isinstance(value, (str, bytes, dict)):
+        return []
+    if hasattr(value, "tolist"):
+        value = value.tolist()
+    if not isinstance(value, Iterable):
+        return []
+
+    rows: list[list[float]] = []
+    for row in value:
+        if hasattr(row, "tolist"):
+            row = row.tolist()
+        if isinstance(row, Iterable) and not isinstance(row, (str, bytes, dict)):
+            row_values = [float(item) for item in row if _is_scalar_metric(item)]
+            if row_values:
+                rows.append(row_values)
+    return rows
+
+
+def _value_at(values: list[float], index: int) -> Optional[float]:
+    if index >= len(values):
+        return None
+    return values[index]
+
+
+def _format_optional_csv_metric(value: Optional[float]) -> str:
+    if value is None:
+        return ""
+    return f"{value:.6f}"
 
 
 def _read_results_csv(csv_path: Path) -> list[dict[str, float]]:

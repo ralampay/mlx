@@ -248,6 +248,9 @@ MLX also now writes extra training graphs into the resolved run directory, along
 - `detection_metrics.png`: precision, recall, F1, `mAP@0.50`, and `mAP@0.50:0.95`
 - `learning_rate.png`: learning-rate schedule curves
 - `speed_metrics.png`: per-epoch speed metrics if Ultralytics records them
+- `per_class_map.csv`: per-class `mAP@0.50` and `mAP@0.50:0.95` values
+- `per_class_map50.csv`: per-class `mAP@0.50` values
+- `per_class_map50.png`: bar chart of per-class `mAP@0.50`
 - `per_class_map50_95.csv`: per-class `mAP@0.50:0.95` values
 - `per_class_map50_95.png`: bar chart of per-class `mAP@0.50:0.95`
 

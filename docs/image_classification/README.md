@@ -238,6 +238,12 @@ Supported one-shot models:
 
 - `siamese-le-net`
 
+Parameter counts for the available one-shot models, using the current default RGB implementation with `--embedding-size 4096`:
+
+| Model | Parameters | Special Properties |
+| --- | ---: | --- |
+| `siamese-le-net` | 38,964,545 | <ul><li>Siamese convolutional embedding model for pairwise image similarity</li><li>Builds positive and negative pairs from label-organized image folders at runtime</li><li>Uses a 4,096-wide embedding by default; changing `--embedding-size` changes the parameter count</li></ul> |
+
 ### One-Shot Dataset Builder
 
 Use `build-dataset` when your source images are grouped by label but do not yet have `train/`, `val/`, and `test/` folders. This is the common setup for one-shot datasets such as Omniglot-style character folders.

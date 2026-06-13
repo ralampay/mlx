@@ -58,7 +58,7 @@ Training expects a dataset root with at least:
     └── <label>/
 ```
 
-Each label directory must contain at least two images so positive pairs can be generated.
+For one-shot training and evaluation, each label directory must contain at least two images so positive pairs can be generated.
 
 This same split layout is used by both model families:
 
@@ -78,7 +78,7 @@ The standard classification path uses `ImageClassificationDataset(dataset_path, 
     └── image-2.png
 ```
 
-It interactively creates `train/`, `val/`, and `test/` splits in a new output directory.
+It creates `train/`, `val/`, and `test/` splits in a new output directory. You can run it interactively or pass counts/ratios and an output path for a non-interactive build.
 
 ## Training
 
@@ -182,6 +182,31 @@ Detailed architecture, naming, and benchmarking notes are documented in:
 
 ### One-Shot Classification
 
+One-shot classification trains a Siamese similarity model. Instead of learning a fixed softmax classifier over known classes, the model learns whether two images are from the same class. Training and validation data are still organized by label, but the loader builds positive pairs from two images in the same label directory and negative pairs from images in different label directories.
+
+Recommended dataset layout:
+
+```text
+<dataset-root>/
+├── train/
+│   ├── alphabet_a/
+│   │   ├── sample-1.png
+│   │   └── sample-2.png
+│   └── alphabet_b/
+│       ├── sample-1.png
+│       └── sample-2.png
+├── val/
+│   ├── alphabet_a/
+│   └── alphabet_b/
+└── test/
+    ├── alphabet_a/
+    └── alphabet_b/
+```
+
+`train/` and `val/` are required for training. `test/` is optional for training, but it is the usual reference split for `benchmark` and `infer-image`.
+
+Every label used by a one-shot split needs at least two images. Labels with fewer than two images cannot produce positive pairs and are ignored by the one-shot pair loader.
+
 Example:
 
 ```bash
@@ -195,6 +220,8 @@ python -m mlx \
     --batch-size 8 \
     --device cuda:0
 ```
+
+With the default `--use-best` behavior, the best validation-loss checkpoint is written to `./artifacts/siamese/siamese-le-net.pth`.
 
 Important arguments:
 
@@ -210,6 +237,94 @@ Important arguments:
 Supported one-shot models:
 
 - `siamese-le-net`
+
+### One-Shot Dataset Builder
+
+Use `build-dataset` when your source images are grouped by label but do not yet have `train/`, `val/`, and `test/` folders. This is the common setup for one-shot datasets such as Omniglot-style character folders.
+
+Expected source layout:
+
+```text
+./data/omniglot-raw/
+├── character_001/
+│   ├── image-01.png
+│   ├── image-02.png
+│   └── ...
+├── character_002/
+│   ├── image-01.png
+│   ├── image-02.png
+│   └── ...
+└── character_003/
+    ├── image-01.png
+    ├── image-02.png
+    └── ...
+```
+
+Build a one-shot-ready split with fixed image counts per label:
+
+```bash
+python -m mlx \
+    --mode image_classification \
+    --action build-dataset \
+    --dataset ./data/omniglot-raw \
+    --output ./data/omniglot-one-shot \
+    --train-count 12 \
+    --val-count 4 \
+    --test-count 4 \
+    --overwrite \
+    --seed 42
+```
+
+This creates:
+
+```text
+./data/omniglot-one-shot/
+├── train/
+│   ├── character_001/
+│   ├── character_002/
+│   └── character_003/
+├── val/
+│   ├── character_001/
+│   ├── character_002/
+│   └── character_003/
+└── test/
+    ├── character_001/
+    ├── character_002/
+    └── character_003/
+```
+
+Then train the one-shot model from the generated split:
+
+```bash
+python -m mlx \
+    --mode image_classification \
+    --model siamese-le-net \
+    --action train \
+    --dataset ./data/omniglot-one-shot \
+    --output ./artifacts/siamese \
+    --epochs 50 \
+    --batch-size 8 \
+    --device cuda:0 \
+    --seed 42
+```
+
+For proportional splits, use ratio mode. Ratios are normalized and applied within each label independently:
+
+```bash
+python -m mlx \
+    --mode image_classification \
+    --action build-dataset \
+    --dataset ./data/omniglot-raw \
+    --split-mode ratios \
+    --train-ratio 0.7 \
+    --val-ratio 0.15 \
+    --test-ratio 0.15 \
+    --output ./data/omniglot-one-shot \
+    --overwrite \
+    --seed 42
+```
+
+The builder copies image files; it does not generate pairs on disk. Pair generation happens at training and benchmarking time through `OneShotPairDataset`.
 
 ## Available Actions
 
@@ -450,10 +565,11 @@ Example:
 python -m mlx \
     --mode image_classification \
     --action infer-image \
+    --model-path ./artifacts/siamese/siamese-le-net.pth \
     --dataset ~/datasets/omniglot/test \
     --input-img ~/datasets/query/sample.png \
     --model siamese-le-net \
     --device cpu
 ```
 
-`infer-image` loads the query image, computes its embedding, compares it against images under `--dataset`, and renders the top matches.
+For one-shot models, `infer-image` requires `--model-path`. It loads the query image, computes its embedding, compares it against images under `--dataset`, and renders the top matches.

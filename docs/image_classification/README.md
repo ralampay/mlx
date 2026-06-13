@@ -541,10 +541,34 @@ python -m mlx \
     --dataset ~/datasets/omniglot/test \
     --model-path ~/datasets/omniglot/checkpoints/best_epoch_10.pt \
     --output ./benchmark-results \
+    --num-pairs 100 \
+    --seed 42 \
     --device cpu
 ```
 
-For one-shot models, `benchmark` requires `--model-path` and evaluates similarity pairs built from the provided dataset directory. When `--output` is set, MLX writes the same benchmark artifacts, using binary confusion-matrix and ROC outputs.
+For one-shot models, `benchmark` requires `--model-path` and evaluates deterministic positive and negative similarity pairs built from the provided dataset directory. `--num-pairs` controls how many pairs are sampled per label, split as evenly as possible between same-label and different-label pairs. Use `--seed` for reproducible pair sampling.
+
+When `--output` is set, MLX writes the shared benchmark artifacts with binary labels:
+
+- `metrics.csv`: aggregate pair-verification metrics including accuracy, macro precision, macro recall, F1, ROC AUC, average precision, equal error rate, best-F1 threshold, Youden-threshold values, and an N-way classification metric summary
+- `confusion_matrix.csv`: binary confusion-matrix counts for `different` and `same`
+- `confusion_matrix.png`: rendered binary confusion matrix
+- `roc_curve.png`: binary ROC curve
+
+It also writes one-shot research artifacts:
+
+- `pair_predictions.csv`: one row per evaluated pair with both image paths, both labels, target, prediction, and same-class probability
+- `threshold_metrics.csv`: threshold sweep with accuracy, precision, recall, specificity, F1, FPR, FNR, TP, FP, TN, and FN
+- `precision_recall_curve.png`: precision-recall curve with average precision
+- `score_distribution.png`: score histograms for same-label and different-label pairs
+
+For label-level one-shot classification results, MLX also writes `n_way_classification/` using a leave-one-out nearest-reference evaluation over the benchmark directory:
+
+- `n_way_classification/metrics.csv`: standard-style classification metrics for predicted labels
+- `n_way_classification/confusion_matrix.csv`: multi-class confusion-matrix counts
+- `n_way_classification/confusion_matrix.png`: rendered multi-class confusion matrix
+- `n_way_classification/roc_curve.png`: one-vs-rest ROC curves derived from per-label similarity scores
+- `n_way_classification/predictions.csv`: one row per query image with true label, predicted label, best reference image, best same-class probability, and correctness
 
 ## Image Inference
 

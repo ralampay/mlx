@@ -103,7 +103,7 @@ The documented deployment path is now: train with Ultralytics, convert the resul
 `image_classification` supports both Siamese one-shot models and standard classifiers such as `resnet18`, `resnet50`, `densenet121`, `mobilenet_v3_large`, `efficientnet_b0`, `convnext_tiny`, `convnext_small`, `convnext_base`, `convnext_large`, `draxnet`, and `drax_mobilenet_v3_large`.
 
 For image-classification training, `--output` is an artifact directory. Training writes `{model}.pth` and `training.csv` inside that directory.
-For image-classification benchmarking, `--output` can also be used to store `metrics.csv`, `confusion_matrix.csv`, `confusion_matrix.png`, and `roc_curve.png`.
+For image-classification benchmarking, `--output` can also be used to store `metrics.csv`, `confusion_matrix.csv`, `confusion_matrix.png`, and `roc_curve.png`. One-shot benchmarks additionally write pair-level predictions, threshold metrics, a precision-recall curve, a score-distribution plot, and N-way classification artifacts.
 
 ## Documentation
 

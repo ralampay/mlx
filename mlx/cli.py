@@ -93,6 +93,15 @@ def build_parser() -> RichArgumentParser:
     parser.add_argument("--num-classes", type=int, default=2, dest="num_classes")
     parser.add_argument("--mask-threshold", type=float, default=0.5, dest="mask_threshold")
     parser.add_argument("--overlay-alpha", type=float, default=0.45, dest="overlay_alpha")
+    parser.add_argument("--cam-method", choices=("gradcam", "ablationcam", "scorecam"), default="gradcam", dest="cam_method")
+    parser.add_argument("--target-layer", default=None, dest="target_layer")
+    parser.add_argument("--target-index", type=int, default=None, dest="target_index")
+    parser.add_argument("--max-samples", type=int, default=None, dest="max_samples")
+    parser.add_argument("--display", action=argparse.BooleanOptionalAction, default=True)
+    parser.add_argument("--save-images", action=argparse.BooleanOptionalAction, default=True, dest="save_images")
+    parser.add_argument("--window-delay", type=int, default=0, dest="window_delay")
+    parser.add_argument("--aug-smooth", action=argparse.BooleanOptionalAction, default=False, dest="aug_smooth")
+    parser.add_argument("--eigen-smooth", action=argparse.BooleanOptionalAction, default=False, dest="eigen_smooth")
     return parser
 
 
@@ -172,6 +181,15 @@ def _render_help() -> None:
     options.add_row("--num-classes", "2", "Number of segmentation classes expected in the masks.")
     options.add_row("--mask-threshold", "0.5", "Threshold used when rendering binary segmentation masks.")
     options.add_row("--overlay-alpha", "0.45", "Blend strength for segmentation overlays.")
+    options.add_row("--cam-method", "gradcam", "CAM method for image-classification cam: gradcam, ablationcam, or scorecam.")
+    options.add_row("--target-layer", "None", "Optional dotted module path to explain, such as layer4.1 or features.-1.")
+    options.add_row("--target-index", "None", "Optional class index or Siamese output index to explain. Defaults to model prediction.")
+    options.add_row("--max-samples", "None", "Maximum number of test samples or one-shot pairs to render.")
+    options.add_row("--display / --no-display", "True", "Show rendered CAM images in OpenCV windows for CLI use.")
+    options.add_row("--save-images / --no-save-images", "True", "Write rendered CAM images under --output when provided.")
+    options.add_row("--window-delay", "0", "OpenCV waitKey delay in milliseconds between displayed CAM images.")
+    options.add_row("--aug-smooth / --no-aug-smooth", "False", "Apply Grad-CAM test-time augmentation smoothing.")
+    options.add_row("--eigen-smooth / --no-eigen-smooth", "False", "Apply Grad-CAM Eigen smoothing.")
     options.add_row("--help", "False", "Show this help screen.")
     console.print(options)
 
@@ -179,7 +197,7 @@ def _render_help() -> None:
     available.add_column("Mode", style="cyan", no_wrap=True)
     available.add_column("Actions", style="white")
     available.add_row("object_detection", "train, infer-camera, infer-video, convert")
-    available.add_row("image_classification", "train, test, benchmark, infer-image, build-dataset")
+    available.add_row("image_classification", "train, test, benchmark, infer-image, cam, build-dataset")
     available.add_row("segmentation", "train, test, infer-image, infer-camera, infer-video, build-dataset")
     console.print(available)
 

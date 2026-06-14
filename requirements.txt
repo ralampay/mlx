@@ -9,4 +9,5 @@ torch
 torchvision
 tqdm
 jupyter
+grad-cam
 ultralytics @ git+https://github.com/ralampay/ultralytics

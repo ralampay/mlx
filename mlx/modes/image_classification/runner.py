@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from typing import Any
 
+from mlx.modes.image_classification.cam import generate_image_classification_cams
 from mlx.core.exceptions import MLXUserError
 from mlx.modes.image_classification.data import build_image_classification_dataset
 from mlx.modes.image_classification.evaluation import benchmark_image_classification
@@ -48,6 +49,7 @@ ACTION_HANDLERS = {
         random_seed=config.get("random_seed"),
     ),
     "infer-image": infer_image_classification,
+    "cam": generate_image_classification_cams,
     "test": smoke_test_image_classification,
     "train": train_image_classification,
 }

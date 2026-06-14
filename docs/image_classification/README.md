@@ -18,6 +18,7 @@ The source is organized by responsibility:
 - `train.py`: training loops and smoke tests for one-shot and standard classifiers.
 - `evaluation.py`: benchmark flows for both model families.
 - `inference.py`: image inference for both model families.
+- `cam.py`: Grad-CAM, AblationCAM, and ScoreCAM rendering for trained checkpoints.
 - `data.py`: dataset loading, dataset building, and shared image preprocessing.
 - `models/`: Siamese and standard classification model builders.
 - `utils.py`: model resolution and checkpoint metadata helpers.
@@ -203,7 +204,7 @@ Recommended dataset layout:
     └── alphabet_b/
 ```
 
-`train/` and `val/` are required for training. `test/` is optional for training, but it is the usual reference split for `benchmark` and `infer-image`.
+`train/` and `val/` are required for training. `test/` is optional for training, but it is the usual reference split for `benchmark`, `infer-image`, and `cam`.
 
 Every label used by a one-shot split needs at least two images. Labels with fewer than two images cannot produce positive pairs and are ignored by the one-shot pair loader.
 
@@ -338,6 +339,7 @@ The builder copies image files; it does not generate pairs on disk. Pair generat
 - `test`: run a random-tensor smoke test for the configured model.
 - `benchmark`: evaluate a trained checkpoint against a dataset directory. Standard models classify labels directly; one-shot models evaluate pair similarity.
 - `infer-image`: run inference for one input image. Standard models output class probabilities; one-shot models compare against a reference dataset and show the best matches.
+- `cam`: render class activation maps for test images from a trained checkpoint. Supported methods are `gradcam`, `ablationcam`, and `scorecam`.
 - `build-dataset`: interactively create train/val/test splits from a label-organized source dataset.
 
 ## Build Dataset
@@ -503,7 +505,7 @@ How many images per label for TEST? 4
 Enter output path for split dataset ./data/omniglot-split
 ```
 
-Use the generated output directory as `--dataset` for `train`, and use its `test/` directory for `benchmark` or `infer-image` when needed.
+Use the generated output directory as `--dataset` for `train`, and use its `test/` directory for `benchmark`, `infer-image`, or `cam` when needed.
 
 ## Benchmarking
 
@@ -569,6 +571,106 @@ For label-level one-shot classification results, MLX also writes `n_way_classifi
 - `n_way_classification/confusion_matrix.png`: rendered multi-class confusion matrix
 - `n_way_classification/roc_curve.png`: one-vs-rest ROC curves derived from per-label similarity scores
 - `n_way_classification/predictions.csv`: one row per query image with true label, predicted label, best reference image, best same-class probability, and correctness
+
+## Class Activation Maps
+
+The `cam` action explains trained image-classification checkpoints by rendering activation heatmaps over test images. It uses the `pytorch-grad-cam` package, installed through the `grad-cam` dependency.
+
+Supported methods:
+
+- `gradcam`: gradient-weighted class activation maps.
+- `ablationcam`: activation ablation maps. This is usually slower than Grad-CAM.
+- `scorecam`: score-weighted activation maps. This is usually slower than Grad-CAM.
+
+The operation is implemented in `mlx.modes.image_classification.cam` so the same components can be reused from notebooks without opening OpenCV windows.
+
+### Standard Classification CAM
+
+Example:
+
+```bash
+python -m mlx \
+    --mode image_classification \
+    --action cam \
+    --model resnet18 \
+    --model-path ./artifacts/resnet18/resnet18.pth \
+    --dataset ./data/animals \
+    --output ./cam-results/resnet18 \
+    --cam-method gradcam \
+    --max-samples 20 \
+    --device cuda:0
+```
+
+For standard classifiers, `cam` loads class labels from checkpoint metadata and reads images from `--dataset`. If `--dataset` points to a dataset root and a `test/` directory exists, MLX uses that `test/` directory automatically. By default, each image is explained for the model's predicted class. Pass `--target-index` to explain a specific class index instead.
+
+### One-Shot CAM
+
+Example:
+
+```bash
+python -m mlx \
+    --mode image_classification \
+    --action cam \
+    --model siamese-le-net \
+    --model-path ./artifacts/siamese/siamese-le-net.pth \
+    --dataset ./data/omniglot-one-shot \
+    --output ./cam-results/siamese \
+    --cam-method gradcam \
+    --num-pairs 25 \
+    --max-samples 10 \
+    --device cuda:0
+```
+
+For one-shot models, `cam` builds deterministic test pairs using the same pair-sampling helper as benchmarking. Each pair produces two CAM outputs: one for the first image while the second image is fixed, and one for the second image while the first image is fixed. The target is the Siamese similarity output, so the heatmap shows which regions affected the pair-similarity score.
+
+`--num-pairs` controls how many candidate pairs are sampled per label before `--max-samples` is applied. Use `--seed` for reproducible pair sampling.
+
+### CAM Options
+
+- `--cam-method`: one of `gradcam`, `ablationcam`, or `scorecam`. Defaults to `gradcam`.
+- `--model-path`: trained MLX checkpoint to explain.
+- `--dataset`: dataset root or test directory. If a `test/` child exists, it is used automatically.
+- `--output`: optional directory for rendered CAM images.
+- `--display` / `--no-display`: show rendered images in OpenCV windows. CLI usage defaults to display enabled; notebook usage should usually set `display=False`.
+- `--save-images` / `--no-save-images`: write rendered overlays under `--output`. Enabled by default when `--output` is provided.
+- `--max-samples`: maximum number of test samples to process. For one-shot CAM this limits sampled pairs, and each pair emits two images.
+- `--target-layer`: optional dotted module path for the CAM target layer, such as `layer4.-1`, `features.-1`, or `embedding.3`.
+- `--target-index`: optional class index for standard classifiers. For one-shot models this targets the Siamese output index, normally `0`.
+- `--aug-smooth`: enable test-time augmentation smoothing from `pytorch-grad-cam`.
+- `--eigen-smooth`: enable Eigen smoothing from `pytorch-grad-cam`.
+- `--window-delay`: OpenCV `waitKey` delay in milliseconds between displayed images. The default `0` waits for a key press.
+
+Default target-layer selection is conservative:
+
+- ResNet-style and `draxnet` models use `layer4.-1`.
+- Models with a `features` stack use `features.-1`.
+- `siamese-le-net` uses `embedding.3`.
+- If no known structure matches, MLX uses the last convolutional layer it can find.
+
+### Notebook Usage
+
+Use `generate_image_classification_cams` directly to get Python objects instead of only files or OpenCV windows:
+
+```python
+from mlx.modes.image_classification.cam import generate_image_classification_cams
+
+results = generate_image_classification_cams({
+    "model": "siamese-le-net",
+    "model_path": "./artifacts/siamese/siamese-le-net.pth",
+    "dataset_path": "./data/omniglot-one-shot",
+    "output_path": "./cam-results/siamese",
+    "device": "cuda:0",
+    "cam_method": "gradcam",
+    "num_pairs": 25,
+    "max_samples": 10,
+    "display": False,
+})
+
+first = results[0]
+first.visualization      # RGB uint8 overlay image
+first.grayscale_cam      # 2D CAM array
+first.output_path        # saved file path when save_images is enabled
+```
 
 ## Image Inference
 

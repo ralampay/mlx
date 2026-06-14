@@ -10,6 +10,7 @@ dependencies = [
     "numpy",
     "onnxruntime",
     "opencv-python",
+    "grad-cam",
     "rich>=13.7.0",
     "torch",
     "torchvision",

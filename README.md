@@ -51,6 +51,7 @@ pip install -r requirements.txt
 Current runtime dependencies:
 
 - `numpy`
+- `grad-cam`
 - `opencv-python`
 - `python-dotenv`
 - `rich`
@@ -77,6 +78,7 @@ python -m mlx --mode object_detection --action infer-camera --model-path ./expor
 python -m mlx --mode object_detection --action infer-video --model-path ./exports/best.onnx --file-path ~/videos/sample.mp4
 python -m mlx --mode image_classification --action train --output ./artifacts/resnet18 --dataset ./dataset --model resnet18 --seed 42
 python -m mlx --mode image_classification --action train --output ./artifacts/siamese --dataset ./omniglot --model siamese-le-net --seed 42
+python -m mlx --mode image_classification --action cam --model resnet18 --model-path ./artifacts/resnet18/resnet18.pth --dataset ./dataset --output ./cam-results --cam-method gradcam
 python -m mlx --mode image_classification --action build-dataset --dataset ./raw-dataset
 python -m mlx --mode image_classification --action build-dataset --dataset ./raw-dataset --output ./dataset --train-count 100 --val-count 20 --test-count 20 --overwrite --seed 42
 python -m mlx --mode image_classification --action build-dataset --dataset ./raw-dataset --split-mode ratios --train-ratio 0.7 --val-ratio 0.15 --test-ratio 0.15 --output ./dataset --overwrite --seed 42
@@ -97,13 +99,14 @@ The documented deployment path is now: train with Ultralytics, convert the resul
 | Mode | Package | Actions | Docs |
 | --- | --- | --- | --- |
 | `object_detection` | `mlx.modes.object_detection.ultralytics` | `train`, `infer-camera`, `infer-video`, `convert` | [Object detection](./docs/object_detection/README.md) |
-| `image_classification` | `mlx.modes.image_classification` | `train`, `test`, `benchmark`, `infer-image`, `build-dataset` | [Image classification](./docs/image_classification/README.md) |
+| `image_classification` | `mlx.modes.image_classification` | `train`, `test`, `benchmark`, `infer-image`, `cam`, `build-dataset` | [Image classification](./docs/image_classification/README.md) |
 | `segmentation` | `mlx.modes.segmentation` | `train`, `test`, `infer-image`, `infer-camera`, `infer-video` | [Segmentation](./docs/segmentation/README.md) |
 
 `image_classification` supports both Siamese one-shot models and standard classifiers such as `resnet18`, `resnet50`, `densenet121`, `mobilenet_v3_large`, `efficientnet_b0`, `convnext_tiny`, `convnext_small`, `convnext_base`, `convnext_large`, `draxnet`, and `drax_mobilenet_v3_large`.
 
 For image-classification training, `--output` is an artifact directory. Training writes `{model}.pth` and `training.csv` inside that directory.
 For image-classification benchmarking, `--output` can also be used to store `metrics.csv`, `confusion_matrix.csv`, `confusion_matrix.png`, and `roc_curve.png`. One-shot benchmarks additionally write pair-level predictions, threshold metrics, a precision-recall curve, a score-distribution plot, and N-way classification artifacts.
+For image-classification explainability, `--action cam` renders Grad-CAM, AblationCAM, or ScoreCAM overlays for test images from a trained checkpoint. CLI runs can display OpenCV windows, and the same `mlx.modes.image_classification.cam` functions can be imported from notebooks.
 
 ## Documentation
 

@@ -4,6 +4,17 @@ import torch
 from torch import nn
 
 
+DRAX_FUSION_MODES = ("average", "sknet")
+
+
+def resolve_drax_fusion_mode(fusion_mode: str) -> str:
+    normalized = fusion_mode.strip().lower()
+    if normalized not in DRAX_FUSION_MODES:
+        supported = ", ".join(DRAX_FUSION_MODES)
+        raise ValueError(f"Unsupported Drax fusion mode '{fusion_mode}'. Choose one of: {supported}.")
+    return normalized
+
+
 class DropPath(nn.Module):
     def __init__(self, drop_prob: float = 0.0) -> None:
         super().__init__()
@@ -146,12 +157,25 @@ class DraxBlock(nn.Module):
         use_attention: bool = True,
         efficient: bool = True,
         drop_path: float = 0.0,
+        fusion_mode: str = "average",
     ) -> None:
         super().__init__()
         self.use_attention = use_attention
         self.efficient = efficient
+        self.fusion_mode = resolve_drax_fusion_mode(fusion_mode)
         self.convnext = ConvNeXtBlock(dim)
         self.drop_path = DropPath(drop_path)
+
+        if use_attention and self.fusion_mode == "sknet":
+            fusion_dim = max(32, dim // 16)
+            self.fusion_gate = nn.Sequential(
+                nn.AdaptiveAvgPool2d(1),
+                nn.Conv2d(dim, fusion_dim, kernel_size=1),
+                nn.ReLU(inplace=True),
+                nn.Conv2d(fusion_dim, 2 * dim, kernel_size=1),
+            )
+        else:
+            self.fusion_gate = None
 
         if not use_attention:
             self.attention = None
@@ -179,8 +203,20 @@ class DraxBlock(nn.Module):
         else:
             attention_delta = self.attention(x) - x
 
-        fused_delta = 0.5 * (conv_delta + attention_delta)
+        fused_delta = self._fuse_deltas(conv_delta, attention_delta)
         return x + self.drop_path(fused_delta)
+
+    def _fuse_deltas(self, conv_delta: torch.Tensor, attention_delta: torch.Tensor) -> torch.Tensor:
+        if self.fusion_mode == "average":
+            return 0.5 * (conv_delta + attention_delta)
+
+        if self.fusion_gate is None:
+            raise RuntimeError("SKNet fusion requires an initialized fusion gate.")
+
+        batch_size, channels, _, _ = conv_delta.shape
+        logits = self.fusion_gate(conv_delta + attention_delta)
+        weights = logits.reshape(batch_size, 2, channels, 1, 1).softmax(dim=1)
+        return weights[:, 0] * conv_delta + weights[:, 1] * attention_delta
 
 
 class ConvActivationBlock(nn.Module):

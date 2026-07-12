@@ -4,7 +4,7 @@ import torch
 from torch import nn
 
 from mlx.core.exceptions import MLXUserError
-from mlx.modes.image_classification.models.blocks import DraxBlock
+from mlx.modes.image_classification.models.blocks import DraxBlock, resolve_drax_fusion_mode
 
 
 class DraxMobileNetV3Large(nn.Module):
@@ -18,6 +18,7 @@ class DraxMobileNetV3Large(nn.Module):
         use_attention: bool = True,
         efficient_attention: bool = True,
         drop_path: float = 0.0,
+        fusion_mode: str = "average",
     ) -> None:
         super().__init__()
         if drax_blocks < 1:
@@ -41,6 +42,7 @@ class DraxMobileNetV3Large(nn.Module):
                     use_attention=use_attention,
                     efficient=efficient_attention,
                     drop_path=drop_path,
+                    fusion_mode=fusion_mode,
                 )
                 for _ in range(drax_blocks)
             ]
@@ -84,6 +86,10 @@ def _replace_mobilenet_stem_conv(model: nn.Module) -> None:
 def build_drax_mobilenet_v3_large(*, num_classes: int, colored: bool, pretrained: bool, config: dict | None = None):
     config = config or {}
     try:
+        fusion_mode = resolve_drax_fusion_mode(str(config.get("drax_mobilenet_fusion_mode", "average")))
+    except ValueError as exc:
+        raise MLXUserError(str(exc)) from exc
+    try:
         from torchvision import models as torchvision_models
     except ImportError as exc:
         raise MLXUserError(
@@ -104,4 +110,5 @@ def build_drax_mobilenet_v3_large(*, num_classes: int, colored: bool, pretrained
         use_attention=bool(config.get("drax_mobilenet_use_attention", True)),
         efficient_attention=bool(config.get("drax_mobilenet_efficient_attention", True)),
         drop_path=float(config.get("drax_mobilenet_drop_path", 0.0)),
+        fusion_mode=fusion_mode,
     )

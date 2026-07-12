@@ -105,7 +105,8 @@ x
  │    SelfAttention2D(x or reduced x) - x
  │
  └─ Fuse
-      0.5 * (conv_delta + attention_delta)
+      average: 0.5 * (conv_delta + attention_delta)
+      sknet: input-dependent channel-wise weighted sum
       → DropPath
       → residual add
 ```
@@ -115,6 +116,13 @@ Key points:
 - it is a project-specific hybrid mixer, not a pure ConvNeXt block
 - it is currently closer in spirit to conv-attention hybrid literature than to pure ResNet blocks
 - it is designed to be replaceable as experiments continue
+
+The `fusion_mode` constructor option selects the fusion strategy:
+
+- `average` is the default and preserves the fixed `0.5 / 0.5` coefficients
+- `sknet` globally pools the summed branch deltas, predicts two logits per channel through a bottleneck MLP, and applies a branch-wise softmax
+
+The SKNet-style mode therefore allows each input and feature channel to choose a different balance between local convolution and global attention. It follows the adaptive selection mechanism from [Selective Kernel Networks](https://openaccess.thecvf.com/content_CVPR_2019/papers/Li_Selective_Kernel_Networks_CVPR_2019_paper.pdf), without reproducing SKNet's convolution branches or BatchNorm-equipped gate.
 
 ## Related Naming
 
@@ -132,6 +140,7 @@ This keeps generic baseline components separate from project-specific experiment
 The main configuration hook for block substitution is:
 
 - `draxnet_stage_blocks`
+- `draxnet_fusion_mode`, either `average` (default) or `sknet`
 
 Current default:
 
@@ -192,3 +201,5 @@ This design is intentional:
 - it applies Drax where the spatial map is already compact
 - it avoids replacing internal inverted residual blocks, which would break more pretrained structure
 - it keeps parameter growth controlled through the adapter bottleneck instead of running Drax at full `960` channels
+
+Its fusion strategy is configured independently with `drax_mobilenet_fusion_mode`, using either `average` (default) or `sknet`.

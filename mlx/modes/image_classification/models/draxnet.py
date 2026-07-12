@@ -6,7 +6,7 @@ import torch
 from torch import nn
 
 from mlx.core.exceptions import MLXUserError
-from mlx.modes.image_classification.models.blocks import DraxBlock
+from mlx.modes.image_classification.models.blocks import DraxBlock, resolve_drax_fusion_mode
 
 
 class BasicResidualBlock(nn.Module):
@@ -64,6 +64,7 @@ class DraxResidualBlock(nn.Module):
         downsample: nn.Module | None = None,
         use_attention: bool = True,
         efficient_attention: bool = True,
+        fusion_mode: str = "average",
     ) -> None:
         super().__init__()
         self.conv1 = nn.Conv2d(
@@ -80,6 +81,7 @@ class DraxResidualBlock(nn.Module):
             dim=out_channels,
             use_attention=use_attention,
             efficient=efficient_attention,
+            fusion_mode=fusion_mode,
         )
         self.proj = nn.Conv2d(out_channels, out_channels, kernel_size=3, stride=1, padding=1, bias=False)
         self.bn2 = nn.BatchNorm2d(out_channels)
@@ -113,12 +115,14 @@ class DraxNet(nn.Module):
         layers: Sequence[int] = (2, 2, 2, 2),
         stage_block_types: Sequence[str] = ("basic", "basic", "basic", "drax"),
         zero_init_residual: bool = False,
+        fusion_mode: str = "average",
     ) -> None:
         super().__init__()
         if tuple(layers) != (2, 2, 2, 2):
             raise ValueError("DraxNet currently implements ResNet-18 only, so layers must be (2, 2, 2, 2).")
         if len(stage_block_types) != len(layers):
             raise ValueError("stage_block_types must have one entry per ResNet stage.")
+        self.fusion_mode = resolve_drax_fusion_mode(fusion_mode)
 
         self.inplanes = 64
         self.conv1 = nn.Conv2d(in_channels, self.inplanes, kernel_size=7, stride=2, padding=3, bias=False)
@@ -167,17 +171,13 @@ class DraxNet(nn.Module):
                 nn.BatchNorm2d(planes * block.expansion),
             )
 
+        block_kwargs = {"fusion_mode": self.fusion_mode} if block is DraxResidualBlock else {}
         layers: list[nn.Module] = [
-            block(
-                self.inplanes,
-                planes,
-                stride=stride,
-                downsample=downsample,
-            )
+            block(self.inplanes, planes, stride=stride, downsample=downsample, **block_kwargs)
         ]
         self.inplanes = planes * block.expansion
         for _ in range(1, blocks):
-            layers.append(block(self.inplanes, planes))
+            layers.append(block(self.inplanes, planes, **block_kwargs))
         return nn.Sequential(*layers)
 
     def _init_weights(self) -> None:
@@ -206,10 +206,15 @@ class DraxNet(nn.Module):
 
 def build_draxnet(*, num_classes: int, colored: bool, pretrained: bool, config: dict | None = None):
     config = config or {}
+    try:
+        fusion_mode = resolve_drax_fusion_mode(str(config.get("draxnet_fusion_mode", "average")))
+    except ValueError as exc:
+        raise MLXUserError(str(exc)) from exc
     model = DraxNet(
         in_channels=3 if colored else 1,
         num_classes=num_classes,
         stage_block_types=tuple(config.get("draxnet_stage_blocks", "basic,basic,basic,drax").split(",")),
+        fusion_mode=fusion_mode,
     )
 
     if pretrained:

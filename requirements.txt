@@ -1,5 +1,7 @@
 matplotlib
 numpy
+pandas
+llama-cpp-python
 onnxruntime
 opencv-python
 python-dotenv

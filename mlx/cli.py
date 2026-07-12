@@ -41,6 +41,7 @@ MODE_REGISTRY: Dict[str, str] = {
     "object-detection": "mlx.modes.object_detection.ultralytics.runner:run_object_detection",
     "object_detection": "mlx.modes.object_detection.ultralytics.runner:run_object_detection",
     "segmentation": "mlx.modes.segmentation.runner:run_segmentation",
+    "nlp": "mlx.modes.nlp.runner:run_nlp",
 }
 
 
@@ -68,6 +69,10 @@ def build_parser() -> RichArgumentParser:
     parser.add_argument("--split-mode", choices=("counts", "ratios"), default=None, dest="split_mode")
     parser.add_argument("--overwrite", action=argparse.BooleanOptionalAction, default=False)
     parser.add_argument("--model-path", default=None, dest="model_path")
+    parser.add_argument("--model-file", default=None, dest="model_file")
+    parser.add_argument("--input-file", default=None, dest="input_file")
+    parser.add_argument("--output-file", default=None, dest="output_file")
+    parser.add_argument("--column-name", "--column_name", default="content", dest="column_name")
     parser.add_argument("--file-path", default=None, dest="file_path")
     parser.add_argument("--input-img", default="/tmp/image.jpg", dest="input_img")
     parser.add_argument("--confidence", type=float, default=0.25)
@@ -108,7 +113,7 @@ def build_parser() -> RichArgumentParser:
 def _render_help() -> None:
     console.print(
         Panel.fit(
-            "MLX\nA rich-powered CLI for computer-vision workflows.",
+            "MLX\nA rich-powered CLI for machine-learning workflows.",
             border_style="cyan",
         )
     )
@@ -127,13 +132,14 @@ def _render_help() -> None:
     usage.add_row("python -m mlx --mode segmentation --action train --dataset ./dataset --model unet --output unet-seg.pt")
     usage.add_row("python -m mlx --mode segmentation --action infer-image --model-path ./unet-seg.pt --input-img ./sample.jpg")
     usage.add_row("python -m mlx --mode segmentation --action build-dataset --dataset ./raw-segmentation")
+    usage.add_row("python -m mlx --mode nlp --action embed --model-file ./model.gguf --input-file ./input.csv")
     console.print(usage)
 
     options = Table(title="Options", show_lines=True)
     options.add_column("Flag", style="cyan", no_wrap=True)
     options.add_column("Default", style="magenta")
     options.add_column("Description", style="white")
-    options.add_row("--mode", "None", "Mode to run: object_detection, image_classification, or segmentation.")
+    options.add_row("--mode", "None", "Mode to run: object_detection, image_classification, segmentation, or nlp.")
     options.add_row("--model", "None", "Model identifier, YAML path, or architecture name.")
     options.add_row("--action", "mode-specific", "Sub-action such as train, infer-video, convert, benchmark, or build-dataset.")
     options.add_row("--dataset", "./tmp/dataset", "Dataset source for training: local YOLO root, dataset YAML, or alias like coco8/coco128.")
@@ -147,6 +153,10 @@ def _render_help() -> None:
     options.add_row("--split-mode", "None", "Build-dataset split mode: counts or ratios. Ratio mode splits each label independently using the provided ratios.")
     options.add_row("--overwrite / --no-overwrite", "False", "Allow build-dataset to replace an existing output directory without prompting.")
     options.add_row("--model-path", "None", "Weights checkpoint path for inference, warm starts, or ONNX conversion.")
+    options.add_row("--model-file", "None", "GGUF embedding model used by NLP embed.")
+    options.add_row("--input-file", "None", "Input CSV used by NLP embed.")
+    options.add_row("--output-file", "derived", "Output CSV used by NLP embed; defaults beside the input file.")
+    options.add_row("--column-name", "content", "CSV text column used by NLP embed.")
     options.add_row("--file-path", "None", "Video path for file-based inference.")
     options.add_row("--input-img", "/tmp/image.jpg", "Input image for classification inference.")
     options.add_row("--device", "cpu", "Execution device such as cpu or cuda:0.")
@@ -199,6 +209,7 @@ def _render_help() -> None:
     available.add_row("object_detection", "train, infer-camera, infer-video, convert")
     available.add_row("image_classification", "train, test, benchmark, infer-image, cam, build-dataset")
     available.add_row("segmentation", "train, test, infer-image, infer-camera, infer-video, build-dataset")
+    available.add_row("nlp", "embed")
     console.print(available)
 
 
@@ -228,6 +239,7 @@ def _render_unknown_mode() -> None:
     table.add_row("object_detection", "Ultralytics-backed detection training and inference")
     table.add_row("image_classification", "Image classification workflows for both one-shot and standard classifiers")
     table.add_row("segmentation", "Semantic segmentation workflows for U-Net style models")
+    table.add_row("nlp", "Text embedding workflows for GGUF models and CSV data")
     console.print(table)
 
 
@@ -252,7 +264,11 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
 
     config = _build_config(namespace)
     apply_global_seed(config.get("random_seed"))
-    print_startup(config["mode"], config.get("action"), config["model"])
+    print_startup(
+        config["mode"],
+        config.get("action"),
+        config.get("model") or config.get("model_file"),
+    )
 
     try:
         runner = _resolve_mode_runner(config["mode"])

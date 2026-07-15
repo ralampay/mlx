@@ -300,12 +300,19 @@ def _resolve_target_layer(model: nn.Module, requested_layer: str | None, model_n
 
 
 def _default_target_layer_path(model: nn.Module, model_name: str) -> str:
+    if model_name == "siamese-le-net" and hasattr(model, "embedding"):
+        return "embedding.3"
+    if model_name.startswith("siamese-") and hasattr(model, "embedding"):
+        if model_name == "siamese-drax_mobilenet_v3_large":
+            return "embedding.adapter_up"
+        if hasattr(model.embedding, "layer4"):
+            return "embedding.layer4.-1"
+        if hasattr(model.embedding, "features"):
+            return "embedding.features.-1"
     if hasattr(model, "layer4"):
         return "layer4.-1"
     if hasattr(model, "features"):
         return "features.-1"
-    if model_name == "siamese-le-net" and hasattr(model, "embedding"):
-        return "embedding.3"
     for name, module in reversed(list(model.named_modules())):
         if isinstance(module, nn.Conv2d):
             return name

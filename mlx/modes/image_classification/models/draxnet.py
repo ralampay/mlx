@@ -207,7 +207,9 @@ class DraxNet(nn.Module):
 def build_draxnet(*, num_classes: int, colored: bool, pretrained: bool, config: dict | None = None):
     config = config or {}
     try:
-        fusion_mode = resolve_drax_fusion_mode(str(config.get("draxnet_fusion_mode", "average")))
+        fusion_mode = resolve_drax_fusion_mode(
+            str(config.get("draxnet_fusion_mode", config.get("drax_fusion_mode", "average")))
+        )
     except ValueError as exc:
         raise MLXUserError(str(exc)) from exc
     model = DraxNet(

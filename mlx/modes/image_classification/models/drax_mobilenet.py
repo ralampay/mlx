@@ -86,7 +86,14 @@ def _replace_mobilenet_stem_conv(model: nn.Module) -> None:
 def build_drax_mobilenet_v3_large(*, num_classes: int, colored: bool, pretrained: bool, config: dict | None = None):
     config = config or {}
     try:
-        fusion_mode = resolve_drax_fusion_mode(str(config.get("drax_mobilenet_fusion_mode", "average")))
+        fusion_mode = resolve_drax_fusion_mode(
+            str(
+                config.get(
+                    "drax_mobilenet_fusion_mode",
+                    config.get("drax_fusion_mode", "average"),
+                )
+            )
+        )
     except ValueError as exc:
         raise MLXUserError(str(exc)) from exc
     try:

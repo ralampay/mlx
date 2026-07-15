@@ -55,6 +55,12 @@ def build_parser() -> RichArgumentParser:
     parser.add_argument("--device", default="cpu")
     parser.add_argument("--action", default=None)
     parser.add_argument("--embedding-size", type=int, default=4096, dest="embedding_size")
+    parser.add_argument(
+        "--drax-fusion-mode",
+        choices=("average", "sknet"),
+        default="average",
+        dest="drax_fusion_mode",
+    )
     parser.add_argument("--batch-size", type=int, default=1, dest="batch_size")
     parser.add_argument("--dataset", "--dataset-path", default="./tmp/dataset", dest="dataset_path")
     parser.add_argument("--epochs", type=int, default=100)
@@ -126,6 +132,7 @@ def _render_help() -> None:
     usage.add_row("python -m mlx --mode object_detection --action convert --model-path ./runs/draxnet/exp/weights/best.pt --output ./exports")
     usage.add_row("python -m mlx --mode image_classification --action train --output ./artifacts/resnet18 --dataset ./dataset --model resnet18")
     usage.add_row("python -m mlx --mode image_classification --action train --output ./artifacts/siamese --dataset ./omniglot --model siamese-le-net")
+    usage.add_row("python -m mlx --mode image_classification --action train --output ./artifacts/siamese-resnet --dataset ./omniglot --model siamese-resnet18 --pretrained")
     usage.add_row("python -m mlx --mode image_classification --action build-dataset --dataset ./raw-dataset")
     usage.add_row("python -m mlx --mode image_classification --action build-dataset --dataset ./raw-dataset --output ./dataset --train-count 100 --val-count 20 --test-count 20 --overwrite --seed 42")
     usage.add_row("python -m mlx --mode image_classification --action build-dataset --dataset ./raw-dataset --split-mode ratios --train-ratio 0.7 --val-ratio 0.15 --test-ratio 0.15 --output ./dataset --overwrite --seed 42")
@@ -164,10 +171,15 @@ def _render_help() -> None:
     options.add_row("--batch-size", "1", "Training or evaluation batch size.")
     options.add_row("--epochs", "100", "Training epoch count.")
     options.add_row("--num-pairs", "100", "One-shot image-classification pairs per label for training or benchmarking.")
-    options.add_row("--embedding-size", "4096", "Siamese network embedding size.")
+    options.add_row("--embedding-size", "4096", "Embedding width for any one-shot Siamese model.")
+    options.add_row(
+        "--drax-fusion-mode",
+        "average",
+        "Drax residual fusion: fixed average or adaptive SKNet channel weighting.",
+    )
     options.add_row("--confidence", "0.25", "Detection confidence threshold.")
     options.add_row("--camera-index", "0", "Camera index for webcam inference.")
-    options.add_row("--pretrained / --no-pretrained", "False", "Toggle Ultralytics pretrained initialization.")
+    options.add_row("--pretrained / --no-pretrained", "False", "Toggle supported pretrained model initialization.")
     options.add_row("--verbose / --no-verbose", "False", "Show per-epoch live progress bars when supported.")
     options.add_row(
         "--use-best / --no-use-best",

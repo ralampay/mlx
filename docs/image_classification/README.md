@@ -29,7 +29,7 @@ The source is organized by responsibility:
 
 This mode supports two training setups:
 
-- One-shot similarity models: `siamese-le-net`
+- One-shot similarity models: `siamese-le-net` plus `siamese-` variants of every standard model listed below, such as `siamese-resnet18` and `siamese-draxnet`
 - Standard classification models: `resnet18`, `resnet50`, `densenet121`, `mobilenet_v3_large`, `efficientnet_b0`, `convnext_tiny`, `convnext_small`, `convnext_base`, `convnext_large`, `draxnet`, `drax_mobilenet_v3_large`
 
 The selected `--model` determines which training, benchmarking, and inference path is used. Torchvision-backed standard models are loaded by name and their classifier heads are adapted to the dataset class count. Additional custom standard classifiers can be plugged in later through the model registry.
@@ -237,13 +237,20 @@ Important arguments:
 
 Supported one-shot models:
 
-- `siamese-le-net`
+| Model | Preserved backbone property |
+| --- | --- |
+| `siamese-le-net` | Compact four-stage LeNet-style convolutional embedding |
+| `siamese-resnet18`, `siamese-resnet50` | Residual connections |
+| `siamese-densenet121` | Dense feature concatenation |
+| `siamese-mobilenet_v3_large` | Inverted residuals, squeeze-excitation, and hard-swish |
+| `siamese-efficientnet_b0` | EfficientNet MBConv architecture |
+| `siamese-convnext_tiny`, `siamese-convnext_small`, `siamese-convnext_base`, `siamese-convnext_large` | ConvNeXt blocks at four capacity levels |
+| `siamese-draxnet` | Configurable Drax attention and fusion stages |
+| `siamese-drax_mobilenet_v3_large` | MobileNet V3 features refined by a Drax adapter |
 
-Parameter counts for the available one-shot models, using the current default RGB implementation with `--embedding-size 4096`:
+The backbone is shared between both inputs. Each model projects to `--embedding-size`, applies a sigmoid embedding activation, and learns a same-class probability from the absolute embedding difference. `--pretrained` initializes supported backbones before the complete Siamese model is fine-tuned. DraxNet retains its existing restriction that pretrained weights require all-basic stages.
 
-| Model | Parameters | Special Properties |
-| --- | ---: | --- |
-| `siamese-le-net` | 38,964,545 | <ul><li>Siamese convolutional embedding model for pairwise image similarity</li><li>Builds positive and negative pairs from label-organized image folders at runtime</li><li>Uses a 4,096-wide embedding by default; changing `--embedding-size` changes the parameter count</li></ul> |
+For `siamese-draxnet` and `siamese-drax_mobilenet_v3_large`, use `--drax-fusion-mode average` for the fixed equal-weight residual average or `--drax-fusion-mode sknet` for learned, input-dependent channel weights. The default remains `average` for compatibility.
 
 ### One-Shot Dataset Builder
 
@@ -338,7 +345,7 @@ The builder copies image files; it does not generate pairs on disk. Pair generat
 - `train`: train the selected model and write artifacts to `--output`, including `{model}.pth` and `training.csv`.
 - `test`: run a random-tensor smoke test for the configured model.
 - `benchmark`: evaluate a trained checkpoint against a dataset directory. Standard models classify labels directly; one-shot models evaluate pair similarity.
-- `infer-image`: run inference for one input image. Standard models output class probabilities; one-shot models compare against a reference dataset and show the best matches.
+- `infer-image`: run inference for one input image. Standard models output class probabilities; one-shot models rank a reference dataset by learned same-class probability.
 - `cam`: render class activation maps for test images from a trained checkpoint. Supported methods are `gradcam`, `ablationcam`, and `scorecam`.
 - `build-dataset`: interactively create train/val/test splits from a label-organized source dataset.
 

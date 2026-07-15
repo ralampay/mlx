@@ -19,6 +19,7 @@ from mlx.modes.image_classification.models.drax_mobilenet import (
 )
 from mlx.modes.image_classification.models.draxnet import DraxNet, build_draxnet
 from mlx.modes.image_classification.models.siamese_lenet import SiameseLeNet
+from mlx.modes.image_classification.models.siamese_backbone import SiameseBackbone
 from mlx.modes.image_classification.models.standard import (
     build_standard_model,
     registered_standard_model_names,
@@ -26,7 +27,6 @@ from mlx.modes.image_classification.models.standard import (
 )
 
 DEFAULT_MODEL = "resnet18"
-ONE_SHOT_MODEL_NAMES = {"siamese-le-net"}
 STANDARD_MODEL_NAMES = {
     "convnext_base",
     "convnext_large",
@@ -40,6 +40,10 @@ STANDARD_MODEL_NAMES = {
     "resnet18",
     "resnet50",
 }
+SIAMESE_BACKBONE_MODELS = {
+    f"siamese-{model_name}": model_name for model_name in STANDARD_MODEL_NAMES
+}
+ONE_SHOT_MODEL_NAMES = {"siamese-le-net", *SIAMESE_BACKBONE_MODELS}
 
 register_standard_model("draxnet", build_draxnet)
 register_standard_model("drax_mobilenet_v3_large", build_drax_mobilenet_v3_large)
@@ -66,10 +70,27 @@ def build_image_classification_model(
 ):
     family = model_family_for(model_name)
     if family == "one-shot":
-        return SiameseLeNet(
+        embedding_size = int(config.get("embedding_size", 4096))
+        if embedding_size < 1:
+            raise MLXUserError("--embedding-size must be at least 1 for one-shot models.")
+        if model_name == "siamese-le-net":
+            return SiameseLeNet(
+                colored=config.get("colored", True),
+                embedding_size=embedding_size,
+            )
+
+        backbone_name = SIAMESE_BACKBONE_MODELS[model_name]
+        backbone = build_standard_model(
+            backbone_name,
+            num_classes=embedding_size,
             colored=config.get("colored", True),
-            embedding_size=config.get("embedding_size", 4096),
+            pretrained=bool(config.get("pretrained", False)),
+            config=config,
         )
+        try:
+            return SiameseBackbone(backbone, embedding_size=embedding_size)
+        except ValueError as exc:
+            raise MLXUserError(f"Cannot build '{model_name}': {exc}") from exc
 
     if num_classes is None:
         raise MLXUserError(
@@ -100,6 +121,8 @@ __all__ = [
     "STANDARD_MODEL_NAMES",
     "SelfAttention2D",
     "SiameseLeNet",
+    "SiameseBackbone",
+    "SIAMESE_BACKBONE_MODELS",
     "build_image_classification_model",
     "build_drax_mobilenet_v3_large",
     "build_draxnet",

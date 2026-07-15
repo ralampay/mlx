@@ -4,7 +4,6 @@ from pathlib import Path
 from typing import Any
 
 import torch
-import torch.nn.functional as F
 
 from mlx.core.exceptions import MLXUserError
 from mlx.core.ui import print_warning
@@ -28,51 +27,64 @@ def infer_image_classification(config: dict[str, Any]) -> dict[str, Any]:
 
 
 def _infer_one_shot(model, metadata: dict[str, Any], config: dict[str, Any], device: str) -> dict[str, Any]:
-    input_img_path = Path(config["input_img"])
-    dataset_path = Path(config["dataset_path"])
-    if not dataset_path.exists():
-        raise MLXUserError(f"Dataset path not found: {dataset_path}")
+    return RankOneShotReferences(
+        model=model,
+        metadata=metadata,
+        input_image=Path(config["input_img"]),
+        dataset_path=Path(config["dataset_path"]),
+        device=device,
+    ).execute()
 
-    def embedding_for(image_path: Path) -> torch.Tensor:
+
+class RankOneShotReferences:
+    def __init__(self, *, model, metadata, input_image: Path, dataset_path: Path, device: str) -> None:
+        self.model = model
+        self.metadata = metadata
+        self.input_image = input_image
+        self.dataset_path = dataset_path
+        self.device = device
+
+    def execute(self) -> dict[str, Any]:
+        if not self.dataset_path.exists():
+            raise MLXUserError(f"Dataset path not found: {self.dataset_path}")
+
+        query = self._load_tensor(self.input_image)
+        matches: list[tuple[str, Path, float]] = []
         with torch.no_grad():
-            tensor = load_image_tensor(
-                image_path,
-                input_size=metadata["input_size"],
-                colored=metadata["colored"],
-            )
-            tensor = tensor.unsqueeze(0).to(device)
-            return model.embedding(tensor)
+            for reference_path in iter_dataset_images(self.dataset_path):
+                try:
+                    reference = self._load_tensor(reference_path)
+                except MLXUserError as exc:
+                    print_warning(f"Skipping {reference_path}: {exc}")
+                    continue
 
-    input_embedding = embedding_for(input_img_path)
-    best_match = None
-    min_distance = float("inf")
-    all_scores = []
+                similarity = float(self.model(query, reference).reshape(-1)[0].item())
+                label = (
+                    reference_path.parent.name
+                    if reference_path.parent != self.dataset_path
+                    else reference_path.stem
+                )
+                matches.append((label, reference_path, similarity))
 
-    for reference_path in iter_dataset_images(dataset_path):
-        try:
-            reference_embedding = embedding_for(reference_path)
-        except MLXUserError as exc:
-            print_warning(f"Skipping {reference_path}: {exc}")
-            continue
+        matches.sort(key=lambda item: item[2], reverse=True)
+        best_match = matches[0] if matches else None
+        result = {
+            "input_image": self.input_image,
+            "best_match_label": best_match[0] if best_match else None,
+            "best_match_path": best_match[1] if best_match else None,
+            "similarity_score": best_match[2] if best_match else None,
+            "top_matches": matches[:10],
+        }
+        display_similarity_matches(result)
+        return result
 
-        distance = F.pairwise_distance(input_embedding, reference_embedding).item()
-        label = reference_path.parent.name if reference_path.parent != dataset_path else reference_path.stem
-        all_scores.append((label, reference_path, distance))
-
-        if distance < min_distance:
-            min_distance = distance
-            best_match = (label, reference_path)
-
-    all_scores.sort(key=lambda item: item[2])
-    result = {
-        "input_image": input_img_path,
-        "best_match_label": best_match[0] if best_match else None,
-        "best_match_path": best_match[1] if best_match else None,
-        "distance": min_distance,
-        "top_matches": all_scores[:10],
-    }
-    display_similarity_matches(result)
-    return result
+    def _load_tensor(self, image_path: Path) -> torch.Tensor:
+        tensor = load_image_tensor(
+            image_path,
+            input_size=self.metadata["input_size"],
+            colored=self.metadata["colored"],
+        )
+        return tensor.unsqueeze(0).to(self.device)
 
 
 def _infer_standard(model, metadata: dict[str, Any], config: dict[str, Any], device: str) -> dict[str, Any]:

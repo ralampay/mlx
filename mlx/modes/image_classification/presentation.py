@@ -52,31 +52,31 @@ def display_similarity_matches(result: dict[str, Any]) -> None:
     all_matches = result["top_matches"]
     best_label = result["best_match_label"]
     best_path = result["best_match_path"]
-    best_distance = result["distance"]
+    best_similarity = result["similarity_score"]
 
     table = Table(title="Inference Results", show_lines=True)
     table.add_column("Rank", justify="center", style="cyan")
     table.add_column("Label", justify="center", style="magenta")
     table.add_column("Image Path", justify="left")
-    table.add_column("Distance", justify="center", style="green")
+    table.add_column("Same-class probability", justify="center", style="green")
 
-    for index, (label, path, distance) in enumerate(all_matches, start=1):
-        table.add_row(str(index), label, str(path), f"{distance:.4f}")
+    for index, (label, path, similarity) in enumerate(all_matches, start=1):
+        table.add_row(str(index), label, str(path), f"{similarity:.4f}")
 
     console.print(table)
     if best_label is not None:
-        print_success(f"Best match: {best_label} (distance={best_distance:.4f})")
+        print_success(f"Best match: {best_label} (same-class probability={best_similarity:.4f})")
 
     images = []
     input_display = cv2.imread(str(input_image))
     if input_display is not None:
         images.append(_draw_header_bar(input_display, "INPUT"))
 
-    for label, path, distance in all_matches:
+    for label, path, similarity in all_matches:
         reference = cv2.imread(str(path))
         if reference is None:
             continue
-        images.append(_draw_header_bar(reference, f"{label} - dist {distance:.4f}"))
+        images.append(_draw_header_bar(reference, f"{label} - score {similarity:.4f}"))
 
     if not images:
         print_warning("No images to display.")
@@ -104,7 +104,7 @@ def display_similarity_matches(result: dict[str, Any]) -> None:
     best_full = cv2.imread(str(best_path)) if best_path else None
     if input_full is not None and best_full is not None:
         input_full = _draw_header_bar(input_full, "INPUT")
-        best_full = _draw_header_bar(best_full, f"{best_label} - dist {best_distance:.4f}")
+        best_full = _draw_header_bar(best_full, f"{best_label} - score {best_similarity:.4f}")
 
         input_height, input_width = input_full.shape[:2]
         best_height, best_width = best_full.shape[:2]

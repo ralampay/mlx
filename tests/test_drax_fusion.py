@@ -6,6 +6,7 @@ import pytest
 import torch
 from torch import nn
 
+from mlx.cli import build_parser
 from mlx.core.exceptions import MLXUserError
 from mlx.modes.image_classification.models.blocks import DraxBlock
 from mlx.modes.image_classification.models.drax_mobilenet import (
@@ -92,6 +93,19 @@ def test_draxnet_builder_propagates_sknet_fusion() -> None:
     assert all(block.drax.fusion_gate is not None for block in drax_blocks)
 
 
+def test_generic_cli_fusion_config_propagates_to_draxnet() -> None:
+    model = build_draxnet(
+        num_classes=3,
+        colored=True,
+        pretrained=False,
+        config={"drax_fusion_mode": "sknet"},
+    )
+
+    drax_blocks = [module for module in model.modules() if isinstance(module, DraxResidualBlock)]
+    assert drax_blocks
+    assert all(block.drax.fusion_mode == "sknet" for block in drax_blocks)
+
+
 def test_draxnet_builder_reports_invalid_user_fusion_mode() -> None:
     with pytest.raises(MLXUserError, match="Unsupported Drax fusion mode 'invalid'"):
         build_draxnet(
@@ -121,6 +135,18 @@ def test_drax_mobilenet_constructor_propagates_sknet_fusion() -> None:
     assert all(block.fusion_gate is not None for block in model.drax_refiner)
 
 
+def test_generic_cli_fusion_config_propagates_to_drax_mobilenet() -> None:
+    model = build_drax_mobilenet_v3_large(
+        num_classes=3,
+        colored=True,
+        pretrained=False,
+        config={"drax_fusion_mode": "sknet", "drax_mobilenet_adapter_dim": 32},
+    )
+
+    assert all(block.fusion_mode == "sknet" for block in model.drax_refiner)
+    assert all(block.fusion_gate is not None for block in model.drax_refiner)
+
+
 def test_drax_mobilenet_builder_reports_invalid_user_fusion_mode() -> None:
     with pytest.raises(MLXUserError, match="Unsupported Drax fusion mode 'invalid'"):
         build_drax_mobilenet_v3_large(
@@ -129,3 +155,9 @@ def test_drax_mobilenet_builder_reports_invalid_user_fusion_mode() -> None:
             pretrained=False,
             config={"drax_mobilenet_fusion_mode": "invalid"},
         )
+
+
+def test_cli_accepts_adaptive_drax_fusion_mode() -> None:
+    namespace = build_parser().parse_args(["--drax-fusion-mode", "sknet"])
+
+    assert namespace.drax_fusion_mode == "sknet"

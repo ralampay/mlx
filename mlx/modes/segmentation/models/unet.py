@@ -7,8 +7,10 @@ from mlx.modes.segmentation.models.base import BaseSegmentationModel
 from mlx.modes.segmentation.models.blocks import (
     DoubleConvBlock,
     DownsampleConvBlock,
+    UNetDecoderBlock,
     UpsampleSkipConvBlock,
 )
+from mlx.modes.segmentation.models.backbones import SegmentationEncoder
 
 
 class UNet(BaseSegmentationModel):
@@ -42,3 +44,56 @@ class UNet(BaseSegmentationModel):
         x = self.up3(x, x2)
         x = self.up4(x, x1)
         return self.outc(x)
+
+
+class BackboneUNet(BaseSegmentationModel):
+    def __init__(
+        self,
+        encoder: SegmentationEncoder,
+        *,
+        num_classes: int = 2,
+        decoder_channels: tuple[int, ...] = (256, 128, 64, 32, 16),
+    ) -> None:
+        super().__init__()
+        if len(encoder.output_channels) not in (4, 5):
+            raise ValueError("U-Net encoders must provide four or five feature levels.")
+        if len(decoder_channels) != 5:
+            raise ValueError("Backbone U-Net requires five decoder channel widths.")
+
+        self.encoder = encoder
+        skip_channels = list(reversed(encoder.output_channels[:-1]))
+        skip_channels.extend([0] * (len(decoder_channels) - len(skip_channels)))
+        input_channels = encoder.output_channels[-1]
+        blocks = []
+        for skip_width, output_width in zip(
+            skip_channels,
+            decoder_channels,
+            strict=True,
+        ):
+            blocks.append(UNetDecoderBlock(input_channels, skip_width, output_width))
+            input_channels = output_width
+        self.decoder = nn.ModuleList(blocks)
+        self.outc = nn.Conv2d(decoder_channels[-1], num_classes, kernel_size=1)
+
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        input_size = x.shape[-2:]
+        features = self.encoder(x)
+        if len(features) != len(self.encoder.output_channels):
+            raise RuntimeError(
+                "Segmentation encoder returned a different number of features than declared."
+            )
+
+        x = features[-1]
+        skips = list(reversed(features[:-1]))
+        for index, decoder in enumerate(self.decoder):
+            skip = skips[index] if index < len(skips) else None
+            x = decoder(x, skip)
+        x = self.outc(x)
+        if x.shape[-2:] != input_size:
+            x = nn.functional.interpolate(
+                x,
+                size=input_size,
+                mode="bilinear",
+                align_corners=False,
+            )
+        return x

@@ -12,7 +12,7 @@ from mlx.modes.segmentation.models import (
 
 class ListSegmentationModels:
     def __init__(self, config: dict[str, Any]) -> None:
-        self.config = config
+        self.config = {**config, "pretrained": False}
 
     def execute(self) -> list[ModelParameterSummary]:
         num_classes = int(self.config.get("num_classes", 2))

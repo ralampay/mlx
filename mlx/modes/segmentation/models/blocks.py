@@ -71,3 +71,32 @@ class UpsampleSkipConvBlock(nn.Module):
             x = nn.functional.interpolate(x, size=skip.shape[-2:], mode="bilinear", align_corners=False)
         x = torch.cat((skip, x), dim=1)
         return self.conv(x)
+
+
+class UNetDecoderBlock(nn.Module):
+    def __init__(self, in_channels: int, skip_channels: int, out_channels: int) -> None:
+        super().__init__()
+        self.skip_channels = skip_channels
+        self.up = nn.ConvTranspose2d(in_channels, out_channels, kernel_size=2, stride=2)
+        self.conv = DoubleConvBlock(out_channels + skip_channels, out_channels)
+
+    def forward(
+        self,
+        x: torch.Tensor,
+        skip: torch.Tensor | None = None,
+    ) -> torch.Tensor:
+        x = self.up(x)
+        if skip is None:
+            if self.skip_channels:
+                raise ValueError("Decoder block requires an encoder skip tensor.")
+            return self.conv(x)
+        if not self.skip_channels:
+            raise ValueError("Decoder block does not accept an encoder skip tensor.")
+        if x.shape[-2:] != skip.shape[-2:]:
+            x = nn.functional.interpolate(
+                x,
+                size=skip.shape[-2:],
+                mode="bilinear",
+                align_corners=False,
+            )
+        return self.conv(torch.cat((skip, x), dim=1))

@@ -19,13 +19,27 @@ The source is organized by responsibility:
 - `inference.py`: single-image, webcam, and video inference.
 - `data.py`: paired image/mask dataset loading and preprocessing.
 - `data.py` also contains the interactive dataset split builder.
-- `models/`: segmentation model registry and the basic `unet`.
+- `models/`: segmentation model registry, U-Net decoders, and classification
+  backbone adapters.
 - `utils.py`: checkpoint metadata, metrics, and shared helpers.
 - `presentation.py`: rich tables and OpenCV visualization helpers.
 
 ## Supported Models
 
 - `unet`: basic U-Net for semantic segmentation
+- `unet-resnet18`, `unet-resnet50`
+- `unet-densenet121`
+- `unet-mobilenet_v3_large`, `unet-efficientnet_b0`
+- `unet-convnext_tiny`, `unet-convnext_small`, `unet-convnext_base`,
+  `unet-convnext_large`
+- `unet-draxnet-average`, `unet-draxnet-sknet`
+- `unet-drax_mobilenet_v3_large-average`,
+  `unet-drax_mobilenet_v3_large-sknet`
+
+The backbone models reuse the corresponding image-classification feature
+extractors and replace their pooling/classification heads with a common U-Net
+decoder. Average and SKNet DRAX fusion are separate model identifiers so runs,
+checkpoints, and parameter counts remain unambiguous.
 
 ## Dataset Format
 
@@ -168,13 +182,38 @@ python -m mlx \
 
 Important arguments:
 
-- `--model`: segmentation model name, currently `unet`
+- `--model`: one of the segmentation model names listed above
+- `--pretrained`: initialize supported classification backbones with torchvision
+  weights; DraxNet variants require non-pretrained initialization, while DRAX
+  MobileNet can initialize its MobileNet backbone from pretrained weights
 - `--dataset`: dataset root containing `train/` and `val/`
 - `--output`: artifact directory, or a legacy `.pt`/`.pth` checkpoint path
 - `--num-classes`: number of output classes expected in the masks
 - `--class-names`: optional comma-separated names matching `--num-classes`
 - `--epochs`, `--batch-size`, `--device`, `--lr`: training controls
 - `--width`, `--height`: input dimensions used to build `input_size`
+
+List every comparison model and its total parameter count for the selected
+class count:
+
+```bash
+python -m mlx \
+    --mode segmentation \
+    --action ls-models \
+    --num-classes 2
+```
+
+Train an explicit SKNet fusion variant:
+
+```bash
+python -m mlx \
+    --mode segmentation \
+    --action train \
+    --model unet-draxnet-sknet \
+    --dataset ./data/kvasir-seg \
+    --output ./results/unet-draxnet-sknet \
+    --num-classes 2
+```
 
 Directory output writes:
 

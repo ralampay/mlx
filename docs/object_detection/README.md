@@ -110,6 +110,14 @@ The important rule is simple: pass the directory that contains `data.yaml`, not 
 
 `draxnet-yolo26` maps to the custom DraxNet backbone YAML added in the `ralampay/ultralytics` fork.
 
+List the canonical project models and their total parameter counts:
+
+```bash
+python -m mlx --mode object-detection --action ls-models
+```
+
+This action constructs `yolo26` and `draxnet-yolo26` from their architecture YAML files without loading pretrained weights.
+
 If you see `Model YAML not found: draxnet-yolo26`, your installed `ultralytics` package does not
 currently expose `draxnet-yolo26.yaml`. In that case, reinstall the pinned dependency for this
 repo, pass a direct filesystem path to that YAML, or switch to `--model yolo26`.

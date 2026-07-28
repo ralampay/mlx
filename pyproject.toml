@@ -7,6 +7,7 @@ readme = "README.md"
 license = { text = "MIT" }
 requires-python = ">=3.9"
 dependencies = [
+    "matplotlib",
     "numpy",
     "pandas",
     "llama-cpp-python",
@@ -14,8 +15,10 @@ dependencies = [
     "opencv-python",
     "grad-cam",
     "rich>=13.7.0",
+    "scikit-learn",
     "torch",
     "torchvision",
+    "tqdm",
     "ultralytics @ git+https://github.com/ralampay/ultralytics"
 ]
 

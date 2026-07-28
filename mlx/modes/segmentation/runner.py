@@ -3,11 +3,14 @@ from __future__ import annotations
 from typing import Any
 
 from mlx.core.exceptions import MLXUserError
+from mlx.core.ui import print_model_parameter_table
 from mlx.modes.segmentation.data import build_segmentation_dataset
+from mlx.modes.segmentation.evaluation import BenchmarkSegmentation
 from mlx.modes.segmentation.inference import (
     StreamSegmentationInferenceRunner,
     infer_segmentation_image,
 )
+from mlx.modes.segmentation.list_models import ListSegmentationModels
 from mlx.modes.segmentation.models import DEFAULT_MODEL
 from mlx.modes.segmentation.presentation import print_segmentation_config_summary
 from mlx.modes.segmentation.train import smoke_test_segmentation, train_segmentation
@@ -24,9 +27,18 @@ DEFAULT_CONFIG = {
     "mask_threshold": 0.5,
     "num_classes": 2,
     "overlay_alpha": 0.45,
+    "split": "test",
 }
 
+
+def _list_models(config: dict[str, Any]):
+    summaries = ListSegmentationModels(config).execute()
+    print_model_parameter_table(summaries, title="Segmentation Models")
+    return summaries
+
+
 ACTION_HANDLERS = {
+    "benchmark": lambda config: BenchmarkSegmentation(config).execute(),
     "build-dataset": lambda config: build_segmentation_dataset(config["dataset_path"]),
     "infer-camera": lambda config: StreamSegmentationInferenceRunner(
         config, source="camera"
@@ -35,6 +47,7 @@ ACTION_HANDLERS = {
     "infer-video": lambda config: StreamSegmentationInferenceRunner(
         config, source="video"
     ).execute(),
+    "ls-models": _list_models,
     "test": smoke_test_segmentation,
     "train": train_segmentation,
 }
@@ -42,6 +55,9 @@ ACTION_HANDLERS = {
 
 def run_segmentation(mode_config: dict[str, Any]) -> Any:
     config = {**DEFAULT_CONFIG, **mode_config}
+    if config["action"] == "ls-models":
+        return ACTION_HANDLERS["ls-models"](config)
+
     config["model"] = mode_config.get("model") or DEFAULT_MODEL
     config["input_size"] = tuple(config.get("input_size", (config["width"], config["height"])))
 

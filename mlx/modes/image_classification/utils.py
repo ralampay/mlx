@@ -1,8 +1,11 @@
 from __future__ import annotations
 
+import os
+import random
 from pathlib import Path
 from typing import Any
 
+import numpy as np
 import torch
 
 from mlx.core.exceptions import MLXUserError
@@ -48,8 +51,7 @@ def save_checkpoint(
     config: dict[str, Any],
     classes: list[str] | None = None,
 ) -> None:
-    checkpoint_path.parent.mkdir(parents=True, exist_ok=True)
-    torch.save(
+    _atomic_torch_save(
         checkpoint_payload(
             model,
             model_name=model_name,
@@ -61,6 +63,121 @@ def save_checkpoint(
     )
 
 
+def save_training_checkpoint(
+    checkpoint_path: Path,
+    model,
+    optimizer,
+    *,
+    model_name: str,
+    family: str,
+    config: dict[str, Any],
+    completed_epoch: int,
+    best_val_loss: float,
+    history: list[dict[str, float | int]],
+    classes: list[str] | None = None,
+) -> None:
+    payload = checkpoint_payload(
+        model,
+        model_name=model_name,
+        family=family,
+        config=config,
+        classes=classes,
+    )
+    payload.update(
+        {
+            "training_state_version": 1,
+            "completed_epoch": int(completed_epoch),
+            "best_val_loss": float(best_val_loss),
+            "optimizer_state_dict": optimizer.state_dict(),
+            "history": list(history),
+            "random_state": _capture_random_state(),
+        }
+    )
+    _atomic_torch_save(payload, checkpoint_path)
+
+
+def load_training_checkpoint(
+    checkpoint_path: str | Path,
+    model,
+    optimizer,
+    *,
+    model_name: str,
+    family: str,
+    config: dict[str, Any],
+    classes: list[str] | None = None,
+) -> dict[str, Any]:
+    path = Path(checkpoint_path).expanduser()
+    if not path.is_file():
+        raise MLXUserError(f"Resume checkpoint not found: {path}")
+
+    try:
+        checkpoint = torch.load(
+            path,
+            map_location=config.get("device", "cpu"),
+            weights_only=True,
+        )
+    except (OSError, RuntimeError, ValueError) as exc:
+        raise MLXUserError(f"Could not load resume checkpoint '{path}': {exc}") from exc
+
+    if checkpoint.get("training_state_version") != 1:
+        raise MLXUserError(
+            f"Checkpoint '{path}' is not a resumable image-classification training checkpoint."
+        )
+    if checkpoint.get("model_name") != model_name:
+        raise MLXUserError(
+            f"Resume checkpoint model '{checkpoint.get('model_name')}' does not match '{model_name}'."
+        )
+    if checkpoint.get("family") != family:
+        raise MLXUserError(
+            f"Resume checkpoint family '{checkpoint.get('family')}' does not match '{family}'."
+        )
+
+    expected_classes = classes or []
+    if list(checkpoint.get("classes") or []) != expected_classes:
+        raise MLXUserError(
+            "Resume checkpoint class labels do not match the selected dataset."
+        )
+    expected_input_size = tuple(config.get("input_size", (224, 224)))
+    if tuple(checkpoint.get("input_size") or ()) != expected_input_size:
+        raise MLXUserError(
+            "Resume checkpoint input size does not match the current --width/--height settings."
+        )
+    if bool(checkpoint.get("colored", True)) != bool(config.get("colored", True)):
+        raise MLXUserError(
+            "Resume checkpoint color mode does not match the current training configuration."
+        )
+
+    checkpoint_config = checkpoint.get("model_config") or {}
+    if checkpoint_config.get("drax_fusion_mode", "average") != config.get(
+        "drax_fusion_mode", "average"
+    ):
+        raise MLXUserError(
+            "Resume checkpoint Drax fusion mode does not match the current configuration."
+        )
+
+    try:
+        model.load_state_dict(checkpoint["state_dict"])
+        optimizer.load_state_dict(checkpoint["optimizer_state_dict"])
+    except (KeyError, RuntimeError, ValueError) as exc:
+        raise MLXUserError(
+            f"Resume checkpoint '{path}' is incompatible with the current model: {exc}"
+        ) from exc
+
+    _restore_random_state(checkpoint.get("random_state") or {})
+    history = checkpoint.get("history") or []
+    completed_epoch = int(checkpoint.get("completed_epoch", 0))
+    if len(history) != completed_epoch:
+        raise MLXUserError(
+            f"Resume checkpoint '{path}' has inconsistent epoch history."
+        )
+
+    return {
+        "best_val_loss": float(checkpoint.get("best_val_loss", float("inf"))),
+        "completed_epoch": completed_epoch,
+        "history": history,
+    }
+
+
 def resolve_train_output_paths(config: dict[str, Any], *, model_name: str) -> dict[str, Path]:
     output_path = config.get("output_path")
     if not output_path:
@@ -69,6 +186,7 @@ def resolve_train_output_paths(config: dict[str, Any], *, model_name: str) -> di
     return {
         "output_dir": output_dir,
         "checkpoint_path": output_dir / f"{model_name}.pth",
+        "last_checkpoint_path": output_dir / f"{model_name}.last.pth",
         "training_csv_path": output_dir / "training.csv",
     }
 
@@ -78,7 +196,11 @@ def load_checkpoint_bundle(config: dict[str, Any]) -> tuple[Any, dict[str, Any]]
     if not model_path:
         raise MLXUserError("This action requires --model-path pointing to a checkpoint.")
 
-    checkpoint = torch.load(model_path, map_location=config.get("device", "cpu"))
+    checkpoint = torch.load(
+        model_path,
+        map_location=config.get("device", "cpu"),
+        weights_only=True,
+    )
     if "state_dict" not in checkpoint:
         raise MLXUserError(
             f"Checkpoint '{model_path}' does not include metadata. Re-train the model with the new image-classification mode."
@@ -124,3 +246,53 @@ def load_checkpoint_bundle(config: dict[str, Any]) -> tuple[Any, dict[str, Any]]
         "colored": runtime_config["colored"],
     }
     return model, metadata
+
+
+def _atomic_torch_save(payload: dict[str, Any], checkpoint_path: Path) -> None:
+    checkpoint_path.parent.mkdir(parents=True, exist_ok=True)
+    temporary_path = checkpoint_path.with_name(
+        f".{checkpoint_path.name}.tmp-{os.getpid()}"
+    )
+    try:
+        torch.save(payload, temporary_path)
+        os.replace(temporary_path, checkpoint_path)
+    finally:
+        temporary_path.unlink(missing_ok=True)
+
+
+def _capture_random_state() -> dict[str, Any]:
+    numpy_state = np.random.get_state()
+    state: dict[str, Any] = {
+        "python": random.getstate(),
+        "numpy": {
+            "bit_generator": numpy_state[0],
+            "state": numpy_state[1].tolist(),
+            "position": numpy_state[2],
+            "has_gauss": numpy_state[3],
+            "cached_gaussian": numpy_state[4],
+        },
+        "torch": torch.get_rng_state(),
+    }
+    if torch.cuda.is_available():
+        state["torch_cuda"] = torch.cuda.get_rng_state_all()
+    return state
+
+
+def _restore_random_state(state: dict[str, Any]) -> None:
+    if "python" in state:
+        random.setstate(tuple(state["python"]))
+    numpy_state = state.get("numpy")
+    if numpy_state:
+        np.random.set_state(
+            (
+                numpy_state["bit_generator"],
+                np.asarray(numpy_state["state"], dtype=np.uint32),
+                int(numpy_state["position"]),
+                int(numpy_state["has_gauss"]),
+                float(numpy_state["cached_gaussian"]),
+            )
+        )
+    if "torch" in state:
+        torch.set_rng_state(state["torch"].cpu())
+    if torch.cuda.is_available() and state.get("torch_cuda"):
+        torch.cuda.set_rng_state_all(state["torch_cuda"])

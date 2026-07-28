@@ -34,6 +34,14 @@ This mode supports two training setups:
 
 The selected `--model` determines which training, benchmarking, and inference path is used. Torchvision-backed standard models are loaded by name and their classifier heads are adapted to the dataset class count. Additional custom standard classifiers can be plugged in later through the model registry.
 
+List every registered model and its total parameter count without downloading pretrained weights:
+
+```bash
+python -m mlx --mode image_classification --action ls-models
+```
+
+The counts use `--num-classes` for standard classifier heads and `--embedding-size` for one-shot models.
+
 All standard classifiers share the same preprocessing family:
 
 - Training: `Resize`, `ToTensor`, `Normalize`. Add `--apply-transformations` to include `RandomHorizontalFlip` and `RandomRotation(10)`.
@@ -88,19 +96,38 @@ For image-classification training, `--output` is treated as an artifact director
 ```text
 <output>/
 ├── {model}.pth
+├── {model}.last.pth
 └── training.csv
 ```
 
-`training.csv` contains one row per epoch with this schema:
+`{model}.pth` is the best validation-loss model when `--use-best` is enabled.
+`{model}.last.pth` is a resumable training-state checkpoint written after every
+completed epoch. It includes the model, Adam optimizer, best validation loss,
+epoch history, and random-number-generator state.
+
+`training.csv` contains one row per completed epoch with this schema:
 
 ```text
-epoch,loss,metric
+epoch,train_loss,val_loss,accuracy,precision,recall,f1
 ```
 
-Metric semantics depend on the model family:
+Resume an interrupted run by passing its last checkpoint and the original
+total target epoch count:
 
-- Standard classifiers: `metric` is validation accuracy.
-- One-shot classifiers: `metric` is validation loss.
+```bash
+python -m mlx \
+    --mode image_classification \
+    --action train \
+    --model resnet18 \
+    --dataset ~/datasets/animals \
+    --output ./artifacts/resnet18 \
+    --epochs 50 \
+    --model-path ./artifacts/resnet18/resnet18.last.pth
+```
+
+Training continues at the next epoch and reconstructs `training.csv` from the
+checkpoint history. The model, family, labels, input size, color mode, and Drax
+fusion mode must match the checkpoint.
 
 ### Standard Classification
 
@@ -123,7 +150,8 @@ Important arguments:
 
 - `--model`: standard classifier such as `resnet18` or `resnet50`.
 - `--dataset`: dataset root containing `train/` and `val/`.
-- `--output`: output artifact directory. Training writes `{model}.pth` and `training.csv` inside it.
+- `--output`: output artifact directory. Training writes `{model}.pth`, `{model}.last.pth`, and `training.csv` inside it.
+- `--model-path`: optional `{model}.last.pth` checkpoint used to resume at the next epoch.
 - `--epochs`, `--batch-size`, `--device`, `--lr`: standard training controls.
 - `--seed` / `--random-seed`: optional integer seed applied globally across Python, NumPy, and PyTorch for reproducible runs.
 - `--pretrained`: enable pretrained initialization for supported torchvision backbones.
@@ -228,7 +256,8 @@ Important arguments:
 
 - `--model`: one-shot model name.
 - `--dataset`: dataset root containing `train/` and `val/`.
-- `--output`: output artifact directory. Training writes `{model}.pth` and `training.csv` inside it.
+- `--output`: output artifact directory. Training writes `{model}.pth`, `{model}.last.pth`, and `training.csv` inside it.
+- `--model-path`: optional `{model}.last.pth` checkpoint used to resume at the next epoch.
 - `--embedding-size`: Siamese embedding width.
 - `--epochs`, `--batch-size`, `--device`, `--lr`: training controls.
 - `--seed` / `--random-seed`: optional integer seed applied globally across Python, NumPy, and PyTorch for reproducible runs.

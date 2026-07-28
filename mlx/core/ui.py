@@ -5,8 +5,10 @@ from typing import Optional
 from rich.console import Console
 from rich.panel import Panel
 from rich.prompt import Confirm, FloatPrompt, IntPrompt, Prompt
+from rich.table import Table
 
 from mlx.core.exceptions import MLXAbort
+from mlx.core.model_listing import ModelParameterSummary
 
 console = Console()
 stderr_console = Console(stderr=True)
@@ -35,6 +37,30 @@ def print_warning(message: str) -> None:
 
 def print_error(message: str) -> None:
     stderr_console.print(Panel.fit(message, title="Error", border_style="red"))
+
+
+def build_model_parameter_table(
+    summaries: list[ModelParameterSummary],
+    *,
+    title: str = "Available Models",
+) -> Table:
+    table = Table(title=title, show_header=True)
+    table.add_column("Model Name", style="cyan")
+    table.add_column("Parameter Count", justify="right", style="magenta")
+    for summary in sorted(
+        summaries,
+        key=lambda item: (item.parameter_count, item.model_name),
+    ):
+        table.add_row(summary.model_name, f"{summary.parameter_count:,}")
+    return table
+
+
+def print_model_parameter_table(
+    summaries: list[ModelParameterSummary],
+    *,
+    title: str = "Available Models",
+) -> None:
+    console.print(build_model_parameter_table(summaries, title=title))
 
 
 def prompt_text(message: str, default: Optional[str] = None) -> str:

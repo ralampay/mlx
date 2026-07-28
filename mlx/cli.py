@@ -102,6 +102,26 @@ def build_parser() -> RichArgumentParser:
     parser.add_argument("--seed", "--random-seed", type=int, default=None, dest="random_seed")
     parser.add_argument("--run-name", default=None, dest="run_name")
     parser.add_argument("--num-classes", type=int, default=2, dest="num_classes")
+    parser.add_argument("--class-names", default=None, dest="class_names")
+    parser.add_argument("--split", choices=("train", "val", "test"), default="test")
+    parser.add_argument(
+        "--boundary-tolerance",
+        type=int,
+        default=2,
+        dest="boundary_tolerance",
+    )
+    parser.add_argument(
+        "--calibration-bins",
+        type=int,
+        default=15,
+        dest="calibration_bins",
+    )
+    parser.add_argument(
+        "--threshold-steps",
+        type=int,
+        default=101,
+        dest="threshold_steps",
+    )
     parser.add_argument("--mask-threshold", type=float, default=0.5, dest="mask_threshold")
     parser.add_argument("--overlay-alpha", type=float, default=0.45, dest="overlay_alpha")
     parser.add_argument("--cam-method", choices=("gradcam", "ablationcam", "scorecam"), default="gradcam", dest="cam_method")
@@ -126,17 +146,21 @@ def _render_help() -> None:
 
     usage = Table(title="Usage", show_header=False)
     usage.add_column("Command", style="bold cyan")
+    usage.add_row("python -m mlx --mode object_detection --action ls-models")
     usage.add_row("python -m mlx --mode object_detection --action train --dataset coco8 --model yolo26")
     usage.add_row("python -m mlx --mode object_detection --action train --dataset coco8 --model draxnet-yolo26 --output ./runs/draxnet")
     usage.add_row("python -m mlx --mode object_detection --action infer-camera --model draxnet-yolo26 --model-path ./runs/draxnet/exp/weights/best.pt")
     usage.add_row("python -m mlx --mode object_detection --action convert --model-path ./runs/draxnet/exp/weights/best.pt --output ./exports")
     usage.add_row("python -m mlx --mode image_classification --action train --output ./artifacts/resnet18 --dataset ./dataset --model resnet18")
+    usage.add_row("python -m mlx --mode image_classification --action ls-models")
     usage.add_row("python -m mlx --mode image_classification --action train --output ./artifacts/siamese --dataset ./omniglot --model siamese-le-net")
     usage.add_row("python -m mlx --mode image_classification --action train --output ./artifacts/siamese-resnet --dataset ./omniglot --model siamese-resnet18 --pretrained")
     usage.add_row("python -m mlx --mode image_classification --action build-dataset --dataset ./raw-dataset")
     usage.add_row("python -m mlx --mode image_classification --action build-dataset --dataset ./raw-dataset --output ./dataset --train-count 100 --val-count 20 --test-count 20 --overwrite --seed 42")
     usage.add_row("python -m mlx --mode image_classification --action build-dataset --dataset ./raw-dataset --split-mode ratios --train-ratio 0.7 --val-ratio 0.15 --test-ratio 0.15 --output ./dataset --overwrite --seed 42")
     usage.add_row("python -m mlx --mode segmentation --action train --dataset ./dataset --model unet --output unet-seg.pt")
+    usage.add_row("python -m mlx --mode segmentation --action benchmark --dataset ./dataset --model-path ./unet-seg.pt --output ./benchmark-results")
+    usage.add_row("python -m mlx --mode segmentation --action ls-models")
     usage.add_row("python -m mlx --mode segmentation --action infer-image --model-path ./unet-seg.pt --input-img ./sample.jpg")
     usage.add_row("python -m mlx --mode segmentation --action build-dataset --dataset ./raw-segmentation")
     usage.add_row("python -m mlx --mode nlp --action embed --model-file ./model.gguf --input-file ./input.csv")
@@ -148,7 +172,7 @@ def _render_help() -> None:
     options.add_column("Description", style="white")
     options.add_row("--mode", "None", "Mode to run: object_detection, image_classification, segmentation, or nlp.")
     options.add_row("--model", "None", "Model identifier, YAML path, or architecture name.")
-    options.add_row("--action", "mode-specific", "Sub-action such as train, infer-video, convert, benchmark, or build-dataset.")
+    options.add_row("--action", "mode-specific", "Sub-action such as train, ls-models, infer-video, convert, benchmark, or build-dataset.")
     options.add_row("--dataset", "./tmp/dataset", "Dataset source for training: local YOLO root, dataset YAML, or alias like coco8/coco128.")
     options.add_row("--output", "None", "Output directory written by train or benchmark. Detection uses it as the Ultralytics project directory, or as the ONNX export destination for convert.")
     options.add_row("--train-count", "None", "Images per label assigned to the train split when building classification datasets.")
@@ -159,7 +183,7 @@ def _render_help() -> None:
     options.add_row("--test-ratio", "None", "Test split ratio applied within each label when building classification datasets.")
     options.add_row("--split-mode", "None", "Build-dataset split mode: counts or ratios. Ratio mode splits each label independently using the provided ratios.")
     options.add_row("--overwrite / --no-overwrite", "False", "Allow build-dataset to replace an existing output directory without prompting.")
-    options.add_row("--model-path", "None", "Weights checkpoint path for inference, warm starts, or ONNX conversion.")
+    options.add_row("--model-path", "None", "Weights checkpoint path for inference, image-classification resume, warm starts, or ONNX conversion.")
     options.add_row("--model-file", "None", "GGUF embedding model used by NLP embed.")
     options.add_row("--input-file", "None", "Input CSV used by NLP embed.")
     options.add_row("--output-file", "derived", "Output CSV used by NLP embed; defaults beside the input file.")
@@ -200,7 +224,12 @@ def _render_help() -> None:
     options.add_row("--loss-clip", "None", "Optional gradient clipping value.")
     options.add_row("--seed / --random-seed", "None", "Global random seed applied across Python, NumPy, and PyTorch.")
     options.add_row("--run-name", "None", "Optional Ultralytics run folder name.")
-    options.add_row("--num-classes", "2", "Number of segmentation classes expected in the masks.")
+    options.add_row("--num-classes", "2", "Number of image-classification or segmentation output classes.")
+    options.add_row("--class-names", "generated", "Comma-separated segmentation class names stored in checkpoints and research artifacts.")
+    options.add_row("--split", "test", "Segmentation dataset split used by benchmark: train, val, or test.")
+    options.add_row("--boundary-tolerance", "2", "Boundary-metric matching tolerance in resized-image pixels.")
+    options.add_row("--calibration-bins", "15", "Confidence bins used for segmentation calibration metrics.")
+    options.add_row("--threshold-steps", "101", "Number of binary segmentation thresholds evaluated by benchmark.")
     options.add_row("--mask-threshold", "0.5", "Threshold used when rendering binary segmentation masks.")
     options.add_row("--overlay-alpha", "0.45", "Blend strength for segmentation overlays.")
     options.add_row("--cam-method", "gradcam", "CAM method for image-classification cam: gradcam, ablationcam, or scorecam.")
@@ -218,9 +247,9 @@ def _render_help() -> None:
     available = Table(title="Available Modes", show_header=True)
     available.add_column("Mode", style="cyan", no_wrap=True)
     available.add_column("Actions", style="white")
-    available.add_row("object_detection", "train, infer-camera, infer-video, convert")
-    available.add_row("image_classification", "train, test, benchmark, infer-image, cam, build-dataset")
-    available.add_row("segmentation", "train, test, infer-image, infer-camera, infer-video, build-dataset")
+    available.add_row("object_detection", "train, infer-camera, infer-video, convert, ls-models")
+    available.add_row("image_classification", "train, test, benchmark, infer-image, cam, build-dataset, ls-models")
+    available.add_row("segmentation", "train, test, benchmark, infer-image, infer-camera, infer-video, build-dataset, ls-models")
     available.add_row("nlp", "embed")
     console.print(available)
 

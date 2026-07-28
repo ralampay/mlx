@@ -2,11 +2,13 @@ from __future__ import annotations
 
 from typing import Any
 
-from mlx.modes.image_classification.cam import generate_image_classification_cams
 from mlx.core.exceptions import MLXUserError
+from mlx.core.ui import print_model_parameter_table
+from mlx.modes.image_classification.cam import generate_image_classification_cams
 from mlx.modes.image_classification.data import build_image_classification_dataset
 from mlx.modes.image_classification.evaluation import benchmark_image_classification
 from mlx.modes.image_classification.inference import infer_image_classification
+from mlx.modes.image_classification.list_models import ListImageClassificationModels
 from mlx.modes.image_classification.models import DEFAULT_MODEL, model_family_for
 from mlx.modes.image_classification.presentation import print_config_summary
 from mlx.modes.image_classification.train import (
@@ -33,6 +35,13 @@ DEFAULT_CONFIG = {
     "verbose": False,
 }
 
+
+def _list_models(config: dict[str, Any]):
+    summaries = ListImageClassificationModels(config).execute()
+    print_model_parameter_table(summaries, title="Image Classification Models")
+    return summaries
+
+
 ACTION_HANDLERS = {
     "benchmark": benchmark_image_classification,
     "build-dataset": lambda config: build_image_classification_dataset(
@@ -49,6 +58,7 @@ ACTION_HANDLERS = {
         random_seed=config.get("random_seed"),
     ),
     "infer-image": infer_image_classification,
+    "ls-models": _list_models,
     "cam": generate_image_classification_cams,
     "test": smoke_test_image_classification,
     "train": train_image_classification,
@@ -57,6 +67,10 @@ ACTION_HANDLERS = {
 
 def run_image_classification(mode_config: dict[str, Any]) -> Any:
     config = {**DEFAULT_CONFIG, **mode_config}
+    action = config["action"]
+    if action == "ls-models":
+        return ACTION_HANDLERS[action](config)
+
     model_name = mode_config.get("model") or DEFAULT_MODEL
     family = model_family_for(model_name)
     if mode_config.get("model") is None and mode_config.get("width") == 256 and mode_config.get("height") == 256:
@@ -74,7 +88,6 @@ def run_image_classification(mode_config: dict[str, Any]) -> Any:
 
     print_config_summary(model_name, family, config)
 
-    action = config["action"]
     handler = ACTION_HANDLERS.get(action)
     if handler is None:
         available = ", ".join(sorted(ACTION_HANDLERS))

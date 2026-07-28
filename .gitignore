@@ -76,3 +76,5 @@ tmp/
 .virtual_documents/
 
 runs/
+
+results/

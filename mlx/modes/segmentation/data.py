@@ -149,6 +149,71 @@ class SegmentationDataset(Dataset):
         return image, mask
 
 
+class SegmentationEvaluationDataset(Dataset):
+    def __init__(
+        self,
+        split_path: str | Path,
+        *,
+        input_size: tuple[int, int],
+        num_classes: int,
+        colored: bool = True,
+    ) -> None:
+        self.split_path = Path(split_path)
+        self.images_dir = self.split_path / "images"
+        self.masks_dir = self.split_path / "masks"
+        self.input_size = input_size
+        self.num_classes = num_classes
+        self.colored = colored
+        if not self.images_dir.is_dir() or not self.masks_dir.is_dir():
+            raise MLXUserError(
+                "Expected evaluation dataset structure:\n"
+                f"{self.split_path}/images/<file>\n"
+                f"{self.split_path}/masks/<file>"
+            )
+        self.samples = _paired_samples(self.images_dir, self.masks_dir)
+        if not self.samples:
+            raise MLXUserError(
+                f"No paired image/mask samples were found under: {self.split_path}"
+            )
+
+    def __len__(self) -> int:
+        return len(self.samples)
+
+    def __getitem__(self, index: int) -> tuple[torch.Tensor, torch.Tensor]:
+        image_path, mask_path = self.samples[index]
+        return (
+            load_image_tensor(
+                image_path,
+                input_size=self.input_size,
+                colored=self.colored,
+            ),
+            load_mask_tensor(
+                mask_path,
+                input_size=self.input_size,
+                num_classes=self.num_classes,
+            ),
+        )
+
+
+def resolve_segmentation_evaluation_split(
+    dataset_path: str | Path,
+    *,
+    split: str,
+) -> Path:
+    dataset_root = Path(dataset_path).expanduser()
+    if not dataset_root.exists():
+        raise MLXUserError(f"Dataset path not found: {dataset_root}")
+    if (dataset_root / "images").is_dir() and (dataset_root / "masks").is_dir():
+        return dataset_root
+    split_path = dataset_root / split
+    if (split_path / "images").is_dir() and (split_path / "masks").is_dir():
+        return split_path
+    raise MLXUserError(
+        f"Segmentation evaluation split '{split}' was not found under '{dataset_root}'. "
+        f"Expected '{split_path}/images' and '{split_path}/masks', or pass a direct split directory."
+    )
+
+
 def load_segmentation_datasets(
     dataset_path: str | Path,
     *,

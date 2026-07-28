@@ -22,6 +22,7 @@ from rich.table import Table
 from torch import nn, optim
 from torch.utils.data import DataLoader
 
+from mlx.core.exceptions import MLXUserError
 from mlx.core.ui import console, print_info, print_success
 from mlx.modes.image_classification.data import (
     load_one_shot_datasets,
@@ -32,13 +33,27 @@ from mlx.modes.image_classification.models import (
     model_family_for,
 )
 from mlx.modes.image_classification.utils import (
+    load_training_checkpoint,
     resolve_model_name,
     resolve_train_output_paths,
     save_checkpoint,
+    save_training_checkpoint,
 )
+
+TRAINING_CSV_COLUMNS = [
+    "epoch",
+    "train_loss",
+    "val_loss",
+    "accuracy",
+    "precision",
+    "recall",
+    "f1",
+]
 
 
 def train_image_classification(config: dict[str, Any]) -> None:
+    if int(config.get("epochs", 0)) < 1:
+        raise MLXUserError("--epochs must be at least 1 for image-classification training.")
     model_name = resolve_model_name(config)
     family = model_family_for(model_name)
     if family == "one-shot":
@@ -69,14 +84,23 @@ def _train_one_shot(model_name: str, config: dict[str, Any]) -> None:
     verbose = bool(config.get("verbose", False))
     output_paths = resolve_train_output_paths(config, model_name=model_name)
     checkpoint_path = output_paths["checkpoint_path"]
+    last_checkpoint_path = output_paths["last_checkpoint_path"]
     training_csv_path = output_paths["training_csv_path"]
-    _initialize_training_csv(training_csv_path)
 
     print_info(f"Starting one-shot training on device={device} for {epochs} epochs")
 
     model = build_image_classification_model(model_name, config).to(device)
     criterion = nn.BCELoss()
     optimizer = optim.Adam(model.parameters(), lr=learning_rate)
+    start_epoch, best_val_loss, history = _prepare_training_state(
+        config,
+        model,
+        optimizer,
+        model_name=model_name,
+        family="one-shot",
+        checkpoint_path=checkpoint_path,
+        training_csv_path=training_csv_path,
+    )
 
     train_dataset, val_dataset = load_one_shot_datasets(
         dataset_path,
@@ -87,12 +111,13 @@ def _train_one_shot(model_name: str, config: dict[str, Any]) -> None:
     train_loader = DataLoader(train_dataset, batch_size=batch_size, shuffle=True, num_workers=2)
     val_loader = DataLoader(val_dataset, batch_size=batch_size, shuffle=False, num_workers=2)
 
-    best_val_loss = float("inf")
     epoch_log = _build_epoch_log()
-    last_saved_panel = Panel("No model saved yet", border_style="dim")
+    last_saved_panel = _initial_checkpoint_panel(start_epoch, last_checkpoint_path)
 
     progress = _build_progress(epochs=epochs, train_loader_size=len(train_loader)) if verbose else None
     epoch_task, batch_task = _progress_tasks(progress) if progress is not None else (None, None)
+    if progress is not None and epoch_task is not None:
+        progress.update(epoch_task, completed=start_epoch)
 
     live = (
         Live(_render_training_view(epoch_log, progress, last_saved_panel), refresh_per_second=refresh_rate, transient=False)
@@ -101,7 +126,7 @@ def _train_one_shot(model_name: str, config: dict[str, Any]) -> None:
     )
 
     with (live or _nullcontext()):
-        for epoch in range(epochs):
+        for epoch in range(start_epoch, epochs):
             model.train()
             running_loss = 0.0
             if progress is not None and batch_task is not None and epoch_task is not None:
@@ -124,12 +149,15 @@ def _train_one_shot(model_name: str, config: dict[str, Any]) -> None:
             if progress is not None and epoch_task is not None:
                 progress.advance(epoch_task)
             avg_val_loss, val_metrics = _validate_one_shot(model, val_loader, criterion, device)
-            _append_training_csv_row(
-                training_csv_path,
-                epoch=epoch + 1,
-                loss=avg_train_loss,
-                metric=avg_val_loss,
+            history.append(
+                _training_history_row(
+                    epoch=epoch + 1,
+                    train_loss=avg_train_loss,
+                    val_loss=avg_val_loss,
+                    metrics=val_metrics,
+                )
             )
+            _write_training_csv(training_csv_path, history)
             epoch_log = _append_epoch_log(
                 epoch_log,
                 epoch=epoch + 1,
@@ -170,6 +198,18 @@ def _train_one_shot(model_name: str, config: dict[str, Any]) -> None:
                 checkpoint_message = None
                 last_saved_panel = Panel("No improvement", title="Checkpoint", border_style="dim")
 
+            save_training_checkpoint(
+                last_checkpoint_path,
+                model,
+                optimizer,
+                model_name=model_name,
+                family="one-shot",
+                config=config,
+                completed_epoch=epoch + 1,
+                best_val_loss=best_val_loss,
+                history=history,
+            )
+
             if live is not None and progress is not None:
                 live.update(_render_training_view(epoch_log, progress, last_saved_panel))
             else:
@@ -206,8 +246,8 @@ def _train_standard(model_name: str, config: dict[str, Any]) -> None:
     verbose = bool(config.get("verbose", False))
     output_paths = resolve_train_output_paths(config, model_name=model_name)
     checkpoint_path = output_paths["checkpoint_path"]
+    last_checkpoint_path = output_paths["last_checkpoint_path"]
     training_csv_path = output_paths["training_csv_path"]
-    _initialize_training_csv(training_csv_path)
 
     print_info(f"Starting standard classification training on device={device} for {epochs} epochs")
     train_dataset, val_dataset, classes = load_standard_classification_datasets(
@@ -224,15 +264,26 @@ def _train_standard(model_name: str, config: dict[str, Any]) -> None:
 
     criterion = nn.CrossEntropyLoss()
     optimizer = optim.Adam(model.parameters(), lr=learning_rate)
+    start_epoch, best_val_loss, history = _prepare_training_state(
+        config,
+        model,
+        optimizer,
+        model_name=model_name,
+        family="standard",
+        checkpoint_path=checkpoint_path,
+        training_csv_path=training_csv_path,
+        classes=classes,
+    )
     train_loader = DataLoader(train_dataset, batch_size=batch_size, shuffle=True, num_workers=2)
     val_loader = DataLoader(val_dataset, batch_size=batch_size, shuffle=False, num_workers=2)
 
-    best_val_loss = float("inf")
     epoch_log = _build_epoch_log()
-    last_saved_panel = Panel("No model saved yet", border_style="dim")
+    last_saved_panel = _initial_checkpoint_panel(start_epoch, last_checkpoint_path)
 
     progress = _build_progress(epochs=epochs, train_loader_size=len(train_loader)) if verbose else None
     epoch_task, batch_task = _progress_tasks(progress) if progress is not None else (None, None)
+    if progress is not None and epoch_task is not None:
+        progress.update(epoch_task, completed=start_epoch)
 
     live = (
         Live(_render_training_view(epoch_log, progress, last_saved_panel), refresh_per_second=refresh_rate, transient=False)
@@ -241,7 +292,7 @@ def _train_standard(model_name: str, config: dict[str, Any]) -> None:
     )
 
     with (live or _nullcontext()):
-        for epoch in range(epochs):
+        for epoch in range(start_epoch, epochs):
             model.train()
             running_loss = 0.0
             if progress is not None and batch_task is not None and epoch_task is not None:
@@ -264,12 +315,15 @@ def _train_standard(model_name: str, config: dict[str, Any]) -> None:
             if progress is not None and epoch_task is not None:
                 progress.advance(epoch_task)
             avg_val_loss, val_metrics = _validate_standard(model, val_loader, criterion, device)
-            _append_training_csv_row(
-                training_csv_path,
-                epoch=epoch + 1,
-                loss=avg_train_loss,
-                metric=val_metrics["accuracy"],
+            history.append(
+                _training_history_row(
+                    epoch=epoch + 1,
+                    train_loss=avg_train_loss,
+                    val_loss=avg_val_loss,
+                    metrics=val_metrics,
+                )
             )
+            _write_training_csv(training_csv_path, history)
             epoch_log = _append_epoch_log(
                 epoch_log,
                 epoch=epoch + 1,
@@ -310,6 +364,19 @@ def _train_standard(model_name: str, config: dict[str, Any]) -> None:
             else:
                 checkpoint_message = None
                 last_saved_panel = Panel("No improvement", title="Checkpoint", border_style="dim")
+
+            save_training_checkpoint(
+                last_checkpoint_path,
+                model,
+                optimizer,
+                model_name=model_name,
+                family="standard",
+                config=config,
+                completed_epoch=epoch + 1,
+                best_val_loss=best_val_loss,
+                history=history,
+                classes=classes,
+            )
 
             if live is not None and progress is not None:
                 live.update(_render_training_view(epoch_log, progress, last_saved_panel))
@@ -478,16 +545,101 @@ def _progress_tasks(progress: Progress) -> tuple[int, int]:
     return progress.task_ids[0], progress.task_ids[1]
 
 
-def _initialize_training_csv(csv_path: Path) -> None:
+def _prepare_training_state(
+    config: dict[str, Any],
+    model,
+    optimizer,
+    *,
+    model_name: str,
+    family: str,
+    checkpoint_path: Path,
+    training_csv_path: Path,
+    classes: list[str] | None = None,
+) -> tuple[int, float, list[dict[str, float | int]]]:
+    resume_path = config.get("model_path")
+    if not resume_path:
+        _write_training_csv(training_csv_path, [])
+        return 0, float("inf"), []
+
+    training_state = load_training_checkpoint(
+        resume_path,
+        model,
+        optimizer,
+        model_name=model_name,
+        family=family,
+        config=config,
+        classes=classes,
+    )
+    completed_epoch = training_state["completed_epoch"]
+    target_epochs = int(config.get("epochs", 0))
+    if completed_epoch > target_epochs:
+        raise MLXUserError(
+            f"Resume checkpoint has completed epoch {completed_epoch}, which exceeds "
+            f"the requested --epochs target of {target_epochs}."
+        )
+    history = training_state["history"]
+    _write_training_csv(training_csv_path, history)
+    if not checkpoint_path.exists():
+        save_checkpoint(
+            checkpoint_path,
+            model,
+            model_name=model_name,
+            family=family,
+            config=config,
+            classes=classes,
+        )
+    print_info(
+        f"Resuming {model_name} from completed epoch {completed_epoch}: {resume_path}"
+    )
+    return completed_epoch, training_state["best_val_loss"], history
+
+
+def _initial_checkpoint_panel(start_epoch: int, last_checkpoint_path: Path) -> Panel:
+    if start_epoch:
+        return Panel(
+            f"Resumed at epoch {start_epoch} from {last_checkpoint_path}",
+            title="Checkpoint",
+            border_style="cyan",
+        )
+    return Panel("No model saved yet", border_style="dim")
+
+
+def _training_history_row(
+    *,
+    epoch: int,
+    train_loss: float,
+    val_loss: float,
+    metrics: dict[str, float],
+) -> dict[str, float | int]:
+    return {
+        "epoch": epoch,
+        "train_loss": train_loss,
+        "val_loss": val_loss,
+        "accuracy": metrics["accuracy"],
+        "precision": metrics["precision"],
+        "recall": metrics["recall"],
+        "f1": metrics["f1"],
+    }
+
+
+def _write_training_csv(
+    csv_path: Path,
+    history: list[dict[str, float | int]],
+) -> None:
     csv_path.parent.mkdir(parents=True, exist_ok=True)
     with csv_path.open("w", newline="", encoding="utf-8") as csv_file:
-        writer = csv.writer(csv_file)
-        writer.writerow(["epoch", "loss", "metric"])
-
-def _append_training_csv_row(csv_path: Path, *, epoch: int, loss: float, metric: float) -> None:
-    with csv_path.open("a", newline="", encoding="utf-8") as csv_file:
-        writer = csv.writer(csv_file)
-        writer.writerow([epoch, f"{loss:.6f}", f"{metric:.6f}"])
+        writer = csv.DictWriter(csv_file, fieldnames=TRAINING_CSV_COLUMNS)
+        writer.writeheader()
+        for row in history:
+            writer.writerow(
+                {
+                    "epoch": int(row["epoch"]),
+                    **{
+                        column: f"{float(row[column]):.6f}"
+                        for column in TRAINING_CSV_COLUMNS[1:]
+                    },
+                }
+            )
 
 
 def _build_epoch_log(*, max_entries: int = 12) -> deque[str]:

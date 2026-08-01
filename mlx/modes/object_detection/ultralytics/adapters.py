@@ -1,11 +1,15 @@
 from __future__ import annotations
 
-from dataclasses import dataclass
 from pathlib import Path
-from typing import Optional, Protocol
+from typing import Optional
 
 import numpy as np
 
+from mlx.modes.object_detection.ultralytics.results import (
+    Detection,
+    DetectionAdapter,
+    DetectionResult,
+)
 from mlx.modes.object_detection.ultralytics.utils import initialize_model
 
 try:
@@ -19,25 +23,6 @@ except ImportError as exc:
     raise ImportError(
         "The ultralytics package (ralampay fork) is required for object-detection mode."
     ) from exc
-
-
-@dataclass(frozen=True)
-class Detection:
-    xyxy: tuple[int, int, int, int]
-    confidence: float
-    class_id: int
-    label: str
-
-
-@dataclass(frozen=True)
-class DetectionResult:
-    detections: list[Detection]
-    names: dict[int, str]
-
-
-class DetectionAdapter(Protocol):
-    def predict(self, frame: np.ndarray) -> DetectionResult:
-        ...
 
 
 class UltralyticsDetectionAdapter:

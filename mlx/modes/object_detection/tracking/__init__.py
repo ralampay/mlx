@@ -1,12 +1,12 @@
-from mlx.modes.object_detection.tracking import (
+from mlx.modes.object_detection.tracking.command import RunTrackByDetectionCommand
+from mlx.modes.object_detection.tracking.models import (
     BoundingBox,
-    RunTrackByDetectionCommand,
     TrackResult,
     TrackStatus,
-    TrackingAlgorithm,
     TrackingDetection,
     TrackingFrameResult,
 )
+from mlx.modes.object_detection.tracking.protocols import TrackingAlgorithm
 
 __all__ = [
     "BoundingBox",

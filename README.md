@@ -1,122 +1,287 @@
 # MLX
 
-Machine-learning workflow runner for computer-vision tasks.
+MLX is a command-line toolkit for machine-learning workflows. It provides a shared
+CLI and project conventions while keeping object detection, image classification,
+segmentation, NLP, and tracking logic in focused modules.
 
-## Table of Contents
+## Contents
 
-- [Overview](#overview)
-- [Project Layout](#project-layout)
+- [Architecture](#architecture)
 - [Installation](#installation)
-- [Usage](#usage)
-- [Modes](#modes)
+- [Command-line interface](#command-line-interface)
+- [Object detection and tracking](#object-detection-and-tracking)
+- [Image classification](#image-classification)
+- [Segmentation](#segmentation)
+- [NLP embeddings](#nlp-embeddings)
 - [Documentation](#documentation)
 
-## Overview
+## Architecture
 
-MLX provides a CLI for running mode-specific workflows behind a shared interface:
-
-```bash
-python -m mlx --mode object_detection --action train
-```
-
-The codebase is organized around mode packages:
-
-- `mlx.core`: shared exceptions and terminal UI helpers.
-- `mlx.modes.image_classification`: image-classification workflows for both one-shot and standard classifiers.
-- `mlx.modes.object_detection.ultralytics`: object detection on Ultralytics.
-- `mlx.modes.segmentation`: semantic segmentation workflows for U-Net style models.
-
-## Project Layout
+The CLI dispatches each `--mode` directly to its package. Shared exceptions, random
+seed handling, model summaries, and terminal presentation utilities live in
+`mlx.core`; mode-specific data preparation, models, training, inference, evaluation,
+and presentation remain under `mlx.modes`.
 
 ```text
 mlx/
-├── core/
-├── modes/
-│   ├── object_detection/
-│   │   └── ultralytics/
-│   ├── image_classification/
-│   └── segmentation/
+├── core/                              shared infrastructure
+└── modes/
+    ├── object_detection/
+    │   ├── ultralytics/               detection training and inference
+    │   └── tracking/                  detector-neutral online tracking
+    ├── image_classification/          standard and one-shot classification
+    ├── segmentation/                  semantic segmentation
+    └── nlp/                           CSV embedding workflows
 ```
 
-The CLI now dispatches directly by `--mode`, so there is no separate platform abstraction.
+Each workflow follows the same project pattern:
+
+```text
+CLI configuration
+    ↓
+thin mode runner
+    ↓
+command-style workflow
+    ↓
+mode-specific models, data, and presentation
+```
+
+### Module map
+
+| Module | Package | Primary interface | Detailed documentation |
+| --- | --- | --- | --- |
+| Shared core | `mlx.core` | Exceptions, UI, seeds, model summaries | This README |
+| Object detection | `mlx.modes.object_detection.ultralytics` | CLI and detection adapters | [Object detection](./docs/object_detection/README.md) |
+| Tracking | `mlx.modes.object_detection.tracking` | Python API | [Tracking](./TRACKING.md) |
+| Image classification | `mlx.modes.image_classification` | CLI and Python workflows | [Image classification](./docs/image_classification/README.md) |
+| Segmentation | `mlx.modes.segmentation` | CLI and Python workflows | [Segmentation](./docs/segmentation/README.md) |
+| NLP embeddings | `mlx.modes.nlp` | CLI | This README |
 
 ## Installation
 
-Install the Python dependencies first:
+Install the project dependencies:
 
 ```bash
-pip install -r requirements.txt
+python -m pip install -r requirements.txt
 ```
 
-Current runtime dependencies:
+The dependency set includes NumPy, pandas, PyTorch, torchvision, OpenCV, Rich,
+scikit-learn, ONNX Runtime, llama-cpp-python, and the repository's pinned
+Ultralytics fork.
 
-- `numpy`
-- `grad-cam`
-- `opencv-python`
-- `python-dotenv`
-- `rich`
-- `scikit-learn`
-- `torch`
-- `torchvision`
-- `tqdm`
-- `ultralytics` from the pinned Git repository in `requirements.txt`
+## Command-line interface
 
-## Usage
-
-All commands share the same high-level signature:
+All CLI modules share one command shape:
 
 ```bash
-python -m mlx --mode <mode-name> --action <action-name>
+python -m mlx --mode <mode> --action <action> [options]
 ```
 
-Examples:
+Available CLI modes are:
+
+| Mode | Actions |
+| --- | --- |
+| `object_detection` | `train`, `infer-camera`, `infer-video`, `convert`, `ls-models` |
+| `image_classification` | `train`, `test`, `benchmark`, `infer-image`, `cam`, `build-dataset`, `ls-models` |
+| `segmentation` | `train`, `test`, `benchmark`, `infer-image`, `infer-camera`, `infer-video`, `build-dataset`, `ls-models` |
+| `nlp` | `embed` |
+
+Hyphenated mode names such as `object-detection` and `image-classification` are also
+accepted. Run the following command for the complete option reference:
 
 ```bash
+python -m mlx --help
+```
+
+## Object detection and tracking
+
+### Object detection
+
+Package: `mlx.modes.object_detection.ultralytics`
+
+The object-detection module trains Ultralytics models, converts PyTorch checkpoints
+to ONNX, and runs camera or video inference through normalized detection adapters.
+Model aliases include `yolo26`, `yolov26`, and `draxnet-yolo26`. Dataset input may
+be a local YOLO dataset root, a dataset YAML, or an Ultralytics alias such as `coco8`
+or `coco128`.
+
+```bash
+# Inspect available models.
 python -m mlx --mode object_detection --action ls-models
-python -m mlx --mode object_detection --action train --dataset coco8 --model draxnet-yolo26 --output ./runs/draxnet
-python -m mlx --mode object_detection --action convert --model-path ./runs/draxnet/exp/weights/best.pt --output ./exports
-python -m mlx --mode object_detection --action infer-camera --model-path ./exports/best.onnx
-python -m mlx --mode object_detection --action infer-video --model-path ./exports/best.onnx --file-path ~/videos/sample.mp4
-python -m mlx --mode image_classification --action train --output ./artifacts/resnet18 --dataset ./dataset --model resnet18 --seed 42
-python -m mlx --mode image_classification --action ls-models
-python -m mlx --mode image_classification --action train --output ./artifacts/siamese --dataset ./omniglot --model siamese-le-net --seed 42
-python -m mlx --mode image_classification --action cam --model resnet18 --model-path ./artifacts/resnet18/resnet18.pth --dataset ./dataset --output ./cam-results --cam-method gradcam
-python -m mlx --mode image_classification --action build-dataset --dataset ./raw-dataset
-python -m mlx --mode image_classification --action build-dataset --dataset ./raw-dataset --output ./dataset --train-count 100 --val-count 20 --test-count 20 --overwrite --seed 42
-python -m mlx --mode image_classification --action build-dataset --dataset ./raw-dataset --split-mode ratios --train-ratio 0.7 --val-ratio 0.15 --test-ratio 0.15 --output ./dataset --overwrite --seed 42
-python -m mlx --mode segmentation --action train --dataset ./dataset --model unet --output ./unet-seg.pt
-python -m mlx --mode segmentation --action train --dataset ./dataset --model unet-resnet18 --pretrained --output ./unet-resnet18
-python -m mlx --mode segmentation --action train --dataset ./dataset --model unet-draxnet-sknet --output ./unet-draxnet-sknet
-python -m mlx --mode segmentation --action ls-models
-python -m mlx --mode segmentation --action infer-image --model-path ./unet-seg.pt --input-img ./sample.jpg
+
+# Train an Ultralytics model.
+python -m mlx --mode object_detection --action train \
+    --dataset coco8 \
+    --model draxnet-yolo26 \
+    --output ./runs/draxnet
+
+# Convert the selected checkpoint to ONNX.
+python -m mlx --mode object_detection --action convert \
+    --model-path ./runs/draxnet/exp/weights/best.pt \
+    --output ./exports
+
+# Run video inference with the exported model.
+python -m mlx --mode object_detection --action infer-video \
+    --model-path ./exports/best.onnx \
+    --file-path ~/videos/sample.mp4
 ```
 
-Run `python -m mlx --help` for the complete CLI reference.
+Training reuses compatible checkpoints found under `--output` when no explicit
+`--model-path` is supplied. By default, the best checkpoint is selected for
+downstream use; pass `--no-use-best` to prefer the last checkpoint.
 
-For object detection, `--model` now accepts built-in aliases such as `yolo26`, `yolov26`, and `draxnet-yolo26`. `--dataset` or `--dataset-path` accepts a local YOLO dataset root, a dataset YAML, or built-in Ultralytics aliases such as `coco8` and `coco128`.
+The intended deployment flow is:
 
-Object-detection training also reuses checkpoints already present under the selected `--output` directory when `--model-path` is omitted. If a resumable `last.pt` is found, MLX continues the existing run and says so in the training output; otherwise it warm-starts from the newest `.pt` it finds there. `--use-best` is enabled by default, so after training MLX selects `weights/best.pt` as the checkpoint for downstream use when Ultralytics writes it; pass `--no-use-best` to prefer `weights/last.pt`.
-For object-detection inference, `.pt` checkpoints continue to use Ultralytics, while `.onnx` model paths now run through ONNX Runtime without requiring `--model`.
-The documented deployment path is now: train with Ultralytics, convert the resulting `.pt` checkpoint to `.onnx`, then run inference against that `.onnx` model.
+```text
+Ultralytics training → .pt checkpoint → ONNX conversion → camera/video inference
+```
 
-## Modes
+See [the object-detection guide](./docs/object_detection/README.md) for dataset
+layout, model resolution, training artifacts, inference, and conversion details.
 
-| Mode | Package | Actions | Docs |
-| --- | --- | --- | --- |
-| `object_detection` | `mlx.modes.object_detection.ultralytics` | `train`, `infer-camera`, `infer-video`, `convert`, `ls-models` | [Object detection](./docs/object_detection/README.md) |
-| `image_classification` | `mlx.modes.image_classification` | `train`, `test`, `benchmark`, `infer-image`, `cam`, `build-dataset`, `ls-models` | [Image classification](./docs/image_classification/README.md) |
-| `segmentation` | `mlx.modes.segmentation` | `train`, `test`, `benchmark`, `infer-image`, `infer-camera`, `infer-video`, `build-dataset`, `ls-models` | [Segmentation](./docs/segmentation/README.md) |
+### Tracking by detection
 
-`image_classification` supports both Siamese one-shot models and standard classifiers such as `resnet18`, `resnet50`, `densenet121`, `mobilenet_v3_large`, `efficientnet_b0`, `convnext_tiny`, `convnext_small`, `convnext_base`, `convnext_large`, `draxnet`, and `drax_mobilenet_v3_large`.
+Package: `mlx.modes.object_detection.tracking`
 
-For image-classification training, `--output` is an artifact directory. Training writes the selected `{model}.pth`, a resumable `{model}.last.pth`, and `training.csv` inside that directory. Pass the last checkpoint back through `--model-path` to continue at the next epoch.
-For image-classification benchmarking, `--output` can also be used to store `metrics.csv`, `confusion_matrix.csv`, `confusion_matrix.png`, and `roc_curve.png`. One-shot benchmarks additionally write pair-level predictions, threshold metrics, a precision-recall curve, a score-distribution plot, and N-way classification artifacts.
-For segmentation training, `--output` accepts either an artifact directory or a legacy checkpoint file. Training saves best-loss, best-Dice, and resumable-last checkpoints plus CSV/plot research history. Segmentation `benchmark` evaluates an explicit split and exports aggregate, per-class, per-image, probability, calibration, boundary, threshold, timing, and prediction artifacts.
-For image-classification explainability, `--action cam` renders Grad-CAM, AblationCAM, or ScoreCAM overlays for test images from a trained checkpoint. CLI runs can display OpenCV windows, and the same `mlx.modes.image_classification.cam` functions can be imported from notebooks.
+Tracking is a Python API layered on normalized object detections rather than a
+separate CLI mode. The integrated command accepts the detector produced by the
+current object-detection adapter factory:
+
+```python
+from mlx.modes.object_detection.tracking.algorithms import DetectionAsTrackAlgorithm
+from mlx.modes.object_detection.ultralytics import RunObjectDetectionTrackingCommand
+
+tracking = RunObjectDetectionTrackingCommand(
+    detection_model=detector,
+    algorithm=DetectionAsTrackAlgorithm(),
+)
+
+while True:
+    ok, frame = capture.read()
+    if not ok:
+        break
+    tracking_result = tracking.execute(frame=frame)
+
+tracking.reset()
+```
+
+Detector-specific inference and generic tracking remain separate:
+
+```text
+frame source → detection adapter → normalized detections
+             → tracking algorithm → immutable track results
+```
+
+The included algorithm is an architectural placeholder, not a temporal association
+tracker. See [TRACKING.md](./TRACKING.md) for the complete integration flow, public
+types, memory guarantees, lower-level API, and extension protocol.
+
+## Image classification
+
+Package: `mlx.modes.image_classification`
+
+This module supports standard classifiers and Siamese one-shot models. Standard
+families include ResNet, DenseNet, MobileNet, EfficientNet, ConvNeXt, DraxNet, and
+Drax MobileNet variants. Its workflows cover dataset construction, training,
+checkpoint resume, benchmarking, image inference, and CAM visualization.
+
+```bash
+# List supported models.
+python -m mlx --mode image_classification --action ls-models
+
+# Train a standard classifier.
+python -m mlx --mode image_classification --action train \
+    --model resnet18 \
+    --dataset ./dataset \
+    --output ./artifacts/resnet18 \
+    --seed 42
+
+# Train a Siamese one-shot model.
+python -m mlx --mode image_classification --action train \
+    --model siamese-le-net \
+    --dataset ./omniglot \
+    --output ./artifacts/siamese \
+    --seed 42
+
+# Generate class-activation maps.
+python -m mlx --mode image_classification --action cam \
+    --model resnet18 \
+    --model-path ./artifacts/resnet18/resnet18.pth \
+    --dataset ./dataset \
+    --output ./cam-results \
+    --cam-method gradcam
+```
+
+Training writes the selected `{model}.pth`, resumable `{model}.last.pth`, and
+`training.csv` into the artifact directory. Benchmarking can export aggregate and
+class-level metrics, confusion matrices, ROC curves, and one-shot-specific pair and
+threshold analyses. CAM supports Grad-CAM, AblationCAM, and ScoreCAM.
+
+See the [image-classification guide](./docs/image_classification/README.md) for model
+families, dataset layouts, evaluation artifacts, and explainability workflows.
+
+## Segmentation
+
+Package: `mlx.modes.segmentation`
+
+The segmentation module provides semantic-segmentation dataset preparation,
+training, resume support, benchmarking, and image, camera, or video inference. It
+supports U-Net variants with native and registered backbone configurations.
+
+```bash
+# List supported segmentation models.
+python -m mlx --mode segmentation --action ls-models
+
+# Train a baseline U-Net.
+python -m mlx --mode segmentation --action train \
+    --dataset ./dataset \
+    --model unet \
+    --output ./artifacts/unet
+
+# Train a pretrained-backbone variant.
+python -m mlx --mode segmentation --action train \
+    --dataset ./dataset \
+    --model unet-resnet18 \
+    --pretrained \
+    --output ./artifacts/unet-resnet18
+
+# Run image inference.
+python -m mlx --mode segmentation --action infer-image \
+    --model-path ./artifacts/unet/unet.pth \
+    --input-img ./sample.jpg
+```
+
+Training stores best-loss, best-Dice, and resumable-last checkpoints together with
+CSV and plot research history. Benchmarking exports aggregate, per-class, per-image,
+probability, calibration, boundary, threshold, timing, and prediction artifacts.
+
+See the [segmentation guide](./docs/segmentation/README.md) for dataset format,
+models, metrics, artifacts, and inference workflows.
+
+## NLP embeddings
+
+Package: `mlx.modes.nlp`
+
+The NLP module currently provides one command-style workflow: generating embeddings
+for a text column in a CSV file with a compatible GGUF embedding model through
+llama-cpp-python.
+
+```bash
+python -m mlx --mode nlp --action embed \
+    --model-file ./models/embedding-model.gguf \
+    --input-file ./data/documents.csv \
+    --column-name content \
+    --output-file ./data/document-embeddings.csv
+```
+
+The input column must contain non-empty text in every row. The output CSV contains
+the source content and generated embedding values. When `--output-file` is omitted,
+MLX derives an output name beside the input CSV.
 
 ## Documentation
 
 - [Documentation index](./docs/README.md)
-- [Object detection mode docs](./docs/object_detection/README.md)
-- [Image classification docs](./docs/image_classification/README.md)
-- [Segmentation mode docs](./docs/segmentation/README.md)
+- [Object detection](./docs/object_detection/README.md)
+- [Tracking by detection](./TRACKING.md)
+- [Image classification](./docs/image_classification/README.md)
+- [Segmentation](./docs/segmentation/README.md)

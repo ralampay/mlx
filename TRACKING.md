@@ -28,6 +28,95 @@ The detector processes the image and produces normalized detections. The tracker
 receives those detections and may optionally inspect the current frame. A tracking
 algorithm never invokes YOLO or another detector directly.
 
+## CLI Workflow with a Trained Detection Model
+
+The object-detection CLI is used to train, convert, and verify the detector that
+will supply detections to the tracking API.
+
+### 1. Train or select a checkpoint
+
+Train a model when a checkpoint is not already available:
+
+```bash
+python -m mlx --mode object_detection --action train \
+    --dataset coco8 \
+    --model draxnet-yolo26 \
+    --output ./runs/draxnet \
+    --epochs 10 \
+    --device cpu
+```
+
+The selected checkpoint is normally under the run's `weights/` directory. Training
+prefers `best.pt` by default when Ultralytics produces it; pass `--no-use-best` to
+prefer `last.pt`.
+
+The remaining examples use this checkpoint:
+
+```text
+./runs/draxnet/exp/weights/best.pt
+```
+
+Adjust the run-directory component when Ultralytics created a different run name.
+
+### 2. Verify the `.pt` detector through the CLI
+
+A PyTorch checkpoint requires both its architecture alias or YAML and its trained
+weights:
+
+```bash
+python -m mlx --mode object_detection --action infer-video \
+    --model draxnet-yolo26 \
+    --model-path ./runs/draxnet/exp/weights/best.pt \
+    --file-path ./videos/input.mp4 \
+    --confidence 0.25 \
+    --device cpu
+```
+
+For a camera source, use the same trained model with `infer-camera`:
+
+```bash
+python -m mlx --mode object_detection --action infer-camera \
+    --model draxnet-yolo26 \
+    --model-path ./runs/draxnet/exp/weights/best.pt \
+    --camera-index 0 \
+    --confidence 0.25 \
+    --device cpu
+```
+
+These commands verify that the model loads and produces normalized detections. They
+display detections only; they do not assign persistent track IDs.
+
+### 3. Optionally convert and verify an ONNX detector
+
+Convert the trained checkpoint:
+
+```bash
+python -m mlx --mode object_detection --action convert \
+    --model-path ./runs/draxnet/exp/weights/best.pt \
+    --output ./exports \
+    --device cpu
+```
+
+Then run inference with the exported model:
+
+```bash
+python -m mlx --mode object_detection --action infer-video \
+    --model-path ./exports/best.onnx \
+    --file-path ./videos/input.mp4 \
+    --confidence 0.25 \
+    --device cpu
+```
+
+An `.onnx` model does not require `--model`; MLX selects the ONNX adapter from the
+file extension.
+
+### 4. Connect the verified model to tracking
+
+Tracking is currently a Python API rather than a CLI action. After verifying the
+trained detector with `infer-video` or `infer-camera`, use the same model path to
+build the detector adapter described in the next section. This keeps CLI model
+loading and tracking model loading on the same project adapter boundary.
+
 ## Using the Current Object-Detection Models
 
 The recommended integration accepts the same detector returned by the existing

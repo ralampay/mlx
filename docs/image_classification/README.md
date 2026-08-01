@@ -18,6 +18,7 @@ The source is organized by responsibility:
 - `train.py`: training loops and smoke tests for one-shot and standard classifiers.
 - `evaluation.py`: benchmark flows for both model families.
 - `inference.py`: image inference for both model families.
+- `ood/`: Deep SVDD center initialization, scoring, loss, and threshold calibration.
 - `cam.py`: Grad-CAM, AblationCAM, and ScoreCAM rendering for trained checkpoints.
 - `data.py`: dataset loading, dataset building, and shared image preprocessing.
 - `models/`: Siamese and standard classification model builders.
@@ -111,6 +112,12 @@ epoch history, and random-number-generator state.
 epoch,train_loss,val_loss,accuracy,precision,recall,f1
 ```
 
+Joint Deep SVDD runs extend this schema with separate train/validation classification and SVDD losses. Ordinary runs retain the original columns exactly.
+
+```text
+epoch,train_loss,train_classification_loss,train_svdd_loss,val_loss,val_classification_loss,val_svdd_loss,accuracy,precision,recall,f1
+```
+
 Resume an interrupted run by passing its last checkpoint and the original
 total target epoch count:
 
@@ -172,6 +179,339 @@ Supported standard models:
 - `convnext_large`
 - `draxnet`
 - `drax_mobilenet_v3_large`
+
+### Optional Joint Deep SVDD
+
+Every standard classifier above supports optional joint Deep SVDD training. It is disabled by default, so existing models, commands, checkpoints, outputs, and classification behavior remain unchanged. One-shot Siamese models do not use this option.
+
+The joint model computes one shared penultimate feature vector and sends it to two independent branches:
+
+```text
+shared image features
+├── existing classification head -> class logits
+└── independent projection head -> Deep SVDD embedding
+```
+
+The projection head prevents the global compactness objective from acting directly on the exact representation that must separate the classes. All labeled images in `train/` are in-distribution examples; no OOD or negative-image directory is required or implicitly added.
+
+For a chest-X-ray dataset, valid images can contain classes `a`, `b`, and `c`. The classifier distinguishes those labels while the OOD gate can reject natural images, dog images, unrelated radiology modalities, and corrupted images.
+
+Ordinary classification training remains:
+
+```bash
+python -m mlx \
+  --mode image_classification \
+  --action train \
+  --model draxnet \
+  --dataset ./dataset \
+  --output ./artifacts/model
+```
+
+Enable joint training explicitly:
+
+```bash
+python -m mlx \
+  --mode image_classification \
+  --action train \
+  --model draxnet \
+  --dataset ./chest-xray-dataset \
+  --output ./artifacts/draxnet-svdd \
+  --ood-method deep-svdd \
+  --svdd-weight 0.05 \
+  --svdd-dim 128 \
+  --svdd-hidden-dim 256 \
+  --svdd-quantile 0.95 \
+  --svdd-warmup-epochs 0 \
+  --epochs 50 \
+  --device cuda:0
+```
+
+Arguments and defaults:
+
+- `--ood-method none`: use ordinary classification. Set `deep-svdd` to enable the joint model.
+- `--svdd-weight 0.05`: contribution of mean squared distance to the fixed center.
+- `--svdd-dim 128`: SVDD embedding dimension.
+- `--svdd-hidden-dim 256`: projection-head hidden dimension.
+- `--svdd-quantile 0.95`: quantile of valid validation scores used as the acceptance threshold; it must be strictly between zero and one.
+- `--svdd-warmup-epochs 0`: number of initial classification-only epochs.
+
+Before the first joint epoch, MLX initializes a fixed center from all training-set embeddings. Resumable checkpoints restore that exact center and never silently recompute it. Best-checkpoint selection uses joint validation loss (`classification loss + svdd weight * SVDD loss`) only when Deep SVDD is enabled; ordinary runs continue to use the existing classification validation loss.
+
+Resume joint training with the same OOD method and projection dimensions:
+
+```bash
+python -m mlx \
+  --mode image_classification \
+  --action train \
+  --model draxnet \
+  --dataset ./chest-xray-dataset \
+  --output ./artifacts/draxnet-svdd \
+  --model-path ./artifacts/draxnet-svdd/draxnet.last.pth \
+  --ood-method deep-svdd \
+  --svdd-dim 128 \
+  --svdd-hidden-dim 256 \
+  --epochs 100
+```
+
+The checkpoint OOD method, embedding dimension, hidden dimension, class labels, input size, color mode, model family, and Drax fusion mode must match the resumed run. An ordinary checkpoint cannot be resumed as a Deep SVDD model; MLX reports this as a user-facing compatibility error.
+
+After training, MLX reloads the selected deployment checkpoint and calibrates its threshold from valid `val/` images—not test or OOD images. The deployment checkpoint stores the center in both the model state and readable `ood` metadata, plus the calibrated threshold, quantile, dimensions, and squared-Euclidean score type. Intermediate `.last.pth` checkpoints may have no threshold and cannot be used for OOD-gated inference until calibration is completed.
+
+The added checkpoint metadata has this shape (the surrounding checkpoint retains MLX's existing keys such as `state_dict`, `family`, and `model_config`):
+
+```python
+{
+    "ood": {
+        "method": "deep-svdd",
+        "center": center_tensor,
+        "threshold": 0.73,  # None before calibration
+        "quantile": 0.95,
+        "embedding_dim": 128,
+        "hidden_dim": 256,
+        "score_type": "squared_euclidean",
+    }
+}
+```
+
+The center also appears as the registered `svdd_center` buffer in `state_dict`. Ordinary checkpoints omit the `ood` block, preserving the pre-SVDD checkpoint layout.
+
+Run inference with the final checkpoint:
+
+```bash
+python -m mlx \
+  --mode image_classification \
+  --action infer-image \
+  --model draxnet \
+  --model-path ./artifacts/draxnet-svdd/draxnet.pth \
+  --input-img ./sample.png \
+  --device cuda:0
+```
+
+#### Determining whether an image is OOD
+
+For a Deep SVDD checkpoint, MLX calculates the squared Euclidean distance between the image's SVDD embedding and the fixed training-distribution center:
+
+```text
+ood_score = sum((svdd_embedding - svdd_center) ** 2)
+```
+
+It then compares that score with the validation-calibrated threshold stored in the checkpoint:
+
+```text
+accepted = ood_score <= ood_threshold
+```
+
+- `accepted: true` means the score is at or below the threshold, so the image is treated as in-distribution and `predicted_label` can be used.
+- `accepted: false` means the score exceeds the threshold, so the image is treated as out-of-distribution. In that case, `predicted_label` and `confidence` are `None`, and `rejection_reason` is `out_of_distribution`.
+- Lower scores indicate greater proximity to the learned training-image center. Higher scores indicate greater dissimilarity.
+
+When calling `infer_image_classification` from Python, inspect `accepted` as the primary decision field:
+
+```python
+from mlx.modes.image_classification.inference import infer_image_classification
+
+result = infer_image_classification(
+    {
+        "model": "draxnet",
+        "model_path": "./artifacts/draxnet-svdd/draxnet.pth",
+        "input_img": "./sample.png",
+        "device": "cpu",
+    }
+)
+
+if result["accepted"]:
+    print(
+        f"In-distribution: {result['predicted_label']} "
+        f"(score={result['ood_score']:.4f}, "
+        f"threshold={result['ood_threshold']:.4f})"
+    )
+else:
+    print(
+        f"OOD: score={result['ood_score']:.4f} exceeds "
+        f"threshold={result['ood_threshold']:.4f}"
+    )
+```
+
+The CLI renders an explicit rejection message when `accepted` is false. For automation, rely on the returned `accepted` boolean instead of comparing rounded display values. The raw `ood_score` and `ood_threshold` fields are also returned for logging and monitoring.
+
+An accepted result includes the trusted class prediction:
+
+```python
+{
+    "accepted": True,
+    "predicted_label": "a",
+    "confidence": 0.91,
+    "ood_score": 0.42,
+    "ood_threshold": 0.73,
+    "rejection_reason": None,
+}
+```
+
+A rejected result does not expose a trusted class label:
+
+```python
+{
+    "accepted": False,
+    "predicted_label": None,
+    "confidence": None,
+    "ood_score": 4.81,
+    "ood_threshold": 0.73,
+    "rejection_reason": "out_of_distribution",
+}
+```
+
+If a Deep SVDD checkpoint has not been calibrated, inference stops instead of choosing a threshold implicitly:
+
+```text
+The checkpoint contains a Deep SVDD model, but no calibrated rejection threshold. Run threshold calibration or use a final deployment checkpoint.
+```
+
+Deep SVDD does not mathematically guarantee rejection of every unseen input. Acceptance means only: “The image is sufficiently similar to the validated training-image distribution.” It does not prove medical validity, diagnostic correctness, or semantic suitability. Calibration quality depends on representative training and validation data, and distribution shifts close to the learned boundary can still be accepted. Joint Deep SVDD is currently limited to standard classifiers; Siamese training does not use the OOD branch, and CAM generation currently expects an ordinary classification checkpoint.
+
+## OOD Training and Benchmarking
+
+### Training an OOD-enabled classifier
+
+Use the normal labelled `train/` and `val/` splits. Every class under these splits is considered valid and in-distribution for Deep SVDD:
+
+```text
+./chest-xray-dataset/
+├── train/
+│   ├── a/
+│   ├── b/
+│   └── c/
+├── val/
+│   ├── a/
+│   ├── b/
+│   └── c/
+└── test/
+    ├── a/
+    ├── b/
+    └── c/
+```
+
+Do not put known OOD examples in `train/` or `val/`. Joint training does not need negative examples, and `val/` is used to calibrate the rejection threshold after the selected checkpoint is loaded.
+
+```bash
+python -m mlx \
+  --mode image_classification \
+  --action train \
+  --model resnet18 \
+  --dataset ./chest-xray-dataset \
+  --output ./artifacts/resnet18-svdd \
+  --ood-method deep-svdd \
+  --svdd-weight 0.05 \
+  --svdd-dim 128 \
+  --svdd-hidden-dim 256 \
+  --svdd-quantile 0.95 \
+  --epochs 50 \
+  --device cuda:0
+```
+
+Use the final `resnet18.pth` for inference and OOD benchmarking. The resumable `resnet18.last.pth` may not contain a calibrated threshold.
+
+### Preparing an OOD benchmark
+
+A meaningful OOD benchmark needs two held-out collections that were not used for training or threshold calibration:
+
+```text
+./ood-benchmark/
+├── id/
+│   └── held-out valid chest X-rays
+└── ood/
+    ├── natural images
+    ├── dog images
+    ├── unrelated radiology modalities
+    └── corrupted images
+```
+
+The ID collection measures how often valid inputs are accepted. The OOD collection measures how often unrelated inputs are rejected. Keep these sets separate from `train/` and `val/`; in particular, do not adjust `--svdd-quantile` after looking at final benchmark results.
+
+The normal `benchmark` action continues to report classification metrics from class logits. It can be run on the held-out ID split to confirm that accepted-distribution classification remains useful:
+
+```bash
+python -m mlx \
+  --mode image_classification \
+  --action benchmark \
+  --model resnet18 \
+  --model-path ./artifacts/resnet18-svdd/resnet18.pth \
+  --dataset ./chest-xray-dataset/test \
+  --batch-size 16 \
+  --device cuda:0
+```
+
+That command is a classification benchmark; it does not treat the labelled test classes as OOD. To measure OOD rejection, score both benchmark collections with the threshold already stored in the final checkpoint:
+
+```python
+from pathlib import Path
+
+import torch
+from sklearn.metrics import roc_auc_score
+
+from mlx.modes.image_classification.data import iter_dataset_images, load_image_tensor
+from mlx.modes.image_classification.models.joint_svdd import JointDeepSVDDClassifier
+from mlx.modes.image_classification.utils import load_checkpoint_bundle
+
+device = "cuda:0" if torch.cuda.is_available() else "cpu"
+model, metadata = load_checkpoint_bundle(
+    {
+        "model": "resnet18",
+        "model_path": "./artifacts/resnet18-svdd/resnet18.pth",
+        "device": device,
+    }
+)
+
+if not isinstance(model, JointDeepSVDDClassifier):
+    raise RuntimeError("The checkpoint is not a Deep SVDD classifier.")
+if not torch.isfinite(model.svdd_threshold):
+    raise RuntimeError("The checkpoint has no calibrated OOD threshold.")
+
+model = model.to(device).eval()
+
+
+@torch.inference_mode()
+def collect_scores(directory: str) -> list[float]:
+    scores = []
+    for image_path in iter_dataset_images(Path(directory)):
+        image = load_image_tensor(
+            image_path,
+            input_size=metadata["input_size"],
+            colored=metadata["colored"],
+        ).unsqueeze(0).to(device)
+        output = model(image)
+        scores.append(float(model.compute_svdd_score(output.svdd_embedding)[0]))
+    if not scores:
+        raise RuntimeError(f"No benchmark images found under {directory}.")
+    return scores
+
+
+id_scores = collect_scores("./ood-benchmark/id")
+ood_scores = collect_scores("./ood-benchmark/ood")
+threshold = float(model.svdd_threshold)
+
+id_acceptance_rate = sum(score <= threshold for score in id_scores) / len(id_scores)
+ood_rejection_rate = sum(score > threshold for score in ood_scores) / len(ood_scores)
+balanced_ood_accuracy = (id_acceptance_rate + ood_rejection_rate) / 2
+auroc = roc_auc_score(
+    [0] * len(id_scores) + [1] * len(ood_scores),
+    id_scores + ood_scores,
+)
+
+print(f"threshold:            {threshold:.6f}")
+print(f"ID acceptance rate:   {id_acceptance_rate:.2%}")
+print(f"OOD rejection rate:   {ood_rejection_rate:.2%}")
+print(f"balanced OOD accuracy:{balanced_ood_accuracy:.2%}")
+print(f"OOD AUROC:             {auroc:.4f}")
+```
+
+Interpret the metrics as follows:
+
+- **ID acceptance rate**: fraction of held-out valid images with `ood_score <= ood_threshold`.
+- **OOD rejection rate**: fraction of known OOD images with `ood_score > ood_threshold`.
+- **Balanced OOD accuracy**: average of ID acceptance and OOD rejection rates, so unequal set sizes do not dominate the result.
+- **OOD AUROC**: threshold-independent ranking quality, treating higher scores as more OOD-like. A useful AUROC does not replace reporting performance at the deployed threshold.
+
+Also report the number and source of ID and OOD images, score distributions, and per-source OOD rejection rates. A single pooled OOD rate can hide failures on a specific category such as another radiology modality. The validation quantile targets acceptance on validation data only; a `0.95` quantile does not guarantee exactly 95% acceptance on a shifted test set.
 
 Parameter counts for the available standard classifiers, using the current implementations with a 1000-class classifier head:
 
@@ -723,7 +1063,7 @@ python -m mlx \
     --device cpu
 ```
 
-For standard classifiers, `infer-image` predicts the top classes for `--input-img`. `--dataset` is not required for this path because labels are loaded from the checkpoint metadata.
+For ordinary standard classifiers, `infer-image` predicts the top classes for `--input-img`. `--dataset` is not required because labels are loaded from checkpoint metadata. For a Deep SVDD deployment checkpoint, inference first compares the squared-Euclidean embedding score with the calibrated threshold. Accepted images return the class prediction, confidence, OOD score, and threshold. Rejected images return `predicted_label=None`, `confidence=None`, and `rejection_reason="out_of_distribution"` rather than presenting the highest logit as a trusted prediction.
 
 ### One-Shot Classification
 

@@ -32,6 +32,14 @@ from mlx.modes.image_classification.models import (
     build_image_classification_model,
     model_family_for,
 )
+from mlx.modes.image_classification.models.joint_svdd import JointDeepSVDDClassifier
+from mlx.modes.image_classification.ood.deep_svdd import (
+    calibrate_svdd_threshold,
+    collect_svdd_scores,
+    compute_svdd_loss,
+    initialize_svdd_center,
+    validate_svdd_config,
+)
 from mlx.modes.image_classification.utils import (
     load_training_checkpoint,
     resolve_model_name,
@@ -49,6 +57,19 @@ TRAINING_CSV_COLUMNS = [
     "recall",
     "f1",
 ]
+SVDD_TRAINING_CSV_COLUMNS = [
+    "epoch",
+    "train_loss",
+    "train_classification_loss",
+    "train_svdd_loss",
+    "val_loss",
+    "val_classification_loss",
+    "val_svdd_loss",
+    "accuracy",
+    "precision",
+    "recall",
+    "f1",
+]
 
 
 def train_image_classification(config: dict[str, Any]) -> None:
@@ -56,7 +77,13 @@ def train_image_classification(config: dict[str, Any]) -> None:
         raise MLXUserError("--epochs must be at least 1 for image-classification training.")
     model_name = resolve_model_name(config)
     family = model_family_for(model_name)
+    validate_svdd_config(config)
     if family == "one-shot":
+        if config.get("ood_method", "none") != "none":
+            raise MLXUserError(
+                "Deep SVDD is supported only for standard image-classification models, "
+                "not one-shot models."
+            )
         _train_one_shot(model_name, config)
         return
     _train_standard(model_name, config)
@@ -244,6 +271,9 @@ def _train_standard(model_name: str, config: dict[str, Any]) -> None:
     refresh_rate = config.get("refresh_per_second", 2)
     use_best = bool(config.get("use_best", False))
     verbose = bool(config.get("verbose", False))
+    joint_svdd = config.get("ood_method", "none") == "deep-svdd"
+    svdd_weight = float(config.get("svdd_weight", 0.05))
+    svdd_warmup_epochs = int(config.get("svdd_warmup_epochs", 0))
     output_paths = resolve_train_output_paths(config, model_name=model_name)
     checkpoint_path = output_paths["checkpoint_path"]
     last_checkpoint_path = output_paths["last_checkpoint_path"]
@@ -264,6 +294,8 @@ def _train_standard(model_name: str, config: dict[str, Any]) -> None:
 
     criterion = nn.CrossEntropyLoss()
     optimizer = optim.Adam(model.parameters(), lr=learning_rate)
+    train_loader = DataLoader(train_dataset, batch_size=batch_size, shuffle=True, num_workers=2)
+    val_loader = DataLoader(val_dataset, batch_size=batch_size, shuffle=False, num_workers=2)
     start_epoch, best_val_loss, history = _prepare_training_state(
         config,
         model,
@@ -274,8 +306,8 @@ def _train_standard(model_name: str, config: dict[str, Any]) -> None:
         training_csv_path=training_csv_path,
         classes=classes,
     )
-    train_loader = DataLoader(train_dataset, batch_size=batch_size, shuffle=True, num_workers=2)
-    val_loader = DataLoader(val_dataset, batch_size=batch_size, shuffle=False, num_workers=2)
+    if joint_svdd and start_epoch == 0:
+        initialize_svdd_center(model, train_loader, device)
 
     epoch_log = _build_epoch_log()
     last_saved_panel = _initial_checkpoint_panel(start_epoch, last_checkpoint_path)
@@ -295,6 +327,8 @@ def _train_standard(model_name: str, config: dict[str, Any]) -> None:
         for epoch in range(start_epoch, epochs):
             model.train()
             running_loss = 0.0
+            running_classification_loss = 0.0
+            running_svdd_loss = 0.0
             if progress is not None and batch_task is not None and epoch_task is not None:
                 progress.reset(batch_task)
                 progress.update(epoch_task, description=f"[magenta]Epoch {epoch + 1}/{epochs}")
@@ -302,8 +336,17 @@ def _train_standard(model_name: str, config: dict[str, Any]) -> None:
             for batch_index, (images, targets) in enumerate(train_loader, start=1):
                 images, targets = images.to(device), targets.to(device)
                 optimizer.zero_grad()
-                logits = model(images)
-                loss = criterion(logits, targets)
+                output = model(images)
+                if joint_svdd:
+                    classification_loss = criterion(output.logits, targets)
+                    svdd_loss = compute_svdd_loss(model, output.svdd_embedding)
+                    loss = classification_loss
+                    if epoch >= svdd_warmup_epochs:
+                        loss = loss + svdd_weight * svdd_loss
+                    running_classification_loss += classification_loss.item()
+                    running_svdd_loss += svdd_loss.item()
+                else:
+                    loss = criterion(output, targets)
                 loss.backward()
                 optimizer.step()
                 running_loss += loss.item()
@@ -314,15 +357,30 @@ def _train_standard(model_name: str, config: dict[str, Any]) -> None:
             avg_train_loss = running_loss / len(train_loader)
             if progress is not None and epoch_task is not None:
                 progress.advance(epoch_task)
-            avg_val_loss, val_metrics = _validate_standard(model, val_loader, criterion, device)
-            history.append(
-                _training_history_row(
+            if joint_svdd:
+                avg_val_loss, val_metrics, val_details = _validate_joint_svdd(
+                    model, val_loader, criterion, device, svdd_weight
+                )
+                history.append(
+                    _svdd_training_history_row(
+                        epoch=epoch + 1,
+                        train_loss=avg_train_loss,
+                        train_classification_loss=running_classification_loss / len(train_loader),
+                        train_svdd_loss=running_svdd_loss / len(train_loader),
+                        val_loss=avg_val_loss,
+                        val_classification_loss=val_details["classification_loss"],
+                        val_svdd_loss=val_details["svdd_loss"],
+                        metrics=val_metrics,
+                    )
+                )
+            else:
+                avg_val_loss, val_metrics = _validate_standard(model, val_loader, criterion, device)
+                history.append(_training_history_row(
                     epoch=epoch + 1,
                     train_loss=avg_train_loss,
                     val_loss=avg_val_loss,
                     metrics=val_metrics,
-                )
-            )
+                ))
             _write_training_csv(training_csv_path, history)
             epoch_log = _append_epoch_log(
                 epoch_log,
@@ -397,6 +455,16 @@ def _train_standard(model_name: str, config: dict[str, Any]) -> None:
                     checkpoint_message=checkpoint_message,
                 )
 
+    if joint_svdd:
+        CalibrateDeepSVDDCheckpoint(
+            model=model,
+            checkpoint_path=checkpoint_path,
+            val_loader=val_loader,
+            device=device,
+            model_name=model_name,
+            config=config,
+            classes=classes,
+        ).execute()
     print_success("Standard classification training complete!")
 
 
@@ -436,6 +504,8 @@ def _test_standard(model_name: str, config: dict[str, Any]) -> None:
     channels = 3 if colored else 1
     x = torch.randn(batch, channels, height, width).to(device)
     output = model(x)
+    if hasattr(output, "logits"):
+        output = output.logits
     _render_test_output("Classification Model Output", output)
 
 
@@ -486,6 +556,40 @@ def _validate_standard(model, val_loader, criterion, device: str) -> tuple[float
 
     avg_loss = val_loss / len(val_loader)
     return avg_loss, _compute_classification_metrics(targets_all, preds)
+
+
+def _validate_joint_svdd(
+    model: JointDeepSVDDClassifier,
+    val_loader,
+    criterion,
+    device: str,
+    svdd_weight: float,
+) -> tuple[float, dict[str, float], dict[str, float]]:
+    model.eval()
+    classification_total = 0.0
+    svdd_total = 0.0
+    preds: list[int] = []
+    targets_all: list[int] = []
+    with torch.no_grad():
+        for images, targets in val_loader:
+            images, targets = images.to(device), targets.to(device)
+            output = model(images)
+            classification_loss = criterion(output.logits, targets)
+            svdd_loss = compute_svdd_loss(model, output.svdd_embedding)
+            classification_total += classification_loss.item()
+            svdd_total += svdd_loss.item()
+            preds.extend(int(item) for item in output.logits.argmax(dim=1).cpu().tolist())
+            targets_all.extend(int(item) for item in targets.cpu().tolist())
+    classification_average = classification_total / len(val_loader)
+    svdd_average = svdd_total / len(val_loader)
+    return (
+        classification_average + svdd_weight * svdd_average,
+        _compute_classification_metrics(targets_all, preds),
+        {
+            "classification_loss": classification_average,
+            "svdd_loss": svdd_average,
+        },
+    )
 
 
 def _compute_classification_metrics(targets: list[int], preds: list[int]) -> dict[str, float]:
@@ -622,13 +726,44 @@ def _training_history_row(
     }
 
 
+def _svdd_training_history_row(
+    *,
+    epoch: int,
+    train_loss: float,
+    train_classification_loss: float,
+    train_svdd_loss: float,
+    val_loss: float,
+    val_classification_loss: float,
+    val_svdd_loss: float,
+    metrics: dict[str, float],
+) -> dict[str, float | int]:
+    return {
+        "epoch": epoch,
+        "train_loss": train_loss,
+        "train_classification_loss": train_classification_loss,
+        "train_svdd_loss": train_svdd_loss,
+        "val_loss": val_loss,
+        "val_classification_loss": val_classification_loss,
+        "val_svdd_loss": val_svdd_loss,
+        "accuracy": metrics["accuracy"],
+        "precision": metrics["precision"],
+        "recall": metrics["recall"],
+        "f1": metrics["f1"],
+    }
+
+
 def _write_training_csv(
     csv_path: Path,
     history: list[dict[str, float | int]],
 ) -> None:
     csv_path.parent.mkdir(parents=True, exist_ok=True)
     with csv_path.open("w", newline="", encoding="utf-8") as csv_file:
-        writer = csv.DictWriter(csv_file, fieldnames=TRAINING_CSV_COLUMNS)
+        columns = (
+            SVDD_TRAINING_CSV_COLUMNS
+            if history and "train_svdd_loss" in history[0]
+            else TRAINING_CSV_COLUMNS
+        )
+        writer = csv.DictWriter(csv_file, fieldnames=columns)
         writer.writeheader()
         for row in history:
             writer.writerow(
@@ -636,10 +771,61 @@ def _write_training_csv(
                     "epoch": int(row["epoch"]),
                     **{
                         column: f"{float(row[column]):.6f}"
-                        for column in TRAINING_CSV_COLUMNS[1:]
+                        for column in columns[1:]
                     },
                 }
             )
+
+
+class CalibrateDeepSVDDCheckpoint:
+    def __init__(
+        self,
+        *,
+        model: JointDeepSVDDClassifier,
+        checkpoint_path: Path,
+        val_loader,
+        device: str,
+        model_name: str,
+        config: dict[str, Any],
+        classes: list[str],
+    ) -> None:
+        self.model = model
+        self.checkpoint_path = checkpoint_path
+        self.val_loader = val_loader
+        self.device = device
+        self.model_name = model_name
+        self.config = config
+        self.classes = classes
+
+    def execute(self) -> None:
+        self._load_selected_model()
+        scores = collect_svdd_scores(self.model, self.val_loader, self.device)
+        threshold = calibrate_svdd_threshold(
+            self.model, scores, float(self.config.get("svdd_quantile", 0.95))
+        )
+        save_checkpoint(
+            self.checkpoint_path,
+            self.model,
+            model_name=self.model_name,
+            family="standard",
+            config=self.config,
+            classes=self.classes,
+        )
+        print_success(
+            f"Calibrated Deep SVDD rejection threshold={threshold:.6f} from validation images."
+        )
+
+    def _load_selected_model(self) -> None:
+        try:
+            checkpoint = torch.load(
+                self.checkpoint_path, map_location=self.device, weights_only=True
+            )
+            self.model.load_state_dict(checkpoint["state_dict"])
+        except (OSError, KeyError, RuntimeError, ValueError) as exc:
+            raise MLXUserError(
+                "Could not reload the selected checkpoint for Deep SVDD threshold "
+                f"calibration: {exc}"
+            ) from exc
 
 
 def _build_epoch_log(*, max_entries: int = 12) -> deque[str]:

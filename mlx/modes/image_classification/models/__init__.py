@@ -25,6 +25,9 @@ from mlx.modes.image_classification.models.standard import (
     registered_standard_model_names,
     register_standard_model,
 )
+from mlx.modes.image_classification.models.adapters import build_feature_adapter
+from mlx.modes.image_classification.models.joint_svdd import JointDeepSVDDClassifier
+from mlx.modes.image_classification.ood.deep_svdd import validate_svdd_config
 
 DEFAULT_MODEL = "resnet18"
 STANDARD_MODEL_NAMES = {
@@ -97,12 +100,22 @@ def build_image_classification_model(
             f"Model '{model_name}' requires the number of classes before it can be constructed."
         )
 
-    return build_standard_model(
+    validate_svdd_config(config)
+    model = build_standard_model(
         model_name,
         num_classes=num_classes,
         colored=config.get("colored", True),
         pretrained=bool(config.get("pretrained", False)),
         config=config,
+    )
+    if config.get("ood_method", "none") == "none":
+        return model
+    adapter = build_feature_adapter(model_name, model)
+    return JointDeepSVDDClassifier(
+        adapter,
+        feature_dim=adapter.feature_dim,
+        svdd_dim=int(config.get("svdd_dim", 128)),
+        svdd_hidden_dim=int(config.get("svdd_hidden_dim", 256)),
     )
 
 
@@ -115,6 +128,7 @@ __all__ = [
     "DraxBlock",
     "DraxMobileNetV3Large",
     "DraxNet",
+    "JointDeepSVDDClassifier",
     "DropPath",
     "LayerNorm2D",
     "ONE_SHOT_MODEL_NAMES",
@@ -124,6 +138,7 @@ __all__ = [
     "SiameseBackbone",
     "SIAMESE_BACKBONE_MODELS",
     "build_image_classification_model",
+    "build_feature_adapter",
     "build_drax_mobilenet_v3_large",
     "build_draxnet",
     "model_family_for",

@@ -14,6 +14,22 @@ from mlx.modes.image_classification.models import (
     build_image_classification_model,
     model_family_for,
 )
+from mlx.modes.image_classification.models.joint_svdd import JointDeepSVDDClassifier
+
+
+def _ood_metadata(model, config: dict[str, Any]) -> dict[str, Any] | None:
+    if not isinstance(model, JointDeepSVDDClassifier):
+        return None
+    threshold = model.svdd_threshold.detach().cpu()
+    return {
+        "method": "deep-svdd",
+        "center": model.svdd_center.detach().cpu(),
+        "threshold": float(threshold.item()) if torch.isfinite(threshold) else None,
+        "quantile": float(config.get("svdd_quantile", 0.95)),
+        "embedding_dim": int(model.svdd_center.numel()),
+        "hidden_dim": int(model.svdd_head[0].out_features),
+        "score_type": "squared_euclidean",
+    }
 
 
 def resolve_model_name(config: dict[str, Any]) -> str:
@@ -29,17 +45,32 @@ def checkpoint_payload(
     classes: list[str] | None = None,
 ) -> dict[str, Any]:
     classes = classes or []
-    return {
+    model_config = dict(config)
+    if config.get("ood_method", "none") == "none":
+        for key in (
+            "ood_method",
+            "svdd_weight",
+            "svdd_dim",
+            "svdd_hidden_dim",
+            "svdd_quantile",
+            "svdd_warmup_epochs",
+        ):
+            model_config.pop(key, None)
+    payload = {
         "classes": classes,
         "colored": bool(config.get("colored", True)),
         "embedding_size": int(config.get("embedding_size", 4096)),
         "family": family,
         "input_size": tuple(config.get("input_size", (224, 224))),
-        "model_config": dict(config),
+        "model_config": model_config,
         "model_name": model_name,
         "num_classes": len(classes) if classes else None,
         "state_dict": model.state_dict(),
     }
+    ood = _ood_metadata(model, config)
+    if ood is not None:
+        payload["ood"] = ood
+    return payload
 
 
 def save_checkpoint(
@@ -155,6 +186,27 @@ def load_training_checkpoint(
             "Resume checkpoint Drax fusion mode does not match the current configuration."
         )
 
+    checkpoint_ood = checkpoint.get("ood") or {"method": "none"}
+    requested_ood = config.get("ood_method", "none")
+    if checkpoint_ood.get("method", "none") != requested_ood:
+        raise MLXUserError(
+            "Resume checkpoint OOD method does not match the current --ood-method setting. "
+            "Use the same OOD configuration that created the checkpoint."
+        )
+    if requested_ood == "deep-svdd":
+        expected = (
+            int(config.get("svdd_dim", 128)),
+            int(config.get("svdd_hidden_dim", 256)),
+        )
+        actual = (
+            int(checkpoint_ood.get("embedding_dim", -1)),
+            int(checkpoint_ood.get("hidden_dim", -1)),
+        )
+        if actual != expected:
+            raise MLXUserError(
+                "Resume checkpoint Deep SVDD dimensions do not match --svdd-dim and --svdd-hidden-dim."
+            )
+
     try:
         model.load_state_dict(checkpoint["state_dict"])
         optimizer.load_state_dict(checkpoint["optimizer_state_dict"])
@@ -216,6 +268,12 @@ def load_checkpoint_bundle(config: dict[str, Any]) -> tuple[Any, dict[str, Any]]
 
     runtime_config = dict(checkpoint.get("model_config") or {})
     runtime_config.update(config)
+    checkpoint_ood = checkpoint.get("ood") or {"method": "none"}
+    runtime_config["ood_method"] = checkpoint_ood.get("method", "none")
+    if runtime_config["ood_method"] == "deep-svdd":
+        runtime_config["svdd_dim"] = int(checkpoint_ood.get("embedding_dim", 128))
+        runtime_config["svdd_hidden_dim"] = int(checkpoint_ood.get("hidden_dim", 256))
+        runtime_config["svdd_quantile"] = float(checkpoint_ood.get("quantile", 0.95))
     runtime_config["colored"] = checkpoint.get("colored", runtime_config.get("colored", True))
     runtime_config["embedding_size"] = checkpoint.get(
         "embedding_size", runtime_config.get("embedding_size", 4096)
@@ -234,7 +292,20 @@ def load_checkpoint_bundle(config: dict[str, Any]) -> tuple[Any, dict[str, Any]]
         runtime_config,
         num_classes=num_classes,
     )
-    model.load_state_dict(checkpoint["state_dict"])
+    try:
+        model.load_state_dict(checkpoint["state_dict"])
+    except (KeyError, RuntimeError, ValueError) as exc:
+        if runtime_config["ood_method"] == "deep-svdd":
+            raise MLXUserError(
+                f"Checkpoint '{model_path}' has incompatible or incomplete Deep SVDD state: {exc}"
+            ) from exc
+        raise MLXUserError(f"Checkpoint '{model_path}' is incompatible with '{model_name}': {exc}") from exc
+    if isinstance(model, JointDeepSVDDClassifier):
+        metadata_threshold = checkpoint_ood.get("threshold")
+        if metadata_threshold is None:
+            model.svdd_threshold.fill_(float("nan"))
+        else:
+            model.svdd_threshold.fill_(float(metadata_threshold))
 
     metadata = {
         "checkpoint_path": Path(model_path),
@@ -244,6 +315,7 @@ def load_checkpoint_bundle(config: dict[str, Any]) -> tuple[Any, dict[str, Any]]
         "model_name": model_name,
         "num_classes": num_classes,
         "colored": runtime_config["colored"],
+        "ood": checkpoint_ood,
     }
     return model, metadata
 

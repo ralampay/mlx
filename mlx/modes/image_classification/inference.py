@@ -13,6 +13,7 @@ from mlx.modes.image_classification.presentation import (
     display_similarity_matches,
 )
 from mlx.modes.image_classification.utils import load_checkpoint_bundle
+from mlx.modes.image_classification.models.joint_svdd import JointDeepSVDDClassifier
 
 
 def infer_image_classification(config: dict[str, Any]) -> dict[str, Any]:
@@ -101,12 +102,34 @@ def _infer_standard(model, metadata: dict[str, Any], config: dict[str, Any], dev
             input_size=metadata["input_size"],
             colored=metadata["colored"],
         )
-        logits = model(image.unsqueeze(0).to(device))
+        output = model(image.unsqueeze(0).to(device))
+        if isinstance(model, JointDeepSVDDClassifier):
+            score = float(model.compute_svdd_score(output.svdd_embedding)[0].item())
+            accepted = bool(model.is_in_distribution(output.svdd_embedding)[0].item())
+            logits = output.logits
+        else:
+            score = None
+            accepted = True
+            logits = output
         probabilities = torch.softmax(logits, dim=1).squeeze(0).cpu()
 
     top_k = min(5, len(classes))
     scores, indices = torch.topk(probabilities, k=top_k)
     top_predictions = [(classes[index], float(score)) for score, index in zip(scores.tolist(), indices.tolist())]
+    if isinstance(model, JointDeepSVDDClassifier):
+        threshold = float(model.svdd_threshold.item())
+        result = {
+            "input_image": input_img_path,
+            "accepted": accepted,
+            "predicted_label": top_predictions[0][0] if accepted and top_predictions else None,
+            "confidence": top_predictions[0][1] if accepted and top_predictions else None,
+            "top_predictions": top_predictions if accepted else [],
+            "ood_score": score,
+            "ood_threshold": threshold,
+            "rejection_reason": None if accepted else "out_of_distribution",
+        }
+        display_classification_predictions(result)
+        return result
     result = {
         "input_image": input_img_path,
         "predicted_label": top_predictions[0][0] if top_predictions else None,

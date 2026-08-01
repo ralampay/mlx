@@ -184,6 +184,9 @@ This module supports standard classifiers and Siamese one-shot models. Standard
 families include ResNet, DenseNet, MobileNet, EfficientNet, ConvNeXt, DraxNet, and
 Drax MobileNet variants. Its workflows cover dataset construction, training,
 checkpoint resume, benchmarking, image inference, and CAM visualization.
+Standard classifiers can optionally add a joint Deep SVDD projection head for
+validation-calibrated out-of-distribution rejection. This is opt-in with
+`--ood-method deep-svdd`; ordinary classification remains the default.
 
 ```bash
 # List supported models.
@@ -203,6 +206,15 @@ python -m mlx --mode image_classification --action train \
     --output ./artifacts/siamese \
     --seed 42
 
+# Jointly train classification and Deep SVDD OOD rejection.
+python -m mlx --mode image_classification --action train \
+    --model resnet18 \
+    --dataset ./dataset \
+    --output ./artifacts/resnet18-svdd \
+    --ood-method deep-svdd \
+    --svdd-weight 0.05 \
+    --svdd-quantile 0.95
+
 # Generate class-activation maps.
 python -m mlx --mode image_classification --action cam \
     --model resnet18 \
@@ -217,8 +229,13 @@ Training writes the selected `{model}.pth`, resumable `{model}.last.pth`, and
 class-level metrics, confusion matrices, ROC curves, and one-shot-specific pair and
 threshold analyses. CAM supports Grad-CAM, AblationCAM, and ScoreCAM.
 
+During Deep SVDD inference, inspect the returned `accepted` field. An image is
+treated as OOD when its squared-Euclidean `ood_score` is greater than the calibrated
+`ood_threshold`; rejected results set `predicted_label` and `confidence` to `None`.
+
 See the [image-classification guide](./docs/image_classification/README.md) for model
-families, dataset layouts, evaluation artifacts, and explainability workflows.
+families, dataset layouts, joint Deep SVDD behavior, evaluation artifacts, and
+explainability workflows.
 
 ## Segmentation
 

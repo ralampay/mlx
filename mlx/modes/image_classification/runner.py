@@ -28,11 +28,17 @@ DEFAULT_CONFIG = {
     "input_size": (256, 256),
     "lr": None,
     "num_pairs": 100,
+    "ood_method": "none",
     "pretrained": False,
     "random_seed": None,
     "refresh_per_second": 2,
     "use_best": True,
     "verbose": False,
+    "svdd_weight": 0.05,
+    "svdd_dim": 128,
+    "svdd_hidden_dim": 256,
+    "svdd_quantile": 0.95,
+    "svdd_warmup_epochs": 0,
 }
 
 

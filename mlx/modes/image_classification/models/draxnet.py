@@ -188,7 +188,11 @@ class DraxNet(nn.Module):
                 nn.init.constant_(module.weight, 1)
                 nn.init.constant_(module.bias, 0)
 
-    def forward(self, x: torch.Tensor) -> torch.Tensor:
+    @property
+    def feature_dim(self) -> int:
+        return self.fc.in_features
+
+    def forward_features(self, x: torch.Tensor) -> torch.Tensor:
         x = self.conv1(x)
         x = self.bn1(x)
         x = self.relu(x)
@@ -201,7 +205,13 @@ class DraxNet(nn.Module):
 
         x = self.avgpool(x)
         x = torch.flatten(x, 1)
-        return self.fc(x)
+        return x
+
+    def classify_features(self, features: torch.Tensor) -> torch.Tensor:
+        return self.fc(features)
+
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        return self.classify_features(self.forward_features(x))
 
 
 def build_draxnet(*, num_classes: int, colored: bool, pretrained: bool, config: dict | None = None):

@@ -51,7 +51,11 @@ class DraxMobileNetV3Large(nn.Module):
         self.adapter_up_norm = nn.BatchNorm2d(final_channels)
         self.classifier[3] = nn.Linear(self.classifier[3].in_features, num_classes)
 
-    def forward(self, x: torch.Tensor) -> torch.Tensor:
+    @property
+    def feature_dim(self) -> int:
+        return self.classifier[0].in_features
+
+    def forward_features(self, x: torch.Tensor) -> torch.Tensor:
         x = self.features(x)
         residual = x
         x = self.adapter_down(x)
@@ -63,7 +67,13 @@ class DraxMobileNetV3Large(nn.Module):
         x = residual + x
         x = self.avgpool(x)
         x = torch.flatten(x, 1)
-        return self.classifier(x)
+        return x
+
+    def classify_features(self, features: torch.Tensor) -> torch.Tensor:
+        return self.classifier(features)
+
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        return self.classify_features(self.forward_features(x))
 
 
 def _replace_mobilenet_stem_conv(model: nn.Module) -> None:

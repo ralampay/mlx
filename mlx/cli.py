@@ -99,6 +99,23 @@ def build_parser() -> RichArgumentParser:
     parser.add_argument("--warmup-epochs", type=float, default=3.0, dest="warmup_epochs")
     parser.add_argument("--amp", action=argparse.BooleanOptionalAction, default=True)
     parser.add_argument("--loss-clip", type=float, default=None, dest="loss_clip")
+    parser.add_argument(
+        "--ood-method",
+        choices=("none", "deep-svdd"),
+        default="none",
+        dest="ood_method",
+    )
+    parser.add_argument("--svdd-weight", type=float, default=0.05, dest="svdd_weight")
+    parser.add_argument("--svdd-dim", type=int, default=128, dest="svdd_dim")
+    parser.add_argument(
+        "--svdd-hidden-dim", type=int, default=256, dest="svdd_hidden_dim"
+    )
+    parser.add_argument(
+        "--svdd-quantile", type=float, default=0.95, dest="svdd_quantile"
+    )
+    parser.add_argument(
+        "--svdd-warmup-epochs", type=int, default=0, dest="svdd_warmup_epochs"
+    )
     parser.add_argument("--seed", "--random-seed", type=int, default=None, dest="random_seed")
     parser.add_argument("--run-name", default=None, dest="run_name")
     parser.add_argument("--num-classes", type=int, default=2, dest="num_classes")
@@ -224,6 +241,12 @@ def _render_help() -> None:
     options.add_row("--nbs", "64", "Nominal batch size for LR scaling.")
     options.add_row("--warmup-epochs", "3.0", "Warmup epoch count.")
     options.add_row("--loss-clip", "None", "Optional gradient clipping value.")
+    options.add_row("--ood-method", "none", "Optional standard-classifier OOD method: none or deep-svdd.")
+    options.add_row("--svdd-weight", "0.05", "Weight applied to the joint Deep SVDD loss.")
+    options.add_row("--svdd-dim", "128", "Deep SVDD embedding width.")
+    options.add_row("--svdd-hidden-dim", "256", "Deep SVDD projection hidden width.")
+    options.add_row("--svdd-quantile", "0.95", "Validation-score quantile used for rejection calibration.")
+    options.add_row("--svdd-warmup-epochs", "0", "Classification-only epochs before applying the SVDD loss.")
     options.add_row("--seed / --random-seed", "None", "Global random seed applied across Python, NumPy, and PyTorch.")
     options.add_row("--run-name", "None", "Optional Ultralytics run folder name.")
     options.add_row("--num-classes", "2", "Number of image-classification or segmentation output classes.")

@@ -125,6 +125,12 @@ def display_similarity_matches(result: dict[str, Any]) -> None:
 
 
 def display_classification_predictions(result: dict[str, Any]) -> None:
+    if result.get("accepted") is False:
+        print_warning(
+            "Image rejected as out-of-distribution "
+            f"(score={result['ood_score']:.6f}, threshold={result['ood_threshold']:.6f})."
+        )
+        return
     table = Table(title="Classification Predictions", show_lines=True)
     table.add_column("Rank", justify="center", style="cyan")
     table.add_column("Label", style="magenta")

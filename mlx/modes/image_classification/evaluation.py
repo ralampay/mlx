@@ -34,6 +34,7 @@ from mlx.modes.image_classification.data import (
     resolve_evaluation_dir,
 )
 from mlx.modes.image_classification.utils import load_checkpoint_bundle
+from mlx.modes.image_classification.models.joint_svdd import JointDeepSVDDClassifier
 
 
 @dataclass(frozen=True)
@@ -178,7 +179,8 @@ def _benchmark_standard(model, metadata: dict[str, Any], config: dict[str, Any],
     with torch.no_grad():
         for images, labels in tqdm(loader, desc="Evaluating images"):
             images = images.to(device)
-            logits = model(images)
+            output = model(images)
+            logits = output.logits if isinstance(model, JointDeepSVDDClassifier) else output
             batch_probs = torch.softmax(logits, dim=1).cpu().numpy()
             batch_preds = logits.argmax(dim=1).cpu().tolist()
             probabilities.extend(batch_probs)

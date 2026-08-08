@@ -94,6 +94,30 @@ def save_checkpoint(
     )
 
 
+def update_checkpoint_model(
+    checkpoint_path: Path,
+    checkpoint: dict[str, Any],
+    model,
+    *,
+    model_name: str,
+    family: str,
+    config: dict[str, Any],
+    classes: list[str] | None = None,
+) -> None:
+    """Replace model metadata while preserving any training-state fields."""
+    updated_checkpoint = dict(checkpoint)
+    updated_checkpoint.update(
+        checkpoint_payload(
+            model,
+            model_name=model_name,
+            family=family,
+            config=config,
+            classes=classes,
+        )
+    )
+    _atomic_torch_save(updated_checkpoint, checkpoint_path)
+
+
 def save_training_checkpoint(
     checkpoint_path: Path,
     model,

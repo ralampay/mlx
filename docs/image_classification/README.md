@@ -255,7 +255,7 @@ python -m mlx \
 
 The checkpoint OOD method, embedding dimension, hidden dimension, class labels, input size, color mode, model family, and Drax fusion mode must match the resumed run. An ordinary checkpoint cannot be resumed as a Deep SVDD model; MLX reports this as a user-facing compatibility error.
 
-After training, MLX reloads the selected deployment checkpoint and calibrates its threshold from valid `val/` images—not test or OOD images. The deployment checkpoint stores the center in both the model state and readable `ood` metadata, plus the calibrated threshold, quantile, dimensions, and squared-Euclidean score type. Intermediate `.last.pth` checkpoints may have no threshold and cannot be used for OOD-gated inference until calibration is completed.
+After training, MLX reloads both the selected deployment checkpoint and the resumable `.last.pth` checkpoint and calibrates each threshold from valid `val/` images—not test or OOD images. Both checkpoints store the center in the model state and readable `ood` metadata, plus their calibrated threshold, quantile, dimensions, and squared-Euclidean score type. A checkpoint saved before training completes may still have no threshold until final calibration runs.
 
 The added checkpoint metadata has this shape (the surrounding checkpoint retains MLX's existing keys such as `state_dict`, `family`, and `model_config`):
 
@@ -408,7 +408,7 @@ python -m mlx \
   --device cuda:0
 ```
 
-Use the final `resnet18.pth` for inference and OOD benchmarking. The resumable `resnet18.last.pth` may not contain a calibrated threshold.
+After training completes, either `resnet18.pth` or `resnet18.last.pth` contains a threshold calibrated for its stored model. Prefer the deployment checkpoint for inference and OOD benchmarking; use `.last.pth` when resumable training state is also needed.
 
 ### Preparing an OOD benchmark
 

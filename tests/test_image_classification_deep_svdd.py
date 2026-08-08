@@ -417,8 +417,16 @@ def test_joint_training_calibrates_final_checkpoint_and_extends_history(monkeypa
     final = torch.load(tmp_path / "artifacts" / "tiny.pth", map_location="cpu", weights_only=True)
     resumable = torch.load(tmp_path / "artifacts" / "tiny.last.pth", map_location="cpu", weights_only=True)
     assert final["ood"]["threshold"] is not None
+    assert resumable["ood"]["threshold"] is not None
     assert torch.equal(final["ood"]["center"], final["state_dict"]["svdd_center"])
     assert torch.equal(resumable["ood"]["center"], resumable["state_dict"]["svdd_center"])
+    assert resumable["ood"]["threshold"] == pytest.approx(
+        resumable["state_dict"]["svdd_threshold"].item()
+    )
+    assert resumable["training_state_version"] == 1
+    assert resumable["completed_epoch"] == 1
+    assert "optimizer_state_dict" in resumable
+    assert "random_state" in resumable
     header = (tmp_path / "artifacts" / "training.csv").read_text(encoding="utf-8").splitlines()[0]
     assert "train_classification_loss" in header
     assert "train_svdd_loss" in header

@@ -46,6 +46,7 @@ from mlx.modes.image_classification.utils import (
     resolve_train_output_paths,
     save_checkpoint,
     save_training_checkpoint,
+    update_checkpoint_model,
 )
 
 TRAINING_CSV_COLUMNS = [
@@ -456,9 +457,9 @@ def _train_standard(model_name: str, config: dict[str, Any]) -> None:
                 )
 
     if joint_svdd:
-        CalibrateDeepSVDDCheckpoint(
+        CalibrateDeepSVDDCheckpoints(
             model=model,
-            checkpoint_path=checkpoint_path,
+            checkpoint_paths=(checkpoint_path, last_checkpoint_path),
             val_loader=val_loader,
             device=device,
             model_name=model_name,
@@ -777,12 +778,12 @@ def _write_training_csv(
             )
 
 
-class CalibrateDeepSVDDCheckpoint:
+class CalibrateDeepSVDDCheckpoints:
     def __init__(
         self,
         *,
         model: JointDeepSVDDClassifier,
-        checkpoint_path: Path,
+        checkpoint_paths: tuple[Path, ...],
         val_loader,
         device: str,
         model_name: str,
@@ -790,7 +791,7 @@ class CalibrateDeepSVDDCheckpoint:
         classes: list[str],
     ) -> None:
         self.model = model
-        self.checkpoint_path = checkpoint_path
+        self.checkpoint_paths = checkpoint_paths
         self.val_loader = val_loader
         self.device = device
         self.model_name = model_name
@@ -798,33 +799,39 @@ class CalibrateDeepSVDDCheckpoint:
         self.classes = classes
 
     def execute(self) -> None:
-        self._load_selected_model()
-        scores = collect_svdd_scores(self.model, self.val_loader, self.device)
-        threshold = calibrate_svdd_threshold(
-            self.model, scores, float(self.config.get("svdd_quantile", 0.95))
-        )
-        save_checkpoint(
-            self.checkpoint_path,
-            self.model,
-            model_name=self.model_name,
-            family="standard",
-            config=self.config,
-            classes=self.classes,
-        )
+        calibrated = []
+        for checkpoint_path in self.checkpoint_paths:
+            checkpoint = self._load_model(checkpoint_path)
+            scores = collect_svdd_scores(self.model, self.val_loader, self.device)
+            threshold = calibrate_svdd_threshold(
+                self.model, scores, float(self.config.get("svdd_quantile", 0.95))
+            )
+            update_checkpoint_model(
+                checkpoint_path,
+                checkpoint,
+                self.model,
+                model_name=self.model_name,
+                family="standard",
+                config=self.config,
+                classes=self.classes,
+            )
+            calibrated.append(f"{checkpoint_path.name}={threshold:.6f}")
         print_success(
-            f"Calibrated Deep SVDD rejection threshold={threshold:.6f} from validation images."
+            "Calibrated Deep SVDD rejection thresholds from validation images: "
+            + ", ".join(calibrated)
         )
 
-    def _load_selected_model(self) -> None:
+    def _load_model(self, checkpoint_path: Path) -> dict[str, Any]:
         try:
             checkpoint = torch.load(
-                self.checkpoint_path, map_location=self.device, weights_only=True
+                checkpoint_path, map_location=self.device, weights_only=True
             )
             self.model.load_state_dict(checkpoint["state_dict"])
+            return checkpoint
         except (OSError, KeyError, RuntimeError, ValueError) as exc:
             raise MLXUserError(
-                "Could not reload the selected checkpoint for Deep SVDD threshold "
-                f"calibration: {exc}"
+                f"Could not reload checkpoint '{checkpoint_path}' for Deep SVDD "
+                f"threshold calibration: {exc}"
             ) from exc
 
 

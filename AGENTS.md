@@ -88,3 +88,11 @@ Requirements:
 - Name commands using clear verb-first intent such as `TrainSegmentationModel`, `ConvertObjectDetectionModel`, or `RunCameraInference`.
 - When a function or class exceeds a single responsibility, split it before adding more branching.
 - Add short comments only when the control flow or ML-specific logic is not obvious from the code itself.
+
+## Architecture Documentation
+
+- Treat `ARCHITECTURE.md` as the canonical architecture reference.
+- Review `ARCHITECTURE.md` for every code or configuration update.
+- Update it in the same change whenever package ownership, dependency direction, command inventory,
+  public interfaces, providers, presentation boundaries, error behavior, or workflow data flow changes.
+- Keep architecture detail in `ARCHITECTURE.md`; README files should link to it and focus on setup and usage.

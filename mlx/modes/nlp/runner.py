@@ -3,15 +3,12 @@ from __future__ import annotations
 from typing import Any
 
 from mlx.core.exceptions import MLXUserError
-from mlx.modes.nlp.embedding import EmbedCsv
+from mlx.modes.nlp.embedding import EmbedCsvCommand, EmbedCsvRequest
 
 
 ACTION_HANDLERS = {
-    "embed": lambda config: EmbedCsv(
-        model_file=config.get("model_file"),
-        input_file=config.get("input_file"),
-        output_file=config.get("output_file"),
-        column_name=config.get("column_name", "content"),
+    "embed": lambda config: EmbedCsvCommand(
+        EmbedCsvRequest.from_config({**config, "present": True})
     ).execute(),
 }
 

@@ -4,16 +4,23 @@ from typing import Any
 
 from mlx.core.exceptions import MLXUserError
 from mlx.core.ui import print_model_parameter_table
-from mlx.modes.segmentation.data import build_segmentation_dataset
+from mlx.modes.segmentation.data import BuildSegmentationDataset
 from mlx.modes.segmentation.evaluation import BenchmarkSegmentation
 from mlx.modes.segmentation.inference import (
-    StreamSegmentationInferenceRunner,
-    infer_segmentation_image,
+    InferSegmentationImage,
+    RunSegmentationStreamInference,
 )
 from mlx.modes.segmentation.list_models import ListSegmentationModels
 from mlx.modes.segmentation.models import DEFAULT_MODEL
 from mlx.modes.segmentation.presentation import print_segmentation_config_summary
-from mlx.modes.segmentation.train import smoke_test_segmentation, train_segmentation
+from mlx.modes.segmentation.requests import (
+    BuildSegmentationDatasetRequest,
+    SegmentationRequest,
+)
+from mlx.modes.segmentation.train import (
+    SmokeTestSegmentationModel,
+    TrainSegmentationModel,
+)
 
 DEFAULT_CONFIG = {
     "action": "test",
@@ -38,18 +45,28 @@ def _list_models(config: dict[str, Any]):
 
 
 ACTION_HANDLERS = {
-    "benchmark": lambda config: BenchmarkSegmentation(config).execute(),
-    "build-dataset": lambda config: build_segmentation_dataset(config["dataset_path"]),
-    "infer-camera": lambda config: StreamSegmentationInferenceRunner(
-        config, source="camera"
+    "benchmark": lambda config: BenchmarkSegmentation(
+        SegmentationRequest.from_config(config)
     ).execute(),
-    "infer-image": infer_segmentation_image,
-    "infer-video": lambda config: StreamSegmentationInferenceRunner(
-        config, source="video"
+    "build-dataset": lambda config: BuildSegmentationDataset(
+        BuildSegmentationDatasetRequest.from_config(config)
+    ).execute(),
+    "infer-camera": lambda config: RunSegmentationStreamInference(
+        SegmentationRequest.from_config(config), source="camera"
+    ).execute(),
+    "infer-image": lambda config: InferSegmentationImage(
+        SegmentationRequest.from_config(config)
+    ).execute(),
+    "infer-video": lambda config: RunSegmentationStreamInference(
+        SegmentationRequest.from_config(config), source="video"
     ).execute(),
     "ls-models": _list_models,
-    "test": smoke_test_segmentation,
-    "train": train_segmentation,
+    "test": lambda config: SmokeTestSegmentationModel(
+        SegmentationRequest.from_config(config)
+    ).execute(),
+    "train": lambda config: TrainSegmentationModel(
+        SegmentationRequest.from_config(config)
+    ).execute(),
 }
 
 

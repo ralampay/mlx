@@ -8,6 +8,7 @@ import torch
 from torch.utils.data import Dataset
 
 from mlx.core.exceptions import MLXUserError
+from mlx.modes.segmentation.requests import BuildSegmentationDatasetRequest
 from mlx.core.ui import (
     confirm_action,
     console,
@@ -246,7 +247,22 @@ def iter_split_images(dataset_path: str | Path, split: str = "test") -> Iterable
     return _iter_image_paths(images_dir)
 
 
+class BuildSegmentationDataset:
+    def __init__(self, request: BuildSegmentationDatasetRequest) -> None:
+        self.request = request
+
+    def execute(self) -> None:
+        _build_segmentation_dataset(self.request.to_config())
+
+
 def build_segmentation_dataset(dataset_path: str) -> None:
+    return BuildSegmentationDataset(
+        BuildSegmentationDatasetRequest(dataset_path=dataset_path)
+    ).execute()
+
+
+def _build_segmentation_dataset(config: dict) -> None:
+    dataset_path = config["dataset_path"]
     dataset_root = Path(dataset_path)
     if not dataset_root.exists():
         raise MLXUserError(f"Dataset path not found: {dataset_root}")
@@ -264,9 +280,14 @@ def build_segmentation_dataset(dataset_path: str) -> None:
     table.add_row("Pairs", str(len(samples)))
     console.print(table)
 
-    train_count = prompt_int("How many paired samples for TRAIN?")
-    val_count = prompt_int("How many paired samples for VAL?")
-    test_count = prompt_int("How many paired samples for TEST?")
+    train_count = config.get("train_count")
+    val_count = config.get("val_count")
+    test_count = config.get("test_count")
+    train_count = prompt_int("How many paired samples for TRAIN?") if train_count is None else int(train_count)
+    val_count = prompt_int("How many paired samples for VAL?") if val_count is None else int(val_count)
+    test_count = prompt_int("How many paired samples for TEST?") if test_count is None else int(test_count)
+    if min(train_count, val_count, test_count) < 0:
+        raise MLXUserError("Segmentation split counts must be zero or greater.")
 
     total_needed = train_count + val_count + test_count
     if len(samples) < total_needed:
@@ -274,9 +295,15 @@ def build_segmentation_dataset(dataset_path: str) -> None:
             f"Only {len(samples)} paired samples were found, less than requested total {total_needed}."
         )
 
-    output_path = Path(prompt_text("Enter output path for split dataset"))
+    output_value = config.get("output_path")
+    output_path = Path(output_value or prompt_text("Enter output path for split dataset"))
     if output_path.exists():
-        confirm_action(f"Output directory '{output_path}' already exists. Overwrite?", abort=True)
+        if not config.get("overwrite", False):
+            if output_value:
+                raise MLXUserError(
+                    f"Output directory '{output_path}' already exists. Re-run with --overwrite to replace it."
+                )
+            confirm_action(f"Output directory '{output_path}' already exists. Overwrite?", abort=True)
         shutil.rmtree(output_path)
     output_path.mkdir(parents=True, exist_ok=True)
 
@@ -284,7 +311,7 @@ def build_segmentation_dataset(dataset_path: str) -> None:
         (output_path / split / "images").mkdir(parents=True, exist_ok=True)
         (output_path / split / "masks").mkdir(parents=True, exist_ok=True)
 
-    random.shuffle(samples)
+    random.Random(config.get("random_seed")).shuffle(samples)
     splits = {
         "train": samples[:train_count],
         "val": samples[train_count : train_count + val_count],

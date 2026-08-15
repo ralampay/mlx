@@ -18,7 +18,21 @@ from mlx.modes.object_detection.ultralytics.utils import (
 )
 
 
+class TrainUltralyticsObjectDetection:
+    def __init__(self, config: dict[str, Any]) -> None:
+        self.config = config
+
+    def execute(self):
+        return _run_training(self.config)
+
+
 def train_object_detection(config: dict[str, Any]):
+    """Compatibility wrapper around the Ultralytics training command."""
+
+    return TrainUltralyticsObjectDetection(config).execute()
+
+
+def _run_training(config: dict[str, Any]):
     resolved_cfg, resolved_weights = resolve_model_paths(
         config,
         require_yaml=True,

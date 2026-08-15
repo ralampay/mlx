@@ -37,6 +37,7 @@ from mlx.modes.segmentation.research import (
     write_json,
     write_training_curves,
 )
+from mlx.modes.segmentation.requests import SegmentationRequest
 from mlx.modes.segmentation.utils import (
     load_training_checkpoint,
     resolve_class_names,
@@ -48,7 +49,9 @@ from mlx.modes.segmentation.utils import (
 
 
 class TrainSegmentationModel:
-    def __init__(self, config: dict[str, Any]) -> None:
+    def __init__(self, config: dict[str, Any] | SegmentationRequest) -> None:
+        if isinstance(config, SegmentationRequest):
+            config = config.to_config()
         self.config = dict(config)
         self.model_name = resolve_model_name(config)
         self.device = str(config["device"])
@@ -312,7 +315,19 @@ def train_segmentation(config: dict[str, Any]) -> None:
     TrainSegmentationModel(config).execute()
 
 
+class SmokeTestSegmentationModel:
+    def __init__(self, request: SegmentationRequest) -> None:
+        self.request = request
+
+    def execute(self) -> None:
+        _run_smoke_test(self.request.to_config())
+
+
 def smoke_test_segmentation(config: dict[str, Any]) -> None:
+    SmokeTestSegmentationModel(SegmentationRequest.from_config(config)).execute()
+
+
+def _run_smoke_test(config: dict[str, Any]) -> None:
     model_name = resolve_model_name(config)
     batch = int(config["batch_size"])
     width, height = config["input_size"]

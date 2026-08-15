@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+from dataclasses import dataclass
 from numbers import Real
 from pathlib import Path
 from typing import Any, Optional
@@ -16,6 +17,7 @@ from rich.progress import (
 )
 
 from mlx.core.exceptions import MLXUserError
+from mlx.core.requests import ConfigRequest
 from mlx.core.ui import console
 
 try:
@@ -29,6 +31,35 @@ except ImportError:  # pragma: no cover - exercised in installations missing ext
     Llama = None
 
 
+@dataclass(frozen=True)
+class EmbedCsvRequest(ConfigRequest):
+    model_file: Optional[str] = None
+    input_file: Optional[str] = None
+    output_file: Optional[str] = None
+    column_name: str = "content"
+    present: bool = False
+
+
+@dataclass(frozen=True)
+class EmbedCsvResult:
+    output_path: Path
+
+
+class EmbedCsvCommand:
+    def __init__(self, request: EmbedCsvRequest) -> None:
+        self.request = request
+
+    def execute(self) -> EmbedCsvResult:
+        output_path = EmbedCsv(
+            model_file=self.request.model_file,
+            input_file=self.request.input_file,
+            output_file=self.request.output_file,
+            column_name=self.request.column_name,
+            present=self.request.present,
+        ).execute()
+        return EmbedCsvResult(output_path=output_path)
+
+
 class EmbedCsv:
     def __init__(
         self,
@@ -36,22 +67,26 @@ class EmbedCsv:
         input_file: Optional[str],
         output_file: Optional[str] = None,
         column_name: str = "content",
+        present: bool = True,
     ) -> None:
         self.model_file = model_file
         self.input_file = input_file
         self.output_file = output_file
         self.column_name = column_name
+        self.present = present
 
     def execute(self) -> Path:
         model_path, input_path, output_path = self._validate_paths()
         dataframe = self._read_input(input_path)
         contents = self._validate_contents(dataframe)
 
-        console.print(f"[cyan]Rows to embed:[/cyan] {len(contents)}")
+        if self.present:
+            console.print(f"[cyan]Rows to embed:[/cyan] {len(contents)}")
         model = self._load_model(model_path)
         embeddings = self._create_embeddings(model, contents)
         self._write_output(output_path, contents, embeddings)
-        self._print_result(output_path, len(contents), len(embeddings[0]))
+        if self.present:
+            self._print_result(output_path, len(contents), len(embeddings[0]))
         return output_path
 
     def _validate_paths(self) -> tuple[Path, Path, Path]:
@@ -139,6 +174,7 @@ class EmbedCsv:
             TaskProgressColumn(),
             TimeRemainingColumn(),
             console=console,
+            disable=not self.present,
         )
         with progress:
             task_id = progress.add_task("Embedding", total=len(contents))

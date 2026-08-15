@@ -14,17 +14,39 @@ from mlx.modes.image_classification.presentation import (
 )
 from mlx.modes.image_classification.utils import load_checkpoint_bundle
 from mlx.modes.image_classification.models.joint_svdd import JointDeepSVDDClassifier
+from mlx.modes.image_classification.requests import ImageClassificationRequest
+
+
+class InferImageClassification:
+    def __init__(self, request: ImageClassificationRequest) -> None:
+        self.request = request
+
+    def execute(self) -> dict[str, Any]:
+        return _run_inference(self.request.to_config())
 
 
 def infer_image_classification(config: dict[str, Any]) -> dict[str, Any]:
+    compatibility_config = {"display": True, **config}
+    return InferImageClassification(
+        ImageClassificationRequest.from_config(compatibility_config)
+    ).execute()
+
+
+def _run_inference(config: dict[str, Any]) -> dict[str, Any]:
     model, metadata = load_checkpoint_bundle(config)
     device = config.get("device", "cpu")
     model = model.to(device)
     model.eval()
 
     if metadata["family"] == "one-shot":
-        return _infer_one_shot(model, metadata, config, device)
-    return _infer_standard(model, metadata, config, device)
+        result = _infer_one_shot(model, metadata, config, device)
+        if config.get("display", False):
+            display_similarity_matches(result)
+        return result
+    result = _infer_standard(model, metadata, config, device)
+    if config.get("display", False):
+        display_classification_predictions(result)
+    return result
 
 
 def _infer_one_shot(model, metadata: dict[str, Any], config: dict[str, Any], device: str) -> dict[str, Any]:
@@ -76,7 +98,6 @@ class RankOneShotReferences:
             "similarity_score": best_match[2] if best_match else None,
             "top_matches": matches[:10],
         }
-        display_similarity_matches(result)
         return result
 
     def _load_tensor(self, image_path: Path) -> torch.Tensor:
@@ -128,12 +149,10 @@ def _infer_standard(model, metadata: dict[str, Any], config: dict[str, Any], dev
             "ood_threshold": threshold,
             "rejection_reason": None if accepted else "out_of_distribution",
         }
-        display_classification_predictions(result)
         return result
     result = {
         "input_image": input_img_path,
         "predicted_label": top_predictions[0][0] if top_predictions else None,
         "top_predictions": top_predictions,
     }
-    display_classification_predictions(result)
     return result

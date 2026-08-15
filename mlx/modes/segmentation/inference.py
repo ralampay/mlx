@@ -17,9 +17,25 @@ from mlx.modes.segmentation.presentation import (
     stack_segmentation_views,
 )
 from mlx.modes.segmentation.utils import load_checkpoint_bundle
+from mlx.modes.segmentation.requests import SegmentationRequest
+
+
+class InferSegmentationImage:
+    def __init__(self, request: SegmentationRequest) -> None:
+        self.request = request
+
+    def execute(self) -> dict[str, Any]:
+        return _run_image_inference(self.request.to_config())
 
 
 def infer_segmentation_image(config: dict[str, Any]) -> dict[str, Any]:
+    compatibility_config = {"display": True, **config}
+    return InferSegmentationImage(
+        SegmentationRequest.from_config(compatibility_config)
+    ).execute()
+
+
+def _run_image_inference(config: dict[str, Any]) -> dict[str, Any]:
     model, metadata = load_checkpoint_bundle(config)
     device = config.get("device", "cpu")
     model = model.to(device)
@@ -65,12 +81,15 @@ def infer_segmentation_image(config: dict[str, Any]) -> dict[str, Any]:
         "predicted_mask": predicted_mask,
         "window_image": window_image,
     }
-    display_segmentation_result(result)
+    if config.get("display", False):
+        display_segmentation_result(result)
     return result
 
 
-class StreamSegmentationInferenceRunner:
-    def __init__(self, config: dict[str, Any], source: str) -> None:
+class RunSegmentationStreamInference:
+    def __init__(self, config: dict[str, Any] | SegmentationRequest, source: str) -> None:
+        if isinstance(config, SegmentationRequest):
+            config = config.to_config()
         self.config = config
         self.source = source
         self.device = config.get("device", "cpu")
@@ -138,7 +157,9 @@ class StreamSegmentationInferenceRunner:
         if self.source == "camera":
             capture = cv2.VideoCapture(self.camera_index)
             if not capture.isOpened():
-                raise RuntimeError(f"Unable to open camera index {self.camera_index}.")
+                raise MLXUserError(
+                    f"Unable to open camera index {self.camera_index}. Check the camera and permissions."
+                )
             return capture, "MLX Segmentation (Camera)"
 
         if self.source == "video":
@@ -150,8 +171,12 @@ class StreamSegmentationInferenceRunner:
                 raise MLXUserError(f"Video file not found: {resolved_video}")
             capture = cv2.VideoCapture(str(resolved_video))
             if not capture.isOpened():
-                raise RuntimeError(f"Unable to open video file: {resolved_video}")
+                raise MLXUserError(
+                    f"Unable to open video file: {resolved_video}. Check that it is a readable video."
+                )
             return capture, f"MLX Segmentation (Video: {resolved_video.name})"
 
         raise MLXUserError(f"Unsupported source type: {self.source}")
 
+
+StreamSegmentationInferenceRunner = RunSegmentationStreamInference

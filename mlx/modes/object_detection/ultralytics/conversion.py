@@ -12,13 +12,29 @@ from mlx.modes.object_detection.ultralytics.utils import resolve_imgsz, resolve_
 
 try:
     from ultralytics import YOLO
-except ImportError as exc:
-    raise ImportError(
-        "The ultralytics package (ralampay fork) is required for object-detection mode."
-    ) from exc
+except ImportError:
+    YOLO = None
+
+
+class ConvertUltralyticsObjectDetectionModel:
+    def __init__(self, config: dict[str, Any]) -> None:
+        self.config = config
+
+    def execute(self) -> Path:
+        return _run_conversion(self.config)
 
 
 def convert_object_detection_model(config: dict[str, Any]) -> Path:
+    """Compatibility wrapper around the Ultralytics conversion command."""
+
+    return ConvertUltralyticsObjectDetectionModel(config).execute()
+
+
+def _run_conversion(config: dict[str, Any]) -> Path:
+    if YOLO is None:
+        raise MLXUserError(
+            "The Ultralytics provider is not installed. Install the detection dependencies before exporting."
+        )
     _, resolved_weights = resolve_model_paths(
         config,
         require_yaml=False,

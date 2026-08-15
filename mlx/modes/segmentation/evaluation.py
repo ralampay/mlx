@@ -43,10 +43,13 @@ from mlx.modes.segmentation.research import (
     write_threshold_artifacts,
 )
 from mlx.modes.segmentation.utils import load_checkpoint_bundle, resolve_class_names
+from mlx.modes.segmentation.requests import SegmentationRequest
 
 
 class BenchmarkSegmentation:
-    def __init__(self, config: dict[str, Any]) -> None:
+    def __init__(self, config: dict[str, Any] | SegmentationRequest) -> None:
+        if isinstance(config, SegmentationRequest):
+            config = config.to_config()
         self.config = config
         self.device = str(config.get("device", "cpu"))
         self.split = str(config.get("split", "test"))

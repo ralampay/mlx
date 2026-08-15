@@ -18,6 +18,7 @@ from mlx.modes.image_classification.data import (
 )
 from mlx.modes.image_classification.evaluation import _build_one_shot_benchmark_pairs
 from mlx.modes.image_classification.utils import load_checkpoint_bundle
+from mlx.modes.image_classification.requests import ImageClassificationRequest
 
 
 @dataclass(frozen=True)
@@ -65,7 +66,22 @@ class _SiameseBranchWrapper(nn.Module):
         return self.model(fixed, image)
 
 
+class GenerateImageClassificationCams:
+    def __init__(self, request: ImageClassificationRequest) -> None:
+        self.request = request
+
+    def execute(self) -> list[CamResult]:
+        return _generate_cams(self.request.to_config())
+
+
 def generate_image_classification_cams(config: dict[str, Any]) -> list[CamResult]:
+    config = {"display": True, **config}
+    return GenerateImageClassificationCams(
+        ImageClassificationRequest.from_config(config)
+    ).execute()
+
+
+def _generate_cams(config: dict[str, Any]) -> list[CamResult]:
     model, metadata = load_checkpoint_bundle(config)
     device = config.get("device", "cpu")
     model = model.to(device)

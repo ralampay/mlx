@@ -4,16 +4,20 @@ from typing import Any
 
 from mlx.core.exceptions import MLXUserError
 from mlx.core.ui import print_model_parameter_table
-from mlx.modes.image_classification.cam import generate_image_classification_cams
-from mlx.modes.image_classification.data import build_image_classification_dataset
-from mlx.modes.image_classification.evaluation import benchmark_image_classification
-from mlx.modes.image_classification.inference import infer_image_classification
+from mlx.modes.image_classification.cam import GenerateImageClassificationCams
+from mlx.modes.image_classification.data import BuildImageClassificationDataset
+from mlx.modes.image_classification.evaluation import BenchmarkImageClassification
+from mlx.modes.image_classification.inference import InferImageClassification
 from mlx.modes.image_classification.list_models import ListImageClassificationModels
 from mlx.modes.image_classification.models import DEFAULT_MODEL, model_family_for
 from mlx.modes.image_classification.presentation import print_config_summary
+from mlx.modes.image_classification.requests import (
+    BuildImageClassificationDatasetRequest,
+    ImageClassificationRequest,
+)
 from mlx.modes.image_classification.train import (
-    smoke_test_image_classification,
-    train_image_classification,
+    SmokeTestImageClassificationModel,
+    TrainImageClassificationModel,
 )
 
 DEFAULT_CONFIG = {
@@ -49,25 +53,25 @@ def _list_models(config: dict[str, Any]):
 
 
 ACTION_HANDLERS = {
-    "benchmark": benchmark_image_classification,
-    "build-dataset": lambda config: build_image_classification_dataset(
-        config["dataset_path"],
-        train_count=config.get("train_count"),
-        val_count=config.get("val_count"),
-        test_count=config.get("test_count"),
-        train_ratio=config.get("train_ratio"),
-        val_ratio=config.get("val_ratio"),
-        test_ratio=config.get("test_ratio"),
-        split_mode=config.get("split_mode"),
-        output_path=config.get("output_path"),
-        overwrite=config.get("overwrite", False),
-        random_seed=config.get("random_seed"),
-    ),
-    "infer-image": infer_image_classification,
+    "benchmark": lambda config: BenchmarkImageClassification(
+        ImageClassificationRequest.from_config(config)
+    ).execute(),
+    "build-dataset": lambda config: BuildImageClassificationDataset(
+        BuildImageClassificationDatasetRequest.from_config(config)
+    ).execute(),
+    "infer-image": lambda config: InferImageClassification(
+        ImageClassificationRequest.from_config(config)
+    ).execute(),
     "ls-models": _list_models,
-    "cam": generate_image_classification_cams,
-    "test": smoke_test_image_classification,
-    "train": train_image_classification,
+    "cam": lambda config: GenerateImageClassificationCams(
+        ImageClassificationRequest.from_config(config)
+    ).execute(),
+    "test": lambda config: SmokeTestImageClassificationModel(
+        ImageClassificationRequest.from_config(config)
+    ).execute(),
+    "train": lambda config: TrainImageClassificationModel(
+        ImageClassificationRequest.from_config(config)
+    ).execute(),
 }
 
 

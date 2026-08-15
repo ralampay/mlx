@@ -126,9 +126,7 @@ The recommended integration accepts the same detector returned by the existing
 
 ```python
 from mlx.modes.object_detection.tracking.algorithms import DetectionAsTrackAlgorithm
-from mlx.modes.object_detection.ultralytics import (
-    RunObjectDetectionTrackingCommand,
-)
+from mlx.modes.object_detection import RunObjectDetectionTrackingCommand
 from mlx.modes.object_detection.ultralytics.adapters import build_detection_adapter
 
 detector = build_detection_adapter(
@@ -176,7 +174,7 @@ Callers that already perform detection can use the lower-level command directly:
 ```python
 from mlx.modes.object_detection.tracking import RunTrackByDetectionCommand
 from mlx.modes.object_detection.tracking.algorithms import DetectionAsTrackAlgorithm
-from mlx.modes.object_detection.ultralytics import to_tracking_detections
+from mlx.modes.object_detection import to_tracking_detections
 
 tracking = RunTrackByDetectionCommand(
     algorithm=DetectionAsTrackAlgorithm(),

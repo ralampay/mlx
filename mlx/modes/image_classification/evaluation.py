@@ -35,6 +35,7 @@ from mlx.modes.image_classification.data import (
 )
 from mlx.modes.image_classification.utils import load_checkpoint_bundle
 from mlx.modes.image_classification.models.joint_svdd import JointDeepSVDDClassifier
+from mlx.modes.image_classification.requests import ImageClassificationRequest
 
 
 @dataclass(frozen=True)
@@ -57,7 +58,21 @@ class OneShotPredictionRecord:
     same_probability: float
 
 
+class BenchmarkImageClassification:
+    def __init__(self, request: ImageClassificationRequest) -> None:
+        self.request = request
+
+    def execute(self) -> dict[str, float]:
+        return _run_benchmark(self.request.to_config())
+
+
 def benchmark_image_classification(config: dict[str, Any]) -> dict[str, float]:
+    return BenchmarkImageClassification(
+        ImageClassificationRequest.from_config(config)
+    ).execute()
+
+
+def _run_benchmark(config: dict[str, Any]) -> dict[str, float]:
     model, metadata = load_checkpoint_bundle(config)
     family = metadata["family"]
     device = config.get("device", "cpu")

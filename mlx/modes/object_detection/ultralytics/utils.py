@@ -11,18 +11,15 @@ from mlx.core.exceptions import MLXUserError
 
 try:
     import cv2
-except ImportError as exc:
-    raise ImportError(
-        "OpenCV is required for object-detection inference. Install it with 'pip install opencv-python'."
-    ) from exc
+except ImportError:
+    cv2 = None
 
 try:
     import ultralytics
     from ultralytics import YOLO
-except ImportError as exc:
-    raise ImportError(
-        "The ultralytics package (ralampay fork) is required for object-detection mode."
-    ) from exc
+except ImportError:
+    ultralytics = None
+    YOLO = None
 
 
 MODEL_ALIASES = {
@@ -57,6 +54,10 @@ def resolve_imgsz(config: dict[str, Any]) -> Union[int, tuple[int, int]]:
 
 
 def _ultralytics_package_root() -> Path:
+    if ultralytics is None:
+        raise MLXUserError(
+            "The Ultralytics provider is not installed. Install the project detection dependencies and try again."
+        )
     return Path(ultralytics.__file__).resolve().parent
 
 
@@ -253,6 +254,10 @@ def initialize_model(
     *,
     prefer_cfg: bool,
 ) -> YOLO:
+    if YOLO is None:
+        raise MLXUserError(
+            "The Ultralytics provider is not installed. Install the project detection dependencies and try again."
+        )
     model: Optional[YOLO] = None
 
     if prefer_cfg and resolved_cfg:
@@ -278,6 +283,10 @@ def initialize_model(
 
 
 def annotate_detections(frame, result):
+    if cv2 is None:
+        raise MLXUserError(
+            "OpenCV is required to annotate detections. Install opencv-python and try again."
+        )
     annotated = frame.copy()
     if result is None:
         return annotated

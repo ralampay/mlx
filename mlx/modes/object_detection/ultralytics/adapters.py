@@ -5,7 +5,8 @@ from typing import Optional
 
 import numpy as np
 
-from mlx.modes.object_detection.ultralytics.results import (
+from mlx.core.exceptions import MLXUserError
+from mlx.modes.object_detection.models import (
     Detection,
     DetectionAdapter,
     DetectionResult,
@@ -19,10 +20,8 @@ except ImportError:
 
 try:
     from ultralytics import YOLO
-except ImportError as exc:
-    raise ImportError(
-        "The ultralytics package (ralampay fork) is required for object-detection mode."
-    ) from exc
+except ImportError:
+    YOLO = None
 
 
 class UltralyticsDetectionAdapter:
@@ -35,6 +34,10 @@ class UltralyticsDetectionAdapter:
         imgsz: int | tuple[int, int],
         confidence: float,
     ) -> None:
+        if YOLO is None:
+            raise MLXUserError(
+                "The Ultralytics provider is not installed. Install the detection dependencies and try again."
+            )
         self.model = initialize_model(resolved_cfg, resolved_weights, prefer_cfg=False)
         self.device = device
         self.imgsz = imgsz
@@ -62,8 +65,12 @@ class OnnxRuntimeDetectionAdapter:
         confidence: float,
     ) -> None:
         if onnxruntime is None:
-            raise ImportError(
+            raise MLXUserError(
                 "onnxruntime is required for ONNX object-detection inference. Install it with 'pip install onnxruntime'."
+            )
+        if YOLO is None:
+            raise MLXUserError(
+                "The Ultralytics provider is required to decode this ONNX detector. Install the detection dependencies and try again."
             )
 
         # Let Ultralytics drive ONNX Runtime inference so preprocessing, decoding,

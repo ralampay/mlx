@@ -2,25 +2,25 @@
 
 Mode: `object-detection`
 
-Package: `mlx.modes.object_detection.ultralytics`
+Package: `mlx.modes.object_detection`
 
 ## Overview
 
-This mode provides the Ultralytics-backed object-detection workflow exposed by:
+This mode provides provider-backed object-detection workflows. Ultralytics is the
+default provider:
 
 ```bash
-python -m mlx --mode object-detection
+python -m mlx --mode object-detection --provider ultralytics
 ```
 
-The source is split by responsibility:
+The neutral source is split by responsibility:
 
-- `runner.py`: action dispatch.
-- `training.py`: training workflow.
-- `inference.py`: webcam and video inference.
-- `adapters.py`: runtime adapters for Ultralytics `.pt` and ONNX Runtime `.onnx` inference.
-- `results.py`: lightweight normalized detection records shared with boundary adapters.
-- `conversion.py`: Ultralytics `.pt` to ONNX export.
-- `utils.py`: model-path resolution, model initialization, and annotation helpers.
+- `runner.py`: action dispatch and CLI presentation wiring.
+- `commands.py`: provider-neutral training, model creation, conversion, listing, and streaming.
+- `models.py`: normalized detection records and the detector protocol.
+- `providers.py`: lazy provider registry and provider protocol.
+- `streaming.py`: frame-source and frame-sink ports plus OpenCV adapters.
+- `ultralytics/`: Ultralytics training, conversion, model resolution, and decoding.
 - `tracking/`: detector-neutral online tracking types, protocol, and per-frame command.
 
 ## Generic Tracking by Detection
@@ -51,9 +51,7 @@ the current `build_detection_adapter(...)` factory, including both the Ultralyti
 
 ```python
 from mlx.modes.object_detection.tracking.algorithms import DetectionAsTrackAlgorithm
-from mlx.modes.object_detection.ultralytics import (
-    RunObjectDetectionTrackingCommand,
-)
+from mlx.modes.object_detection import RunObjectDetectionTrackingCommand
 
 # `detector` is the existing adapter created by build_detection_adapter(...).
 command = RunObjectDetectionTrackingCommand(
@@ -76,8 +74,8 @@ For callers that already perform detection separately,
 `RunTrackByDetectionCommand.execute(detections=..., frame=...)` remains available as
 the lower-level detector-neutral API.
 
-The conversion is kept beside the Ultralytics adapter because its existing
-`Detection` record uses integer `xyxy` coordinates. Generic tracking state uses
+The conversion is kept at the neutral detection/tracking boundary. `Detection` uses
+integer `xyxy` coordinates, while generic tracking state uses
 immutable `BoundingBox` values backed by ordinary Python floats and does not retain
 an Ultralytics result object.
 

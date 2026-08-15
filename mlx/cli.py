@@ -38,8 +38,8 @@ ModeRunner = Callable[[Dict[str, Any]], Any]
 MODE_REGISTRY: Dict[str, str] = {
     "image-classification": "mlx.modes.image_classification.runner:run_image_classification",
     "image_classification": "mlx.modes.image_classification.runner:run_image_classification",
-    "object-detection": "mlx.modes.object_detection.ultralytics.runner:run_object_detection",
-    "object_detection": "mlx.modes.object_detection.ultralytics.runner:run_object_detection",
+    "object-detection": "mlx.modes.object_detection.runner:run_object_detection",
+    "object_detection": "mlx.modes.object_detection.runner:run_object_detection",
     "segmentation": "mlx.modes.segmentation.runner:run_segmentation",
     "nlp": "mlx.modes.nlp.runner:run_nlp",
 }
@@ -49,6 +49,7 @@ def build_parser() -> RichArgumentParser:
     parser = RichArgumentParser(add_help=False, prog="python -m mlx")
     parser.add_argument("-h", "--help", action="store_true", dest="help")
     parser.add_argument("--mode", default=None)
+    parser.add_argument("--provider", default="ultralytics")
     parser.add_argument("--model", default=None)
     parser.add_argument("--height", type=int, default=256)
     parser.add_argument("--width", type=int, default=256)
@@ -190,6 +191,7 @@ def _render_help() -> None:
     options.add_column("Default", style="magenta")
     options.add_column("Description", style="white")
     options.add_row("--mode", "None", "Mode to run: object_detection, image_classification, segmentation, or nlp.")
+    options.add_row("--provider", "ultralytics", "Object-detection provider selected through the lazy provider registry.")
     options.add_row("--model", "None", "Model identifier, YAML path, or architecture name.")
     options.add_row("--action", "mode-specific", "Sub-action such as train, ls-models, infer-video, convert, benchmark, or build-dataset.")
     options.add_row("--dataset", "./tmp/dataset", "Dataset source for training: local YOLO root, dataset YAML, or alias like coco8/coco128.")
@@ -302,7 +304,7 @@ def _render_unknown_mode() -> None:
     table = Table(title="Available Modes", show_header=True)
     table.add_column("Mode", style="cyan", no_wrap=True)
     table.add_column("Purpose", style="white")
-    table.add_row("object_detection", "Ultralytics-backed detection training and inference")
+    table.add_row("object_detection", "Provider-backed detection training and inference")
     table.add_row("image_classification", "Image classification workflows for both one-shot and standard classifiers")
     table.add_row("segmentation", "Semantic segmentation workflows for U-Net style models")
     table.add_row("nlp", "Text embedding workflows for GGUF models and CSV data")

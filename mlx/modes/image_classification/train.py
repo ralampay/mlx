@@ -40,6 +40,7 @@ from mlx.modes.image_classification.ood.deep_svdd import (
     initialize_svdd_center,
     validate_svdd_config,
 )
+from mlx.modes.image_classification.requests import ImageClassificationRequest
 from mlx.modes.image_classification.utils import (
     load_training_checkpoint,
     resolve_model_name,
@@ -73,30 +74,50 @@ SVDD_TRAINING_CSV_COLUMNS = [
 ]
 
 
+class TrainImageClassificationModel:
+    def __init__(self, request: ImageClassificationRequest) -> None:
+        self.request = request
+
+    def execute(self) -> None:
+        config = self.request.to_config()
+        if int(config.get("epochs", 0)) < 1:
+            raise MLXUserError("--epochs must be at least 1 for image-classification training.")
+        model_name = resolve_model_name(config)
+        family = model_family_for(model_name)
+        validate_svdd_config(config)
+        if family == "one-shot":
+            if config.get("ood_method", "none") != "none":
+                raise MLXUserError(
+                    "Deep SVDD is supported only for standard image-classification models, "
+                    "not one-shot models."
+                )
+            _train_one_shot(model_name, config)
+            return
+        _train_standard(model_name, config)
+
+
+class SmokeTestImageClassificationModel:
+    def __init__(self, request: ImageClassificationRequest) -> None:
+        self.request = request
+
+    def execute(self) -> None:
+        config = self.request.to_config()
+        model_name = resolve_model_name(config)
+        family = model_family_for(model_name)
+        if family == "one-shot":
+            _test_one_shot(model_name, config)
+            return
+        _test_standard(model_name, config)
+
+
 def train_image_classification(config: dict[str, Any]) -> None:
-    if int(config.get("epochs", 0)) < 1:
-        raise MLXUserError("--epochs must be at least 1 for image-classification training.")
-    model_name = resolve_model_name(config)
-    family = model_family_for(model_name)
-    validate_svdd_config(config)
-    if family == "one-shot":
-        if config.get("ood_method", "none") != "none":
-            raise MLXUserError(
-                "Deep SVDD is supported only for standard image-classification models, "
-                "not one-shot models."
-            )
-        _train_one_shot(model_name, config)
-        return
-    _train_standard(model_name, config)
+    TrainImageClassificationModel(ImageClassificationRequest.from_config(config)).execute()
 
 
 def smoke_test_image_classification(config: dict[str, Any]) -> None:
-    model_name = resolve_model_name(config)
-    family = model_family_for(model_name)
-    if family == "one-shot":
-        _test_one_shot(model_name, config)
-        return
-    _test_standard(model_name, config)
+    SmokeTestImageClassificationModel(
+        ImageClassificationRequest.from_config(config)
+    ).execute()
 
 
 def _train_one_shot(model_name: str, config: dict[str, Any]) -> None:

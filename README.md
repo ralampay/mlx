@@ -6,7 +6,7 @@ segmentation, NLP, and tracking logic in focused modules.
 
 ## Contents
 
-- [Architecture](#architecture)
+- [Architecture](./ARCHITECTURE.md)
 - [Installation](#installation)
 - [Command-line interface](#command-line-interface)
 - [Object detection and tracking](#object-detection-and-tracking)
@@ -17,45 +17,8 @@ segmentation, NLP, and tracking logic in focused modules.
 
 ## Architecture
 
-The CLI dispatches each `--mode` directly to its package. Shared exceptions, random
-seed handling, model summaries, and terminal presentation utilities live in
-`mlx.core`; mode-specific data preparation, models, training, inference, evaluation,
-and presentation remain under `mlx.modes`.
-
-```text
-mlx/
-├── core/                              shared infrastructure
-└── modes/
-    ├── object_detection/
-    │   ├── ultralytics/               detection training and inference
-    │   └── tracking/                  detector-neutral online tracking
-    ├── image_classification/          standard and one-shot classification
-    ├── segmentation/                  semantic segmentation
-    └── nlp/                           CSV embedding workflows
-```
-
-Each workflow follows the same project pattern:
-
-```text
-CLI configuration
-    ↓
-thin mode runner
-    ↓
-command-style workflow
-    ↓
-mode-specific models, data, and presentation
-```
-
-### Module map
-
-| Module | Package | Primary interface | Detailed documentation |
-| --- | --- | --- | --- |
-| Shared core | `mlx.core` | Exceptions, UI, seeds, model summaries | This README |
-| Object detection | `mlx.modes.object_detection.ultralytics` | CLI and detection adapters | [Object detection](./docs/object_detection/README.md) |
-| Tracking | `mlx.modes.object_detection.tracking` | Python API | [Tracking](./TRACKING.md) |
-| Image classification | `mlx.modes.image_classification` | CLI and Python workflows | [Image classification](./docs/image_classification/README.md) |
-| Segmentation | `mlx.modes.segmentation` | CLI and Python workflows | [Segmentation](./docs/segmentation/README.md) |
-| NLP embeddings | `mlx.modes.nlp` | CLI | This README |
+See [ARCHITECTURE.md](./ARCHITECTURE.md) for package ownership, command conventions,
+dependency direction, presentation boundaries, and the object-detection provider API.
 
 ## Installation
 
@@ -97,9 +60,9 @@ python -m mlx --help
 
 ### Object detection
 
-Package: `mlx.modes.object_detection.ultralytics`
+Package: `mlx.modes.object_detection`
 
-The object-detection module trains Ultralytics models, converts PyTorch checkpoints
+The default `ultralytics` provider trains models, converts PyTorch checkpoints
 to ONNX, and runs camera or video inference through normalized detection adapters.
 Model aliases include `yolo26`, `yolov26`, and `draxnet-yolo26`. Dataset input may
 be a local YOLO dataset root, a dataset YAML, or an Ultralytics alias such as `coco8`
@@ -149,7 +112,7 @@ current object-detection adapter factory:
 
 ```python
 from mlx.modes.object_detection.tracking.algorithms import DetectionAsTrackAlgorithm
-from mlx.modes.object_detection.ultralytics import RunObjectDetectionTrackingCommand
+from mlx.modes.object_detection import RunObjectDetectionTrackingCommand
 
 tracking = RunObjectDetectionTrackingCommand(
     detection_model=detector,

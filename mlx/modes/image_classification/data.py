@@ -21,6 +21,7 @@ except ImportError as exc:  # pragma: no cover - pillow is expected via torchvis
     ) from exc
 
 from mlx.core.exceptions import MLXUserError
+from mlx.modes.image_classification.requests import BuildImageClassificationDatasetRequest
 from mlx.core.ui import (
     confirm_action,
     console,
@@ -394,7 +395,58 @@ def _counts_from_ratios(
     return counts[0], counts[1], counts[2]
 
 
+class BuildImageClassificationDataset:
+    def __init__(self, request: BuildImageClassificationDatasetRequest) -> None:
+        self.request = request
+
+    def execute(self) -> None:
+        config = self.request.to_config()
+        _build_image_classification_dataset(
+            config["dataset_path"],
+            train_count=config.get("train_count"),
+            val_count=config.get("val_count"),
+            test_count=config.get("test_count"),
+            train_ratio=config.get("train_ratio"),
+            val_ratio=config.get("val_ratio"),
+            test_ratio=config.get("test_ratio"),
+            split_mode=config.get("split_mode"),
+            output_path=config.get("output_path"),
+            overwrite=bool(config.get("overwrite", False)),
+            random_seed=config.get("random_seed"),
+        )
+
+
 def build_image_classification_dataset(
+    dataset_path: str,
+    *,
+    train_count: int | None = None,
+    val_count: int | None = None,
+    test_count: int | None = None,
+    train_ratio: float | None = None,
+    val_ratio: float | None = None,
+    test_ratio: float | None = None,
+    split_mode: str | None = None,
+    output_path: str | os.PathLike[str] | None = None,
+    overwrite: bool = False,
+    random_seed: int | None = None,
+) -> None:
+    request = BuildImageClassificationDatasetRequest(
+        dataset_path=dataset_path,
+        train_count=train_count,
+        val_count=val_count,
+        test_count=test_count,
+        train_ratio=train_ratio,
+        val_ratio=val_ratio,
+        test_ratio=test_ratio,
+        split_mode=split_mode,
+        output_path=str(output_path) if output_path is not None else None,
+        overwrite=overwrite,
+        random_seed=random_seed,
+    )
+    return BuildImageClassificationDataset(request).execute()
+
+
+def _build_image_classification_dataset(
     dataset_path: str,
     *,
     train_count: int | None = None,

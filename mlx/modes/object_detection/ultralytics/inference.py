@@ -16,14 +16,16 @@ from mlx.modes.object_detection.ultralytics.utils import (
 
 try:
     import cv2
-except ImportError as exc:
-    raise ImportError(
-        "OpenCV is required for object-detection inference. Install it with 'pip install opencv-python'."
-    ) from exc
+except ImportError:
+    cv2 = None
 
 
 class StreamInferenceRunner:
     def __init__(self, config: dict[str, Any], source: str) -> None:
+        if cv2 is None:
+            raise MLXUserError(
+                "OpenCV is required for object-detection inference. Install opencv-python and try again."
+            )
         self.config = config
         self.source = source
         self.device = config.get("device", "cpu")

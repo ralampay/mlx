@@ -8,6 +8,7 @@ from rich.table import Table
 
 from mlx.core.exceptions import MLXUserError
 from mlx.core.ui import console, print_info, print_success
+from mlx.modes.object_detection.artifacts import resolve_onnx_output_target
 from mlx.modes.object_detection.ultralytics.utils import resolve_imgsz, resolve_model_paths
 
 try:
@@ -47,7 +48,7 @@ def _run_conversion(config: dict[str, Any]) -> Path:
             "The convert action expects --model-path to point to an Ultralytics PyTorch checkpoint (.pt)."
         )
 
-    output_target = _resolve_output_target(config, resolved_weights)
+    output_target = resolve_onnx_output_target(config, resolved_weights)
     output_target.parent.mkdir(parents=True, exist_ok=True)
     imgsz = resolve_imgsz(config)
 
@@ -79,24 +80,6 @@ def _run_conversion(config: dict[str, Any]) -> Path:
 
     print_success(f"ONNX export complete: {final_path}")
     return final_path
-
-
-def _resolve_output_target(config: dict[str, Any], resolved_weights: Path) -> Path:
-    output_path = config.get("output_path")
-    default_target = resolved_weights.with_suffix(".onnx")
-    if not output_path:
-        return default_target.resolve()
-
-    candidate = Path(output_path).expanduser()
-    if candidate.exists() and candidate.is_dir():
-        return (candidate / default_target.name).resolve()
-    if candidate.suffix.lower() == ".onnx":
-        return candidate.resolve()
-    if candidate.exists():
-        return (candidate / default_target.name).resolve()
-    if candidate.suffix:
-        raise MLXUserError("For ONNX export, --output must be a directory or a path ending in .onnx.")
-    return (candidate / default_target.name).resolve()
 
 
 def _conversion_summary_table(

@@ -10,6 +10,11 @@ from rich.panel import Panel
 from rich.table import Table
 
 from mlx.core.ui import console, print_info, print_success, print_warning
+from mlx.modes.object_detection.artifacts import (
+    detect_existing_training_artifacts,
+    find_existing_checkpoint,
+    find_latest_checkpoint,
+)
 from mlx.modes.object_detection.ultralytics.utils import (
     initialize_model,
     resolve_dataset_source,
@@ -56,7 +61,7 @@ def _run_training(config: dict[str, Any]):
     run_name = config.get("run_name", "mlx-ultralytics")
     lr0 = config.get("lr0")
     loss_clip = config.get("loss_clip")
-    auto_resume_checkpoint, auto_warm_start_weights = _detect_existing_training_artifacts(
+    auto_resume_checkpoint, auto_warm_start_weights = detect_existing_training_artifacts(
         project_dir=project_dir,
         run_name=run_name,
         explicit_weights=resolved_weights,
@@ -148,63 +153,6 @@ def _run_training(config: dict[str, Any]):
     return results
 
 
-def _detect_existing_training_artifacts(
-    *,
-    project_dir: Path,
-    run_name: Optional[str],
-    explicit_weights: Optional[Path],
-) -> tuple[Optional[Path], Optional[Path]]:
-    if explicit_weights is not None or not project_dir.exists():
-        return None, None
-
-    run_dir = project_dir / run_name if run_name else None
-    resume_checkpoint = _find_existing_checkpoint(
-        project_dir=project_dir,
-        run_dir=run_dir,
-        file_name="last.pt",
-    )
-    if resume_checkpoint is not None:
-        return resume_checkpoint, None
-
-    warm_start_weights = _find_existing_checkpoint(
-        project_dir=project_dir,
-        run_dir=run_dir,
-        file_name="best.pt",
-    )
-    if warm_start_weights is not None:
-        return None, warm_start_weights
-
-    warm_start_weights = _find_latest_checkpoint(project_dir, pattern="*.pt")
-    if warm_start_weights is not None:
-        return None, warm_start_weights
-
-    return None, None
-
-
-def _find_existing_checkpoint(
-    *,
-    project_dir: Path,
-    run_dir: Optional[Path],
-    file_name: str,
-) -> Optional[Path]:
-    preferred_candidates = []
-    if run_dir is not None:
-        preferred_candidates.extend((run_dir / "weights" / file_name, run_dir / file_name))
-
-    for candidate in preferred_candidates:
-        if candidate.exists():
-            return candidate.resolve()
-
-    return _find_latest_checkpoint(project_dir, pattern=file_name)
-
-
-def _find_latest_checkpoint(project_dir: Path, *, pattern: str) -> Optional[Path]:
-    matches = [path for path in project_dir.rglob(pattern) if path.is_file()]
-    if not matches:
-        return None
-    return max(matches, key=lambda path: (path.stat().st_mtime_ns, str(path))).resolve()
-
-
 def _training_summary_table(
     *,
     resolved_cfg,
@@ -264,7 +212,7 @@ def _select_training_checkpoint(
     preferred_name = "best.pt" if use_best else "last.pt"
     fallback_name = "last.pt" if use_best else "best.pt"
 
-    preferred = _find_existing_checkpoint(
+    preferred = find_existing_checkpoint(
         project_dir=output_dir,
         run_dir=output_dir,
         file_name=preferred_name,
@@ -272,7 +220,7 @@ def _select_training_checkpoint(
     if preferred is not None:
         return preferred
 
-    fallback = _find_existing_checkpoint(
+    fallback = find_existing_checkpoint(
         project_dir=output_dir,
         run_dir=output_dir,
         file_name=fallback_name,
@@ -283,7 +231,7 @@ def _select_training_checkpoint(
         )
         return fallback
 
-    latest = _find_latest_checkpoint(output_dir, pattern="*.pt")
+    latest = find_latest_checkpoint(output_dir, pattern="*.pt")
     if latest is not None:
         print_warning(f"Preferred checkpoint {preferred_name} was not found; using newest checkpoint.")
         return latest

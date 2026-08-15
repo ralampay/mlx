@@ -1,15 +1,17 @@
+grad-cam
+jupyter
+llama-cpp-python
 matplotlib
 numpy
-pandas
-llama-cpp-python
 onnxruntime
 opencv-python
+pandas
+pytest
 python-dotenv
 rich
 scikit-learn
 torch
 torchvision
 tqdm
-jupyter
-grad-cam
 ultralytics @ git+https://github.com/ralampay/ultralytics
+libreyolo[onnx] @ git+https://github.com/ralampay/libreyolo.git@release

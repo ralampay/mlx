@@ -36,6 +36,7 @@ class ObjectDetectionProvider(Protocol):
 
 
 PROVIDER_REGISTRY: dict[str, str] = {
+    "libreyolo": "mlx.modes.object_detection.libreyolo.provider:get_provider",
     "ultralytics": "mlx.modes.object_detection.ultralytics.provider:get_provider",
 }
 
@@ -68,4 +69,3 @@ def get_provider(name: str) -> ObjectDetectionProvider:
             f"Object-detection provider '{normalized}' is unavailable: {exc}. "
             "Install the provider dependencies and try again."
         ) from exc
-

@@ -51,8 +51,10 @@ mlx/
     │   ├── models.py             provider-neutral detection values and detector protocol
     │   ├── providers.py          lazy provider registry and provider protocol
     │   ├── commands.py           neutral train, create, convert, list, and stream commands
+    │   ├── artifacts.py          shared checkpoint discovery and export-path rules
     │   ├── streaming.py          frame-source/frame-sink ports and OpenCV adapters
     │   ├── tracking/             provider-neutral tracking contracts and algorithms
+    │   ├── libreyolo/            LibreYOLO implementation using the Ralampay fork
     │   └── ultralytics/          Ultralytics implementation and compatibility exports
     └── nlp/                      GGUF-backed CSV embedding workflows
 ```
@@ -73,10 +75,11 @@ builders remain functions.
 
 ## Object-Detection Providers
 
-Object detection is selected with `--provider`; `ultralytics` is the default. The CLI routes to
+Object detection is selected with `--provider`; `ultralytics` is the default and `libreyolo` is
+the alternative. The CLI routes to
 `mlx.modes.object_detection.runner`, which resolves providers through a string registry only when
-the selected action executes. Importing the CLI or another mode therefore does not require
-Ultralytics to be installed.
+the selected action executes. Importing the CLI or another mode therefore does not require either
+provider to be installed.
 
 All providers normalize predictions to `DetectionResult` containing `Detection` values. Tracking,
 annotation, streaming, and downstream callers depend only on that contract. The provider protocol
@@ -87,7 +90,7 @@ supports four capabilities:
 3. export from `ConvertObjectDetectionRequest`;
 4. list models from `ListObjectDetectionModelsRequest`.
 
-To add LibreYOLO or another provider:
+To add another provider:
 
 1. create `mlx.modes.object_detection.<provider>/provider.py` without importing it globally;
 2. implement `ObjectDetectionProvider`, translating library results to the neutral detection types;
@@ -96,8 +99,16 @@ To add LibreYOLO or another provider:
 5. add fake-provider contract tests plus provider-specific decoding and integration tests;
 6. document supported models, formats, training semantics, and install dependencies.
 
-Provider dependencies remain unchanged until a second implementation is introduced. At that
-point they should become named optional extras so users can install only the provider they need.
+Provider dependencies are named optional extras so users can install only the integration they
+need. `object-detection-ultralytics` installs the Ralampay Ultralytics fork,
+`object-detection-libreyolo` follows the `release` branch of the Ralampay LibreYOLO fork with its
+ONNX dependencies, and `object-detection` installs both. Provider packages must stay lazy so these
+extras remain independent.
+
+LibreYOLO training and listing are first-class for `yolo9-t`, `yolo9-s`, `yolo9-m`, and
+`yolo9-c`. Its inference and conversion adapters may accept other axis-aligned detection
+checkpoints supported by the fork, but non-detection tasks and cross-provider checkpoint loading
+are outside the neutral provider contract.
 
 ## Presentation, Errors, and Compatibility
 
@@ -128,4 +139,3 @@ paths. Compatibility wrappers must not accumulate new business logic.
 - Any code or configuration change must review this document. Update it in the same change whenever
   command inventory, package ownership, dependencies, interfaces, provider behavior, or data flow
   changes.
-

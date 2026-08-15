@@ -22,15 +22,60 @@ dependency direction, presentation boundaries, and the object-detection provider
 
 ## Installation
 
-Install the project dependencies:
+MLX requires Python 3.10 or newer. Create an isolated virtual environment from the
+repository root so its packages do not conflict with system Python or other projects.
+
+### Linux and macOS
 
 ```bash
+python3 --version
+python3 -m venv .venv
+source .venv/bin/activate
+python -m pip install --upgrade pip setuptools wheel
 python -m pip install -r requirements.txt
 ```
 
-The dependency set includes NumPy, pandas, PyTorch, torchvision, OpenCV, Rich,
-scikit-learn, ONNX Runtime, llama-cpp-python, and the repository's pinned
-Ultralytics fork.
+### Windows PowerShell
+
+```powershell
+py -3 --version
+py -3 -m venv .venv
+.\.venv\Scripts\Activate.ps1
+python -m pip install --upgrade pip setuptools wheel
+python -m pip install -r requirements.txt
+```
+
+If `python3` or `py -3` reports a version older than 3.10, install a supported Python
+release and use that interpreter to create `.venv`. Activate the environment again in
+each new terminal before running MLX commands.
+
+The requirements file installs the project dependencies used for development,
+notebooks, tests, and both object-detection providers. Confirm the environment after
+installation:
+
+```bash
+python -m mlx --help
+python -m pytest -q
+```
+
+Leave the environment when finished with:
+
+```bash
+deactivate
+```
+
+The development dependency set includes NumPy, pandas, PyTorch, torchvision, OpenCV,
+Rich, scikit-learn, ONNX Runtime, llama-cpp-python, the Ralampay Ultralytics fork,
+and the `release` branch of the Ralampay LibreYOLO fork.
+
+Package consumers who do not use `requirements.txt` can install the project with only
+the object-detection provider they need:
+
+```bash
+python -m pip install ".[object-detection-ultralytics]"
+python -m pip install ".[object-detection-libreyolo]"
+python -m pip install ".[object-detection]"  # both providers
+```
 
 ## Command-line interface
 
@@ -62,21 +107,33 @@ python -m mlx --help
 
 Package: `mlx.modes.object_detection`
 
-The default `ultralytics` provider trains models, converts PyTorch checkpoints
-to ONNX, and runs camera or video inference through normalized detection adapters.
-Model aliases include `yolo26`, `yolov26`, and `draxnet-yolo26`. Dataset input may
-be a local YOLO dataset root, a dataset YAML, or an Ultralytics alias such as `coco8`
-or `coco128`.
+The default `ultralytics` provider and alternative `libreyolo` provider both train
+models, convert PyTorch checkpoints to ONNX, and run camera or video inference through
+normalized detection adapters. Select LibreYOLO explicitly with `--provider libreyolo`.
+
+Ultralytics aliases include `yolo26`, `yolov26`, and `draxnet-yolo26`. First-class
+LibreYOLO training/listing aliases are `yolo9-t`, `yolo9-s`, `yolo9-m`, and `yolo9-c`.
+Dataset input may be a local YOLO dataset root, a dataset YAML, or an alias such as
+`coco8` or `coco128`.
 
 ```bash
 # Inspect available models.
 python -m mlx --mode object_detection --action ls-models
+
+# Inspect the first-class LibreYOLO models.
+python -m mlx --mode object_detection --provider libreyolo --action ls-models
 
 # Train an Ultralytics model.
 python -m mlx --mode object_detection --action train \
     --dataset coco8 \
     --model draxnet-yolo26 \
     --output ./runs/draxnet
+
+# Train with the LibreYOLO fork.
+python -m mlx --mode object_detection --provider libreyolo --action train \
+    --dataset coco8 \
+    --model yolo9-t \
+    --output ./runs/libreyolo
 
 # Convert the selected checkpoint to ONNX.
 python -m mlx --mode object_detection --action convert \
@@ -93,10 +150,13 @@ Training reuses compatible checkpoints found under `--output` when no explicit
 `--model-path` is supplied. By default, the best checkpoint is selected for
 downstream use; pass `--no-use-best` to prefer the last checkpoint.
 
+Provider checkpoints are not interchangeable. Always select the same provider that
+created the `.pt` or `.onnx` artifact.
+
 The intended deployment flow is:
 
 ```text
-Ultralytics training → .pt checkpoint → ONNX conversion → camera/video inference
+selected provider training → .pt checkpoint → ONNX conversion → camera/video inference
 ```
 
 See [the object-detection guide](./docs/object_detection/README.md) for dataset

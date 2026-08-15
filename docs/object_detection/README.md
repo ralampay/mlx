@@ -7,11 +7,32 @@ Package: `mlx.modes.object_detection`
 ## Overview
 
 This mode provides provider-backed object-detection workflows. Ultralytics is the
-default provider:
+default provider and LibreYOLO is selected explicitly:
 
 ```bash
 python -m mlx --mode object-detection --provider ultralytics
+python -m mlx --mode object-detection --provider libreyolo
 ```
+
+The repository-level `requirements.txt` installs both providers. Create and activate
+the virtual environment by following the main [installation guide](../../README.md#installation),
+then run:
+
+```bash
+python -m pip install -r requirements.txt
+```
+
+Package consumers installing MLX directly may instead install one provider or both:
+
+```bash
+python -m pip install ".[object-detection-ultralytics]"
+python -m pip install ".[object-detection-libreyolo]"
+python -m pip install ".[object-detection]"
+```
+
+The LibreYOLO extra follows the `release` branch of
+[`ralampay/libreyolo`](https://github.com/ralampay/libreyolo). It does not install
+LibreYOLO from PyPI or the upstream repository.
 
 The neutral source is split by responsibility:
 
@@ -20,6 +41,8 @@ The neutral source is split by responsibility:
 - `models.py`: normalized detection records and the detector protocol.
 - `providers.py`: lazy provider registry and provider protocol.
 - `streaming.py`: frame-source and frame-sink ports plus OpenCV adapters.
+- `artifacts.py`: provider-shared checkpoint discovery and ONNX destination rules.
+- `libreyolo/`: Ralampay LibreYOLO training, conversion, model resolution, and decoding.
 - `ultralytics/`: Ultralytics training, conversion, model resolution, and decoding.
 - `tracking/`: detector-neutral online tracking types, protocol, and per-frame command.
 
@@ -117,13 +140,15 @@ disk or another external store as it is produced.
 
 ## Dataset Format
 
-Training accepts any of these dataset sources:
+Both providers accept any of these dataset sources:
 
 - a local YOLO dataset root containing `data.yaml`
 - a direct dataset YAML path
-- a built-in Ultralytics dataset alias such as `coco8` or `coco128`
+- a provider-supplied dataset alias such as `coco8` or `coco128`
 
-For this repository, `coco8` is the best default example dataset. It is small, ships with an auto-download manifest in Ultralytics, and is fast enough for smoke-testing both `yolo26` and `draxnet-yolo26`.
+For this repository, `coco8` is the best default example dataset. It is small, is
+available through both providers, and is fast enough for smoke-testing `yolo26`,
+`draxnet-yolo26`, and `yolo9-t`.
 
 If you want a slightly less trivial quick-start dataset, use `coco128`. For real training, point `--dataset` to your own YOLO-format dataset root.
 
@@ -196,7 +221,7 @@ The important rule is simple: pass the directory that contains `data.yaml`, not 
 
 ## Model Selection
 
-`--model` accepts either a YAML path or one of the friendly aliases resolved by `mlx`:
+With `--provider ultralytics`, `--model` accepts a YAML path or one of these aliases:
 
 - `yolo26`
 - `yolov26`
@@ -204,10 +229,23 @@ The important rule is simple: pass the directory that contains `data.yaml`, not 
 
 `draxnet-yolo26` maps to the custom DraxNet backbone YAML added in the `ralampay/ultralytics` fork.
 
+With `--provider libreyolo`, first-class training and listing use these aliases:
+
+- `yolo9-t`
+- `yolo9-s`
+- `yolo9-m`
+- `yolo9-c`
+
+LibreYOLO inference and conversion load the local artifact supplied through
+`--model-path`. Other axis-aligned detection checkpoints understood by the fork may
+work through this passthrough path, but only the four YOLOv9 variants above are part
+of MLX's tested training and listing surface.
+
 List the canonical project models and their total parameter counts:
 
 ```bash
 python -m mlx --mode object-detection --action ls-models
+python -m mlx --mode object-detection --provider libreyolo --action ls-models
 ```
 
 This action constructs `yolo26` and `draxnet-yolo26` from their architecture YAML files without loading pretrained weights.
@@ -223,6 +261,10 @@ The typical object-detection deployment path in this repository is:
 1. Train with Ultralytics using a `.yaml` model definition and produce a `.pt` checkpoint.
 2. Convert that trained `.pt` checkpoint to `.onnx`.
 3. Run camera or video inference from the exported `.onnx` model through ONNX Runtime.
+
+The same action sequence works with LibreYOLO by adding `--provider libreyolo` to
+every command and using `--model yolo9-t` for training. Provider artifacts are not
+interchangeable, so the provider flag must remain consistent across the workflow.
 
 Concrete example:
 
@@ -295,6 +337,28 @@ Important notes for this workflow:
 - if you want the ONNX export beside the checkpoint instead of under `./exports`, omit `--output`.
 
 ## Training
+
+### LibreYOLO YOLOv9
+
+```bash
+python -m mlx \
+    --mode object-detection \
+    --provider libreyolo \
+    --action train \
+    --dataset coco8 \
+    --model yolo9-t \
+    --epochs 10 \
+    --batch-size 8 \
+    --device cuda:0 \
+    --output ./runs/libreyolo-yolo9
+```
+
+For LibreYOLO, `--model-path` is an optional local warm-start/resume checkpoint and
+`--pretrained` requests the matching published initialization from the fork.
+`--loss-clip` is not supported for LibreYOLO YOLOv9 and fails with a user-facing
+message instead of being ignored.
+
+### Ultralytics
 
 Baseline YOLO26 example:
 
@@ -419,10 +483,27 @@ Important arguments:
 - `--height`, `--width`: optional export image size. If equal, MLX passes a square `imgsz`; otherwise it passes the `(height, width)` tuple to Ultralytics.
 - `--device`: export backend such as `cpu` or `cuda:0`.
 
+LibreYOLO conversion uses the same flags:
+
+```bash
+python -m mlx \
+    --mode object-detection \
+    --provider libreyolo \
+    --action convert \
+    --model-path ./runs/libreyolo-yolo9/mlx-libreyolo/weights/best.pt \
+    --output ./exports/libreyolo
+```
+
 ## Dependencies
 
-- `ultralytics` from the `ralampay/ultralytics` fork, because `draxnet-yolo26` is defined there
-- `onnxruntime` for `.onnx` inference
-- `opencv-python` for webcam or video inference
+- `object-detection-ultralytics` installs `ultralytics` from the
+  `ralampay/ultralytics` fork plus ONNX Runtime.
+- `object-detection-libreyolo` installs `libreyolo[onnx]` from the `release` branch
+  of `ralampay/libreyolo`.
+- `object-detection` installs both providers.
+- `opencv-python` supplies webcam/video input and display for either provider.
+
+The LibreYOLO fork requires Python 3.10 or newer, which is also the minimum supported
+Python version for MLX.
 
 Run `python -m mlx --help` for the full CLI reference.

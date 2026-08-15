@@ -5,21 +5,33 @@ description = "MLX: A command-line machine learning workflow runner."
 authors = [{ name = "Your Name", email = "raphael.alampay@gmail.com" }]
 readme = "README.md"
 license = { text = "MIT" }
-requires-python = ">=3.9"
+requires-python = ">=3.10"
 dependencies = [
     "matplotlib",
     "numpy",
     "pandas",
     "llama-cpp-python",
-    "onnxruntime",
     "opencv-python",
     "grad-cam",
     "rich>=13.7.0",
     "scikit-learn",
     "torch",
     "torchvision",
-    "tqdm",
+    "tqdm"
+]
+
+[project.optional-dependencies]
+object-detection-ultralytics = [
+    "onnxruntime",
     "ultralytics @ git+https://github.com/ralampay/ultralytics"
+]
+object-detection-libreyolo = [
+    "libreyolo[onnx] @ git+https://github.com/ralampay/libreyolo.git@release"
+]
+object-detection = [
+    "onnxruntime",
+    "ultralytics @ git+https://github.com/ralampay/ultralytics",
+    "libreyolo[onnx] @ git+https://github.com/ralampay/libreyolo.git@release"
 ]
 
 [project.scripts]
@@ -28,3 +40,6 @@ mlx = "mlx.cli:main"
 [build-system]
 requires = ["setuptools", "wheel"]
 build-backend = "setuptools.build_meta"
+
+[tool.setuptools.packages.find]
+include = ["mlx*"]

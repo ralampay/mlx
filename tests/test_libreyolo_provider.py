@@ -23,10 +23,19 @@ from mlx.modes.object_detection.requests import ObjectDetectionRequest
 
 
 def _install_fake_libreyolo(monkeypatch, *, LibreYOLO, LibreYOLO9=None) -> None:
+    class FakeDraxConfig:
+        def __init__(self, **kwargs):
+            self.__dict__.update(kwargs)
+
     module = SimpleNamespace(LibreYOLO=LibreYOLO)
     if LibreYOLO9 is not None:
         module.LibreYOLO9 = LibreYOLO9
     monkeypatch.setitem(sys.modules, "libreyolo", module)
+    monkeypatch.setitem(
+        sys.modules,
+        "libreyolo.models.yolo9",
+        SimpleNamespace(DraxConfig=FakeDraxConfig),
+    )
 
 
 def test_libreyolo_provider_is_registered_lazily() -> None:
@@ -302,7 +311,7 @@ def test_libreyolo_conversion_moves_export_to_requested_target(
     assert export_calls == [{"format": "onnx", "imgsz": 640, "device": "cpu"}]
 
 
-def test_libreyolo_listing_builds_four_yolo9_sizes(monkeypatch) -> None:
+def test_libreyolo_listing_builds_canonical_yolo9_configurations(monkeypatch) -> None:
     calls = []
 
     class FakeYOLO9:
@@ -323,8 +332,59 @@ def test_libreyolo_listing_builds_four_yolo9_sizes(monkeypatch) -> None:
         ModelParameterSummary("yolo9-s", 8),
         ModelParameterSummary("yolo9-m", 8),
         ModelParameterSummary("yolo9-c", 8),
+        ModelParameterSummary("yolo9-s-drax-b5", 8),
     ]
-    assert [call["size"] for call in calls] == ["t", "s", "m", "c"]
+    assert [call["size"] for call in calls] == ["t", "s", "m", "c", "s"]
+    assert all("drax_config" not in call for call in calls[:-1])
+    drax_config = calls[-1]["drax_config"]
+    assert drax_config.enabled is True
+    assert drax_config.stages == ("b5",)
+    assert drax_config.use_attention is True
+    assert drax_config.efficient is True
+    assert drax_config.fusion_mode == "average"
+    assert drax_config.drop_path == 0.0
+
+
+def test_libreyolo_training_builds_documented_drax_configuration(
+    monkeypatch, tmp_path: Path
+) -> None:
+    dataset = tmp_path / "dataset"
+    dataset.mkdir()
+    (dataset / "data.yaml").write_text("names: {0: thing}\n", encoding="utf-8")
+    constructor_calls = []
+
+    class FakeYOLO9:
+        def __init__(self, **kwargs):
+            constructor_calls.append(kwargs)
+
+        def train(self, **kwargs):
+            return {}
+
+    _install_fake_libreyolo(
+        monkeypatch,
+        LibreYOLO=lambda *args, **kwargs: pytest.fail("checkpoint loader was not expected"),
+        LibreYOLO9=FakeYOLO9,
+    )
+
+    TrainLibreYOLOObjectDetection(
+        {
+            "model": "yolo9-s-drax-b5",
+            "dataset_path": str(dataset),
+            "output_path": str(tmp_path / "runs"),
+            "device": "cpu",
+        }
+    ).execute()
+
+    assert len(constructor_calls) == 1
+    call = constructor_calls[0]
+    assert call["size"] == "s"
+    drax_config = call["drax_config"]
+    assert drax_config.enabled is True
+    assert drax_config.stages == ("b5",)
+    assert drax_config.use_attention is True
+    assert drax_config.efficient is True
+    assert drax_config.fusion_mode == "average"
+    assert drax_config.drop_path == 0.0
 
 
 def test_installed_libreyolo_can_construct_scratch_yolo9_t() -> None:

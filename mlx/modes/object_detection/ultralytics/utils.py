@@ -27,8 +27,14 @@ MODEL_ALIASES = {
     "yolo26.yaml": "yolo26.yaml",
     "yolov26": "yolo26.yaml",
     "yolov26.yaml": "yolo26.yaml",
-    "draxnet-yolo26": "draxnet-yolo26.yaml",
-    "draxnet-yolo26.yaml": "draxnet-yolo26.yaml",
+    "draxnet-yolo26": "draxnet-ave-yolo26.yaml",
+    "draxnet-yolo26.yaml": "draxnet-ave-yolo26.yaml",
+    "draxnet-ave-yolo26": "draxnet-ave-yolo26.yaml",
+    "draxnet-ave-yolo26.yaml": "draxnet-ave-yolo26.yaml",
+    "draxnet-ave-yolo26.yml": "draxnet-ave-yolo26.yaml",
+    "draxnet-sknet-yolo26": "draxnet-sknet-yolo26.yaml",
+    "draxnet-sknet-yolo26.yaml": "draxnet-sknet-yolo26.yaml",
+    "draxnet-sknet-yolo26.yml": "draxnet-sknet-yolo26.yaml",
 }
 
 DATASET_ALIASES = {
@@ -162,26 +168,12 @@ def _build_missing_model_yaml_message(model_cfg: Any, resolved_cfg: Path) -> str
     normalized = MODEL_ALIASES.get(requested.lower(), requested)
     models_root = _ultralytics_models_root()
 
-    if normalized == "draxnet-yolo26.yaml":
-        yolo26_yaml = _resolve_yaml_in_package(
-            "yolo26.yaml",
-            package_subdir="cfg/models",
-            aliases=MODEL_ALIASES,
-        )
-        if yolo26_yaml is not None:
-            return (
-                "Model YAML not found: draxnet-yolo26. "
-                f"The alias resolves to `{normalized}`, but that file is not present under "
-                f"`{models_root}` in the installed `ultralytics` package. "
-                "Your current environment has `yolo26.yaml`, but not the custom DraxNet variant. "
-                "Reinstall the pinned `ultralytics` dependency for this repo, use a direct path to "
-                "`draxnet-yolo26.yaml`, or switch to `--model yolo26`."
-            )
-
     if requested.lower() in MODEL_ALIASES:
         return (
             f"Model YAML not found: {requested}. "
-            f"The alias resolves to `{normalized}`, but that file is not present under `{models_root}`."
+            f"The alias resolves to `{normalized}`, but that file is not present under `{models_root}` "
+            "in the installed `ultralytics` package. Install or update the Ultralytics dependency "
+            "from the `ralampay/ultralytics` fork and verify that its DraxNet model YAMLs are packaged."
         )
 
     return f"Model YAML not found: {resolved_cfg}"

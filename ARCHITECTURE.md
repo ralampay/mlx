@@ -105,10 +105,19 @@ need. `object-detection-ultralytics` installs the Ralampay Ultralytics fork,
 ONNX dependencies, and `object-detection` installs both. Provider packages must stay lazy so these
 extras remain independent.
 
-LibreYOLO training and listing are first-class for `yolo9-t`, `yolo9-s`, `yolo9-m`, and
-`yolo9-c`. Its inference and conversion adapters may accept other axis-aligned detection
-checkpoints supported by the fork, but non-detection tasks and cross-provider checkpoint loading
-are outside the neutral provider contract.
+The Ultralytics provider lists `yolo26`, `draxnet-ave-yolo26`, and
+`draxnet-sknet-yolo26` as canonical architectures. The compatibility alias
+`draxnet-yolo26` resolves to the fixed-average DraxNet variant. Built-in model aliases resolve to
+YAML files shipped in the installed provider package so listing and training use the same
+definitions; explicit filesystem paths remain supported for custom architectures.
+
+LibreYOLO training and listing are first-class for `yolo9-t`, `yolo9-s`, `yolo9-m`, `yolo9-c`,
+and `yolo9-s-drax-b5`. A shared model specification keeps listing and scratch training aligned;
+the Drax alias selects the release branch's first supported experiment configuration: YOLOv9-S,
+B5 only, attention and efficient mode enabled, average fusion, and zero drop path. Inference and
+conversion adapters may accept other axis-aligned detection checkpoints supported by the fork,
+but non-detection tasks and cross-provider checkpoint loading are outside the neutral provider
+contract.
 
 ## Presentation, Errors, and Compatibility
 

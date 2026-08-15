@@ -7,13 +7,24 @@ from typing import Any, Optional, Union
 from mlx.core.exceptions import MLXUserError
 
 
-MODEL_SIZES = {
-    "yolo9-t": "t",
-    "yolo9-s": "s",
-    "yolo9-m": "m",
-    "yolo9-c": "c",
+@dataclass(frozen=True)
+class LibreYOLOModelSpec:
+    size: str
+    drax_stages: tuple[str, ...] = ()
+
+    @property
+    def uses_drax(self) -> bool:
+        return bool(self.drax_stages)
+
+
+MODEL_SPECS = {
+    "yolo9-t": LibreYOLOModelSpec(size="t"),
+    "yolo9-s": LibreYOLOModelSpec(size="s"),
+    "yolo9-m": LibreYOLOModelSpec(size="m"),
+    "yolo9-c": LibreYOLOModelSpec(size="c"),
+    "yolo9-s-drax-b5": LibreYOLOModelSpec(size="s", drax_stages=("b5",)),
 }
-CANONICAL_MODEL_NAMES = tuple(MODEL_SIZES)
+CANONICAL_MODEL_NAMES = tuple(MODEL_SPECS)
 DATASET_ALIASES = {
     "coco8": "coco8.yaml",
     "coco8.yaml": "coco8.yaml",
@@ -36,10 +47,10 @@ def resolve_imgsz(config: dict[str, Any]) -> Union[int, tuple[int, int]]:
     return height if height == width else (height, width)
 
 
-def resolve_model_size(model_name: Optional[str]) -> str:
+def resolve_model_spec(model_name: Optional[str]) -> LibreYOLOModelSpec:
     normalized = (model_name or "").strip().lower()
-    size = MODEL_SIZES.get(normalized)
-    if size is None:
+    model_spec = MODEL_SPECS.get(normalized)
+    if model_spec is None:
         available = ", ".join(CANONICAL_MODEL_NAMES)
         if not model_name:
             raise MLXUserError(
@@ -50,7 +61,33 @@ def resolve_model_size(model_name: Optional[str]) -> str:
             f"Unsupported first-class LibreYOLO training model '{model_name}'. "
             f"Available models: {available}."
         )
-    return size
+    return model_spec
+
+
+def resolve_model_size(model_name: Optional[str]) -> str:
+    return resolve_model_spec(model_name).size
+
+
+def build_drax_config(model_spec: LibreYOLOModelSpec) -> Any:
+    if not model_spec.uses_drax:
+        return None
+
+    try:
+        from libreyolo.models.yolo9 import DraxConfig
+    except ImportError as exc:
+        raise MLXUserError(
+            "The installed LibreYOLO fork does not expose the required DraxConfig API. "
+            "Run './update.sh' from the MLX repository and try again."
+        ) from exc
+
+    return DraxConfig(
+        enabled=True,
+        stages=model_spec.drax_stages,
+        use_attention=True,
+        efficient=True,
+        fusion_mode="average",
+        drop_path=0.0,
+    )
 
 
 def resolve_model_path(model_path: Optional[str], *, required: bool) -> Optional[Path]:

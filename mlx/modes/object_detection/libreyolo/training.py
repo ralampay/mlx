@@ -11,11 +11,12 @@ from mlx.modes.object_detection.artifacts import (
     find_latest_checkpoint,
 )
 from mlx.modes.object_detection.libreyolo.utils import (
+    build_drax_config,
     dependency_error,
     resolve_dataset_source,
     resolve_imgsz,
     resolve_model_path,
-    resolve_model_size,
+    resolve_model_spec,
 )
 
 
@@ -35,7 +36,7 @@ class TrainLibreYOLOObjectDetection:
         except ImportError as exc:
             raise dependency_error("training an object-detection model") from exc
 
-        size = resolve_model_size(self.config.get("model"))
+        model_spec = resolve_model_spec(self.config.get("model"))
         explicit_weights = resolve_model_path(self.config.get("model_path"), required=False)
         if explicit_weights is not None and explicit_weights.suffix.lower() != ".pt":
             raise MLXUserError(
@@ -71,12 +72,15 @@ class TrainLibreYOLOObjectDetection:
                     task="detect",
                 )
             else:
-                model = LibreYOLO9(
-                    model_path=None,
-                    size=size,
-                    device=self.config.get("device", "cpu"),
-                    task="detect",
-                )
+                model_kwargs = {
+                    "model_path": None,
+                    "size": model_spec.size,
+                    "device": self.config.get("device", "cpu"),
+                    "task": "detect",
+                }
+                if model_spec.uses_drax:
+                    model_kwargs["drax_config"] = build_drax_config(model_spec)
+                model = LibreYOLO9(**model_kwargs)
 
             train_kwargs = self._build_train_kwargs(
                 data=dataset.data,

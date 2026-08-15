@@ -14,6 +14,7 @@ from mlx.modes.image_classification import list_models as classification_listing
 from mlx.modes.image_classification import runner as classification_runner
 from mlx.modes.object_detection.ultralytics import list_models as detection_listing
 from mlx.modes.object_detection.ultralytics import runner as detection_runner
+from mlx.modes.object_detection.ultralytics import utils as detection_utils
 from mlx.modes.segmentation import list_models as segmentation_listing
 from mlx.modes.segmentation import runner as segmentation_runner
 
@@ -134,11 +135,13 @@ def test_detection_listing_uses_canonical_aliases_and_underlying_model(monkeypat
     summaries = detection_listing.ListObjectDetectionModels().execute()
 
     assert summaries == [
-        ModelParameterSummary("draxnet-yolo26", 8),
+        ModelParameterSummary("draxnet-ave-yolo26", 8),
+        ModelParameterSummary("draxnet-sknet-yolo26", 8),
         ModelParameterSummary("yolo26", 8),
     ]
     assert [call[0]["model"] for call in resolved] == [
-        "draxnet-yolo26",
+        "draxnet-ave-yolo26",
+        "draxnet-sknet-yolo26",
         "yolo26",
     ]
     assert all(call[1:] == (True, False) for call in resolved)
@@ -147,12 +150,37 @@ def test_detection_listing_uses_canonical_aliases_and_underlying_model(monkeypat
 
 def test_detection_listing_propagates_missing_yaml_error(monkeypatch) -> None:
     def missing_yaml(*args, **kwargs):
-        raise MLXUserError("Model YAML not found: draxnet-yolo26")
+        raise MLXUserError("Model YAML not found: draxnet-ave-yolo26")
 
     monkeypatch.setattr(detection_listing, "resolve_model_paths", missing_yaml)
 
-    with pytest.raises(MLXUserError, match="draxnet-yolo26"):
+    with pytest.raises(MLXUserError, match="draxnet-ave-yolo26"):
         detection_listing.ListObjectDetectionModels().execute()
+
+
+@pytest.mark.parametrize(
+    ("alias", "filename"),
+    [
+        ("draxnet-yolo26", "draxnet-ave-yolo26.yaml"),
+        ("draxnet-yolo26.yaml", "draxnet-ave-yolo26.yaml"),
+        ("draxnet-ave-yolo26", "draxnet-ave-yolo26.yaml"),
+        ("draxnet-ave-yolo26.yml", "draxnet-ave-yolo26.yaml"),
+        ("draxnet-sknet-yolo26", "draxnet-sknet-yolo26.yaml"),
+        ("draxnet-sknet-yolo26.yml", "draxnet-sknet-yolo26.yaml"),
+    ],
+)
+def test_detection_draxnet_aliases_resolve_packaged_yaml(
+    monkeypatch,
+    tmp_path,
+    alias,
+    filename,
+) -> None:
+    config_path = tmp_path / "cfg" / "models" / "ext" / filename
+    config_path.parent.mkdir(parents=True, exist_ok=True)
+    config_path.touch()
+    monkeypatch.setattr(detection_utils, "_ultralytics_package_root", lambda: tmp_path)
+
+    assert detection_utils.resolve_weights_source(alias) == config_path.resolve()
 
 
 @pytest.mark.parametrize(

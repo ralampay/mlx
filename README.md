@@ -111,8 +111,11 @@ The default `ultralytics` provider and alternative `libreyolo` provider both tra
 models, convert PyTorch checkpoints to ONNX, and run camera or video inference through
 normalized detection adapters. Select LibreYOLO explicitly with `--provider libreyolo`.
 
-Ultralytics aliases include `yolo26`, `yolov26`, and `draxnet-yolo26`. First-class
-LibreYOLO training/listing aliases are `yolo9-t`, `yolo9-s`, `yolo9-m`, and `yolo9-c`.
+Ultralytics aliases include `yolo26`, `yolov26`, `draxnet-ave-yolo26`, and
+`draxnet-sknet-yolo26`. The legacy `draxnet-yolo26` alias selects the fixed-average
+variant. First-class LibreYOLO training/listing aliases are `yolo9-t`, `yolo9-s`,
+`yolo9-m`, `yolo9-c`, and `yolo9-s-drax-b5`. The Drax alias matches LibreYOLO's
+documented YOLOv9-S experiment with Drax enabled at B5.
 Dataset input may be a local YOLO dataset root, a dataset YAML, or an alias such as
 `coco8` or `coco128`.
 

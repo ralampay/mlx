@@ -148,7 +148,7 @@ Both providers accept any of these dataset sources:
 
 For this repository, `coco8` is the best default example dataset. It is small, is
 available through both providers, and is fast enough for smoke-testing `yolo26`,
-`draxnet-yolo26`, and `yolo9-t`.
+both DraxNet YOLO26 variants, and `yolo9-t`.
 
 If you want a slightly less trivial quick-start dataset, use `coco128`. For real training, point `--dataset` to your own YOLO-format dataset root.
 
@@ -225,9 +225,13 @@ With `--provider ultralytics`, `--model` accepts a YAML path or one of these ali
 
 - `yolo26`
 - `yolov26`
+- `draxnet-ave-yolo26`
+- `draxnet-sknet-yolo26`
 - `draxnet-yolo26`
 
-`draxnet-yolo26` maps to the custom DraxNet backbone YAML added in the `ralampay/ultralytics` fork.
+The two explicit DraxNet aliases select fixed-average and SKNet-style adaptive fusion,
+respectively. The legacy `draxnet-yolo26` alias remains supported and maps to
+`draxnet-ave-yolo26`.
 
 With `--provider libreyolo`, first-class training and listing use these aliases:
 
@@ -235,11 +239,14 @@ With `--provider libreyolo`, first-class training and listing use these aliases:
 - `yolo9-s`
 - `yolo9-m`
 - `yolo9-c`
+- `yolo9-s-drax-b5`
 
 LibreYOLO inference and conversion load the local artifact supplied through
 `--model-path`. Other axis-aligned detection checkpoints understood by the fork may
-work through this passthrough path, but only the four YOLOv9 variants above are part
-of MLX's tested training and listing surface.
+work through this passthrough path, but only the configurations above are part of
+MLX's tested training and listing surface. `yolo9-s-drax-b5` matches LibreYOLO's first
+supported Drax experiment: size S, Drax at B5, attention and efficient mode enabled,
+average fusion, and zero drop path.
 
 List the canonical project models and their total parameter counts:
 
@@ -248,11 +255,12 @@ python -m mlx --mode object-detection --action ls-models
 python -m mlx --mode object-detection --provider libreyolo --action ls-models
 ```
 
-This action constructs `yolo26` and `draxnet-yolo26` from their architecture YAML files without loading pretrained weights.
+This action constructs `yolo26`, `draxnet-ave-yolo26`, and `draxnet-sknet-yolo26`
+from their architecture YAML files without loading pretrained weights.
 
-If you see `Model YAML not found: draxnet-yolo26`, your installed `ultralytics` package does not
-currently expose `draxnet-yolo26.yaml`. In that case, reinstall the pinned dependency for this
-repo, pass a direct filesystem path to that YAML, or switch to `--model yolo26`.
+If a DraxNet model YAML is missing, update the Ultralytics dependency from the
+`ralampay/ultralytics` fork. Installed distributions of the fork include both DraxNet `.yaml`
+files under `ultralytics/cfg/models/ext/`.
 
 ## End-to-End Workflow
 
@@ -358,6 +366,10 @@ For LibreYOLO, `--model-path` is an optional local warm-start/resume checkpoint 
 `--loss-clip` is not supported for LibreYOLO YOLOv9 and fails with a user-facing
 message instead of being ignored.
 
+Use `--model yolo9-s-drax-b5` to train the Drax-enabled configuration documented by
+the fork. MLX passes the same Drax configuration used by `ls-models`, so the listed
+parameter count represents the architecture selected for scratch training.
+
 ### Ultralytics
 
 Baseline YOLO26 example:
@@ -391,7 +403,8 @@ python -m mlx \
 Important arguments:
 
 - `--dataset` / `--dataset-path`: required dataset source. Use `coco8` for the documented smoke-test path.
-- `--model`: required architecture YAML or alias such as `yolo26` or `draxnet-yolo26`.
+- `--model`: required architecture YAML or alias such as `yolo26`, `draxnet-ave-yolo26`,
+  or `draxnet-sknet-yolo26`.
 - `--model-path`: optional checkpoint for warm-start training.
 - `--epochs`, `--batch-size`, `--device`: core training controls.
 - `--use-best` / `--no-use-best`: select `weights/best.pt` after training by default. Use `--no-use-best` to prefer `weights/last.pt` instead.

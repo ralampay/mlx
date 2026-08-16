@@ -130,7 +130,7 @@ def _result_to_detection_result(result) -> DetectionResult:
     for (x1, y1, x2, y2), score, class_id in zip(xyxy, confs, classes):
         detections.append(
             Detection(
-                xyxy=(int(x1), int(y1), int(x2), int(y2)),
+                xyxy=(float(x1), float(y1), float(x2), float(y2)),
                 confidence=float(score),
                 class_id=int(class_id),
                 label=names.get(int(class_id), str(int(class_id))),

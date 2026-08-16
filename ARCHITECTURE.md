@@ -52,8 +52,8 @@ mlx/
     │   ├── providers.py          lazy provider registry and provider protocol
     │   ├── commands.py           neutral train, create, convert, list, and stream commands
     │   ├── artifacts.py          shared checkpoint discovery and export-path rules
-    │   ├── streaming.py          frame-source/frame-sink ports and OpenCV adapters
-    │   ├── tracking/             provider-neutral tracking contracts and algorithms
+    │   ├── streaming.py          frame ports, optional metadata capability, OpenCV adapters
+    │   ├── tracking/             tracking, MOT evaluation, replay export, registry, algorithms
     │   ├── libreyolo/            LibreYOLO implementation using the Ralampay fork
     │   └── ultralytics/          Ultralytics implementation and compatibility exports
     └── nlp/                      GGUF-backed CSV embedding workflows
@@ -66,7 +66,7 @@ The primary workflow commands are:
 | Image classification | `TrainImageClassificationModel`, `SmokeTestImageClassificationModel`, `BenchmarkImageClassification`, `InferImageClassification`, `GenerateImageClassificationCams`, `BuildImageClassificationDataset`, `ListImageClassificationModels` |
 | Segmentation | `TrainSegmentationModel`, `SmokeTestSegmentationModel`, `BenchmarkSegmentation`, `InferSegmentationImage`, `RunSegmentationStreamInference`, `BuildSegmentationDataset`, `ListSegmentationModels` |
 | Object detection | `TrainObjectDetectionModel`, `CreateObjectDetector`, `ConvertObjectDetectionModel`, `ListObjectDetectionModels`, `RunObjectDetectionStream` |
-| Tracking | `RunObjectDetectionTrackingCommand`, `RunTrackByDetectionCommand` |
+| Tracking | `CreateTrackingAlgorithm`, `RunObjectDetectionTrackingCommand`, `RunTrackByDetectionCommand`, `RunTrackingVideo`, `BenchmarkMOTTracking`, `ExportTrackingReplay` |
 | NLP | `EmbedCsvCommand` (`EmbedCsv` is the legacy path-returning API) |
 
 Large commands should keep `execute()` readable by delegating cohesive steps to private methods
@@ -81,7 +81,8 @@ the alternative. The CLI routes to
 the selected action executes. Importing the CLI or another mode therefore does not require either
 provider to be installed.
 
-All providers normalize predictions to `DetectionResult` containing `Detection` values. Tracking,
+All providers normalize predictions to `DetectionResult` containing `Detection` values with
+floating-point `xyxy` boxes. Tracking,
 annotation, streaming, and downstream callers depend only on that contract. The provider protocol
 supports four capabilities:
 
@@ -89,6 +90,32 @@ supports four capabilities:
 2. create a `DetectionAdapter` from `ObjectDetectionRequest`;
 3. export from `ConvertObjectDetectionRequest`;
 4. list models from `ListObjectDetectionModelsRequest`.
+
+The `track` CLI mode routes to the nested tracking runner because tracking-by-detection remains
+owned by object detection. `RunTrackingVideo` composes the selected provider's `DetectionAdapter`,
+an OpenCV frame source, a registry-selected `TrackingAlgorithm`, streaming MOT output, optional
+MOT evaluation, portable replay export, and an optional injected frame sink/renderer pair. Trackers receive only normalized
+`TrackingDetection` values and may be selected by
+built-in alias or an external `package.module:ClassName`; constructor keyword arguments come from
+an optional JSON configuration. The built-in registry is immutable, and applications extend it by
+creating and injecting a new `TrackerRegistry` rather than changing process-wide state. SORT and
+ByteTrack are the built-in reference implementations.
+
+Tracking output is a headerless 10-column MOTChallenge file with 1-based frame and track IDs.
+Only confirmed tracks observed in the current frame are persisted; lost and tentative state remain
+algorithm details. Benchmarking ignores unavailable world coordinates and reports MOTA, mean
+matched IoU, IDF1, precision, recall, false positives, misses, and identity switches. Session
+memory is bounded by active/lost tracks and current-frame detections; video frames and complete
+trajectory histories are not retained.
+
+`ExportTrackingReplay` is downstream of MOT serialization and does not depend on a detector,
+tracker, OpenCV, or source video. It writes a versioned `replay.json` projection plus a
+self-contained `replay.html` browser player. The JSON preserves canvas/FPS metadata, run settings,
+prediction boxes, optional ground-truth boxes, and optional metrics, but omits provider objects and
+absolute video paths. `OpenCVFrameSource` exposes FPS and geometry through the optional
+`MetadataFrameSource` capability; commands still accept minimal `FrameSource` implementations,
+and decoded frame shapes remain authoritative for replay canvas dimensions. This interface
+segregation keeps fake, camera, and future non-OpenCV sources portable.
 
 To add another provider:
 
@@ -121,9 +148,16 @@ contract.
 
 ## Presentation, Errors, and Compatibility
 
-Commands expose structured values and provider-neutral protocols. Streaming is fully headless:
+Commands expose structured values and provider-neutral protocols. Detection streaming and
+tracking video execution support headless use through injected presentation boundaries:
 `RunObjectDetectionStream` accepts injected detector, frame source, frame sink, renderer, and
-reporter objects. The CLI supplies OpenCV and Rich adapters. Other modes keep their output
+reporter objects. `RunTrackingVideo` accepts an optional paired frame sink and tracking renderer;
+without them it writes tracking artifacts headlessly. The tracking CLI injects an OpenCV sink and
+a mode-owned renderer by default, while `--no-display` leaves both absent. The renderer consumes
+only `TrackingFrameResult` values and draws current observations with stable track-ID colors,
+boxes, identity/class/confidence/status labels, and a frame summary. User-stopped playback
+finalizes partial MOT output but skips whole-video benchmarking. The CLI supplies OpenCV and Rich
+adapters. Other modes keep their output
 formatters in `presentation.py`; ongoing changes must move new terminal/window behavior toward
 the same injected-adapter boundary rather than adding UI work to model, data, or metric modules.
 

@@ -64,9 +64,9 @@ Leave the environment when finished with:
 deactivate
 ```
 
-The development dependency set includes NumPy, pandas, PyTorch, torchvision, OpenCV,
-Rich, scikit-learn, ONNX Runtime, llama-cpp-python, the Ralampay Ultralytics fork,
-and the `release` branch of the Ralampay LibreYOLO fork.
+The development dependency set includes NumPy, pandas, SciPy, motmetrics, PyTorch,
+torchvision, OpenCV, Rich, scikit-learn, ONNX Runtime, llama-cpp-python, the Ralampay
+Ultralytics fork, and the `release` branch of the Ralampay LibreYOLO fork.
 
 Package consumers who do not use `requirements.txt` can install the project with only
 the object-detection provider they need:
@@ -90,6 +90,7 @@ Available CLI modes are:
 | Mode | Actions |
 | --- | --- |
 | `object_detection` | `train`, `infer-camera`, `infer-video`, `convert`, `ls-models` |
+| `track` | `run`, `ls-trackers` |
 | `image_classification` | `train`, `test`, `benchmark`, `infer-image`, `cam`, `build-dataset`, `ls-models` |
 | `segmentation` | `train`, `test`, `benchmark`, `infer-image`, `infer-camera`, `infer-video`, `build-dataset`, `ls-models` |
 | `nlp` | `embed` |
@@ -169,26 +170,18 @@ layout, model resolution, training artifacts, inference, and conversion details.
 
 Package: `mlx.modes.object_detection.tracking`
 
-Tracking is a Python API layered on normalized object detections rather than a
-separate CLI mode. The integrated command accepts the detector produced by the
-current object-detection adapter factory:
+Tracking is exposed as a separate CLI mode while remaining layered on normalized
+object detections. Select the detection provider and either the built-in `sort` or
+`bytetrack` algorithm:
 
-```python
-from mlx.modes.object_detection.tracking.algorithms import DetectionAsTrackAlgorithm
-from mlx.modes.object_detection import RunObjectDetectionTrackingCommand
-
-tracking = RunObjectDetectionTrackingCommand(
-    detection_model=detector,
-    algorithm=DetectionAsTrackAlgorithm(),
-)
-
-while True:
-    ok, frame = capture.read()
-    if not ok:
-        break
-    tracking_result = tracking.execute(frame=frame)
-
-tracking.reset()
+```bash
+python -m mlx --mode track --tracker bytetrack \
+    --provider ultralytics \
+    --model yolo26 \
+    --model-path ./runs/yolo/weights/best.pt \
+    --file-path ./video.mp4 \
+    --ground-truth ./gt.txt \
+    --output ./tracking-run
 ```
 
 Detector-specific inference and generic tracking remain separate:
@@ -198,9 +191,13 @@ frame source → detection adapter → normalized detections
              → tracking algorithm → immutable track results
 ```
 
-The included algorithm is an architectural placeholder, not a temporal association
-tracker. See [TRACKING.md](./TRACKING.md) for the complete integration flow, public
-types, memory guarantees, lower-level API, and extension protocol.
+The run writes MOTChallenge-compatible `tracks.txt`, portable `replay.json`, and a
+self-contained `replay.html` 2D player that does not require the source video. When
+ground truth is provided, it also writes standard MOT metrics in `metrics.json` and
+includes GT boxes in the replay. External algorithms can be selected with
+`--tracker package.module:ClassName`. See [TRACKING.md](./TRACKING.md) for provider
+examples, output details, configuration, lower-level APIs, and a copyable custom
+tracker.
 
 ## Image classification
 

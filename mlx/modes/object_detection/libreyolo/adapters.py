@@ -123,7 +123,7 @@ def result_to_detection_result(result: Any) -> DetectionResult:
         class_id = int(raw_class_id)
         detections.append(
             Detection(
-                xyxy=tuple(int(value) for value in coordinates),
+                xyxy=tuple(float(value) for value in coordinates),
                 confidence=float(score),
                 class_id=class_id,
                 label=names.get(class_id, str(class_id)),

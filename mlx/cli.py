@@ -40,6 +40,8 @@ MODE_REGISTRY: Dict[str, str] = {
     "image_classification": "mlx.modes.image_classification.runner:run_image_classification",
     "object-detection": "mlx.modes.object_detection.runner:run_object_detection",
     "object_detection": "mlx.modes.object_detection.runner:run_object_detection",
+    "track": "mlx.modes.object_detection.tracking.runner:run_tracking",
+    "tracking": "mlx.modes.object_detection.tracking.runner:run_tracking",
     "segmentation": "mlx.modes.segmentation.runner:run_segmentation",
     "nlp": "mlx.modes.nlp.runner:run_nlp",
 }
@@ -83,6 +85,27 @@ def build_parser() -> RichArgumentParser:
     parser.add_argument("--file-path", default=None, dest="file_path")
     parser.add_argument("--input-img", default="/tmp/image.jpg", dest="input_img")
     parser.add_argument("--confidence", type=float, default=0.25)
+    parser.add_argument("--tracker", default="bytetrack")
+    parser.add_argument("--tracker-config", default=None, dest="tracker_config")
+    parser.add_argument(
+        "--ground-truth",
+        "--gt-file",
+        default=None,
+        dest="ground_truth",
+    )
+    parser.add_argument(
+        "--track-class-id",
+        action="append",
+        type=int,
+        default=None,
+        dest="track_class_ids",
+    )
+    parser.add_argument(
+        "--benchmark-iou",
+        type=float,
+        default=0.5,
+        dest="benchmark_iou",
+    )
     parser.add_argument("--camera-index", type=int, default=0, dest="camera_index")
     parser.add_argument("--pretrained", action=argparse.BooleanOptionalAction, default=False)
     parser.add_argument("--verbose", action=argparse.BooleanOptionalAction, default=False)
@@ -171,6 +194,8 @@ def _render_help() -> None:
     usage.add_row("python -m mlx --mode object_detection --action train --dataset coco8 --model draxnet-yolo26 --output ./runs/draxnet")
     usage.add_row("python -m mlx --mode object_detection --action infer-camera --model draxnet-yolo26 --model-path ./runs/draxnet/exp/weights/best.pt")
     usage.add_row("python -m mlx --mode object_detection --action convert --model-path ./runs/draxnet/exp/weights/best.pt --output ./exports")
+    usage.add_row("python -m mlx --mode track --tracker bytetrack --model yolo26 --model-path ./best.pt --file-path ./video.mp4 --output ./tracking-run")
+    usage.add_row("python -m mlx --mode track --provider libreyolo --tracker sort --model-path ./best.onnx --file-path ./video.mp4 --ground-truth ./gt.txt --output ./tracking-run")
     usage.add_row("python -m mlx --mode image_classification --action train --output ./artifacts/resnet18 --dataset ./dataset --model resnet18")
     usage.add_row("python -m mlx --mode image_classification --action ls-models")
     usage.add_row("python -m mlx --mode image_classification --action train --output ./artifacts/siamese --dataset ./omniglot --model siamese-le-net")
@@ -192,12 +217,12 @@ def _render_help() -> None:
     options.add_column("Flag", style="cyan", no_wrap=True)
     options.add_column("Default", style="magenta")
     options.add_column("Description", style="white")
-    options.add_row("--mode", "None", "Mode to run: object_detection, image_classification, segmentation, or nlp.")
+    options.add_row("--mode", "None", "Mode to run: object_detection, track, image_classification, segmentation, or nlp.")
     options.add_row("--provider", "ultralytics", "Object-detection provider: ultralytics or libreyolo.")
     options.add_row("--model", "None", "Provider-specific model identifier, YAML path, or architecture name.")
     options.add_row("--action", "mode-specific", "Sub-action such as train, ls-models, infer-video, convert, benchmark, or build-dataset.")
     options.add_row("--dataset", "./tmp/dataset", "Dataset source for training: local YOLO root, dataset YAML, or alias like coco8/coco128.")
-    options.add_row("--output", "None", "Output directory written by train or benchmark. Detection uses it as the provider project directory, or as the ONNX export destination for convert.")
+    options.add_row("--output", "None", "Output directory written by training, benchmarks, or tracking. Detection uses it as the provider project directory, or as the ONNX export destination for convert.")
     options.add_row("--train-count", "None", "Images per label assigned to the train split when building classification datasets.")
     options.add_row("--val-count", "None", "Images per label assigned to the val split when building classification datasets.")
     options.add_row("--test-count", "None", "Images per label assigned to the test split when building classification datasets.")
@@ -205,7 +230,7 @@ def _render_help() -> None:
     options.add_row("--val-ratio", "None", "Validation split ratio applied within each label when building classification datasets.")
     options.add_row("--test-ratio", "None", "Test split ratio applied within each label when building classification datasets.")
     options.add_row("--split-mode", "None", "Build-dataset split mode: counts or ratios. Ratio mode splits each label independently using the provided ratios.")
-    options.add_row("--overwrite / --no-overwrite", "False", "Allow build-dataset to replace an existing output directory without prompting.")
+    options.add_row("--overwrite / --no-overwrite", "False", "Allow supported workflows to replace existing output artifacts without prompting.")
     options.add_row("--model-path", "None", "Provider-compatible checkpoint path for inference, resume, warm starts, or ONNX conversion.")
     options.add_row("--model-file", "None", "GGUF embedding model used by NLP embed.")
     options.add_row("--input-file", "None", "Input CSV used by NLP embed.")
@@ -225,6 +250,11 @@ def _render_help() -> None:
         "Drax residual fusion: fixed average or adaptive SKNet channel weighting.",
     )
     options.add_row("--confidence", "0.25", "Detection confidence threshold.")
+    options.add_row("--tracker", "bytetrack", "Tracking algorithm alias or external package.module:ClassName.")
+    options.add_row("--tracker-config", "None", "Optional JSON object file passed as keyword arguments to the tracker constructor.")
+    options.add_row("--ground-truth / --gt-file", "None", "Optional 10-column MOTChallenge ground-truth file used for tracking benchmarks.")
+    options.add_row("--track-class-id", "all", "Repeatable detector class ID included in tracking; all classes are used by default.")
+    options.add_row("--benchmark-iou", "0.5", "Minimum box IoU used for MOT benchmark matching.")
     options.add_row("--camera-index", "0", "Camera index for webcam inference.")
     options.add_row("--pretrained / --no-pretrained", "False", "Toggle supported pretrained model initialization.")
     options.add_row("--verbose / --no-verbose", "False", "Show per-epoch live progress bars when supported.")
@@ -265,7 +295,11 @@ def _render_help() -> None:
     options.add_row("--target-layer", "None", "Optional dotted module path to explain, such as layer4.1 or features.-1.")
     options.add_row("--target-index", "None", "Optional class index or Siamese output index to explain. Defaults to model prediction.")
     options.add_row("--max-samples", "None", "Maximum number of test samples or one-shot pairs to render.")
-    options.add_row("--display / --no-display", "True", "Show rendered CAM images in OpenCV windows for CLI use.")
+    options.add_row(
+        "--display / --no-display",
+        "True",
+        "Show live tracking overlays or rendered CAM images in OpenCV windows.",
+    )
     options.add_row("--save-images / --no-save-images", "True", "Write rendered CAM images under --output when provided.")
     options.add_row("--window-delay", "0", "OpenCV waitKey delay in milliseconds between displayed CAM images.")
     options.add_row("--aug-smooth / --no-aug-smooth", "False", "Apply Grad-CAM test-time augmentation smoothing.")
@@ -277,6 +311,7 @@ def _render_help() -> None:
     available.add_column("Mode", style="cyan", no_wrap=True)
     available.add_column("Actions", style="white")
     available.add_row("object_detection", "train, infer-camera, infer-video, convert, ls-models")
+    available.add_row("track", "run, ls-trackers")
     available.add_row("image_classification", "train, test, benchmark, infer-image, cam, build-dataset, ls-models")
     available.add_row("segmentation", "train, test, benchmark, infer-image, infer-camera, infer-video, build-dataset, ls-models")
     available.add_row("nlp", "embed")
@@ -307,6 +342,7 @@ def _render_unknown_mode() -> None:
     table.add_column("Mode", style="cyan", no_wrap=True)
     table.add_column("Purpose", style="white")
     table.add_row("object_detection", "Provider-backed detection training and inference")
+    table.add_row("track", "Provider-neutral video tracking and MOT benchmarking")
     table.add_row("image_classification", "Image classification workflows for both one-shot and standard classifiers")
     table.add_row("segmentation", "Semantic segmentation workflows for U-Net style models")
     table.add_row("nlp", "Text embedding workflows for GGUF models and CSV data")

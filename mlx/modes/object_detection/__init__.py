@@ -6,18 +6,21 @@ from mlx.modes.object_detection.commands import (
     TrainObjectDetectionModel,
 )
 from mlx.modes.object_detection.models import Detection, DetectionAdapter, DetectionResult
-from mlx.modes.object_detection.tracking_adapter import (
-    RunObjectDetectionTrackingCommand,
-    to_tracking_detections,
-)
 from mlx.modes.object_detection.tracking import (
     BoundingBox,
+    ExportTrackingReplay,
+    RunObjectDetectionTrackingCommand,
     RunTrackByDetectionCommand,
+    RunTrackingVideo,
     TrackResult,
     TrackStatus,
     TrackingAlgorithm,
     TrackingDetection,
     TrackingFrameResult,
+    TrackingRequest,
+    TrackingReplayResult,
+    TrackingRunResult,
+    to_tracking_detections,
 )
 
 __all__ = [
@@ -27,6 +30,7 @@ __all__ = [
     "Detection",
     "DetectionAdapter",
     "DetectionResult",
+    "ExportTrackingReplay",
     "ListObjectDetectionModels",
     "RunObjectDetectionStream",
     "RunObjectDetectionTrackingCommand",
@@ -36,6 +40,10 @@ __all__ = [
     "TrackingAlgorithm",
     "TrackingDetection",
     "TrackingFrameResult",
+    "TrackingRequest",
+    "TrackingReplayResult",
+    "TrackingRunResult",
+    "RunTrackingVideo",
     "TrainObjectDetectionModel",
     "to_tracking_detections",
 ]

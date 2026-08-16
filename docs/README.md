@@ -40,5 +40,6 @@ The repository documentation is split by CLI mode and backing package:
 | CLI Mode | Backing Package |
 | --- | --- |
 | `object_detection` | `mlx.modes.object_detection` |
+| `track` | `mlx.modes.object_detection.tracking` |
 | `image_classification` | `mlx.modes.image_classification` |
 | `segmentation` | `mlx.modes.segmentation` |

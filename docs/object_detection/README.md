@@ -28,6 +28,7 @@ Package consumers installing MLX directly may instead install one provider or bo
 python -m pip install ".[object-detection-ultralytics]"
 python -m pip install ".[object-detection-libreyolo]"
 python -m pip install ".[object-detection]"
+python -m pip install ".[tracking,object-detection-ultralytics]"
 ```
 
 The LibreYOLO extra follows the `release` branch of
@@ -48,7 +49,8 @@ The neutral source is split by responsibility:
 
 ## Generic Tracking by Detection
 
-The first tracking layer keeps frame acquisition, detection, and tracking separate:
+Tracking has its own `--mode track` CLI but remains owned by the object-detection
+package. Frame acquisition, detection, and tracking stay separate:
 
 ```text
 video or camera source
@@ -62,81 +64,15 @@ tracking command
 immutable per-frame track results
 ```
 
-This boundary lets the same tracking API work with different detector formats, video
-sources, and future association algorithms. A tracking algorithm receives detections
-that have already been computed; it never invokes YOLO itself.
+The built-in `sort` and `bytetrack` implementations consume the normalized
+`DetectionAdapter` output produced by either provider. `--tracker
+package.module:ClassName` loads an external structural implementation without an MLX
+base class. Runs stream confirmed observations to MOTChallenge `tracks.txt`; passing
+`--ground-truth` also writes MOTA, MOTP, IDF1, and error counts to `metrics.json`.
 
-The included `DetectionAsTrackAlgorithm` is only an executable skeleton. It assigns a
-new, confirmed ID to every detection and deliberately performs no temporal
-association. The integration command accepts the same detection adapter returned by
-the current `build_detection_adapter(...)` factory, including both the Ultralytics
-`.pt` and ONNX Runtime `.onnx` implementations:
-
-```python
-from mlx.modes.object_detection.tracking.algorithms import DetectionAsTrackAlgorithm
-from mlx.modes.object_detection import RunObjectDetectionTrackingCommand
-
-# `detector` is the existing adapter created by build_detection_adapter(...).
-command = RunObjectDetectionTrackingCommand(
-    detection_model=detector,
-    algorithm=DetectionAsTrackAlgorithm(),
-)
-
-while True:
-    ok, frame = capture.read()
-    if not ok:
-        break
-
-    tracking_result = command.execute(frame=frame)
-    write_or_render(tracking_result)
-
-command.reset()  # Call before processing a new video or camera session.
-```
-
-For callers that already perform detection separately,
-`RunTrackByDetectionCommand.execute(detections=..., frame=...)` remains available as
-the lower-level detector-neutral API.
-
-The conversion is kept at the neutral detection/tracking boundary. `Detection` uses
-integer `xyxy` coordinates, while generic tracking state uses
-immutable `BoundingBox` values backed by ordinary Python floats and does not retain
-an Ultralytics result object.
-
-Future algorithms implement the structural `TrackingAlgorithm` protocol without
-inheriting from a project base class:
-
-```python
-from collections.abc import Sequence
-
-import numpy as np
-
-from mlx.modes.object_detection.tracking import (
-    TrackingDetection,
-    TrackingFrameResult,
-)
-
-
-class IoUTrackingAlgorithm:
-    def update(
-        self,
-        *,
-        frame_index: int,
-        detections: Sequence[TrackingDetection],
-        frame: np.ndarray | None = None,
-    ) -> TrackingFrameResult:
-        # Future class-aware association logic belongs here.
-        ...
-
-    def reset(self) -> None:
-        ...
-```
-
-The command retains only its current frame index, and algorithms must retain only
-active or temporarily lost track state. Frames, detector result objects, full
-trajectories, and prior `TrackingFrameResult` objects are not stored, so tracking
-memory stays proportional to active tracks plus current-frame detections rather than
-video duration. Applications that need session history should stream each result to
-disk or another external store as it is produced.
+See the complete [tracking guide](../../TRACKING.md) for commands using both
+providers, tracker JSON options, output format, benchmarking behavior, memory rules,
+Python APIs, and a copyable custom tracker class.
 
 ## Dataset Format
 

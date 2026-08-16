@@ -25,7 +25,7 @@ class RichWorkflowReporter:
 def annotate_detections(frame: np.ndarray, result: DetectionResult) -> np.ndarray:
     annotated = frame.copy()
     for detection in result.detections:
-        x1, y1, x2, y2 = detection.xyxy
+        x1, y1, x2, y2 = (int(round(value)) for value in detection.xyxy)
         color = _color_for_label(detection.label)
         cv2.rectangle(annotated, (x1, y1), (x2, y2), color, 2)
         cv2.putText(
@@ -44,4 +44,3 @@ def annotate_detections(frame: np.ndarray, result: DetectionResult) -> np.ndarra
 def _color_for_label(label: str) -> tuple[int, int, int]:
     digest = hashlib.sha256(label.encode("utf-8")).hexdigest()
     return tuple(int(min(max(int(digest[index : index + 2], 16), 64), 255)) for index in (0, 2, 4))
-

@@ -8,7 +8,7 @@ import numpy as np
 
 @dataclass(frozen=True)
 class Detection:
-    xyxy: tuple[int, int, int, int]
+    xyxy: tuple[float, float, float, float]
     confidence: float
     class_id: int
     label: str
@@ -23,4 +23,3 @@ class DetectionResult:
 class DetectionAdapter(Protocol):
     def predict(self, frame: np.ndarray) -> DetectionResult:
         ...
-

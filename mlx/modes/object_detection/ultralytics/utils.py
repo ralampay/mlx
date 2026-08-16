@@ -323,6 +323,7 @@ def annotate_detections(frame, result):
             confidence = detection["confidence"]
             class_id = detection["class_id"]
             label = detection["label"]
+        x1, y1, x2, y2 = (int(round(value)) for value in (x1, y1, x2, y2))
         text = f"{label}: {confidence:.2f}"
         color = palette.get(label, palette.get(int(class_id), (0, 255, 0)))
         cv2.rectangle(annotated, (x1, y1), (x2, y2), color, 2)

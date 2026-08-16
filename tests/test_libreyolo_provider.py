@@ -78,7 +78,7 @@ def test_libreyolo_result_decodes_normalized_detections() -> None:
 
     assert decoded.names == {0: "person", 1: "bike"}
     assert len(decoded.detections) == 1
-    assert decoded.detections[0].xyxy == (1, 2, 30, 40)
+    assert decoded.detections[0].xyxy == pytest.approx((1.2, 2.9, 30.8, 40.1))
     assert decoded.detections[0].confidence == pytest.approx(0.75)
     assert decoded.detections[0].class_id == 1
     assert decoded.detections[0].label == "bike"

@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Protocol
+from typing import Protocol, runtime_checkable
 
 import numpy as np
 
@@ -24,6 +24,20 @@ class FrameSink(Protocol):
         ...
 
     def close(self) -> None:
+        ...
+
+
+@dataclass(frozen=True, slots=True)
+class FrameSourceMetadata:
+    width: int | None = None
+    height: int | None = None
+    fps: float | None = None
+    frame_count: int | None = None
+
+
+@runtime_checkable
+class MetadataFrameSource(Protocol):
+    def metadata(self) -> FrameSourceMetadata:
         ...
 
 
@@ -61,11 +75,27 @@ class OpenCVFrameSource:
             self._capture.release()
             raise MLXUserError(f"Unable to open {label}. Check the source and permissions.")
 
+        self._cv2 = cv2
+
     def read(self) -> tuple[bool, np.ndarray]:
         return self._capture.read()
 
     def release(self) -> None:
         self._capture.release()
+
+    def metadata(self) -> FrameSourceMetadata:
+        return FrameSourceMetadata(
+            width=_positive_int_or_none(
+                self._capture.get(self._cv2.CAP_PROP_FRAME_WIDTH)
+            ),
+            height=_positive_int_or_none(
+                self._capture.get(self._cv2.CAP_PROP_FRAME_HEIGHT)
+            ),
+            fps=_positive_float_or_none(self._capture.get(self._cv2.CAP_PROP_FPS)),
+            frame_count=_positive_int_or_none(
+                self._capture.get(self._cv2.CAP_PROP_FRAME_COUNT)
+            ),
+        )
 
 
 class OpenCVFrameSink:
@@ -88,3 +118,10 @@ class OpenCVFrameSink:
     def close(self) -> None:
         self._cv2.destroyAllWindows()
 
+
+def _positive_int_or_none(value: float) -> int | None:
+    return int(round(value)) if value > 0 else None
+
+
+def _positive_float_or_none(value: float) -> float | None:
+    return float(value) if value > 0 else None

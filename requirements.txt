@@ -2,6 +2,7 @@ grad-cam
 jupyter
 llama-cpp-python
 matplotlib
+motmetrics>=1.4.0
 numpy
 onnxruntime
 opencv-python
@@ -10,6 +11,7 @@ pytest
 python-dotenv
 rich
 scikit-learn
+scipy>=1.10.0
 torch
 torchvision
 tqdm

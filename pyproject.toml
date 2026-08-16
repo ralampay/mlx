@@ -33,6 +33,10 @@ object-detection = [
     "ultralytics @ git+https://github.com/ralampay/ultralytics",
     "libreyolo[onnx] @ git+https://github.com/ralampay/libreyolo.git@release"
 ]
+tracking = [
+    "motmetrics>=1.4.0",
+    "scipy>=1.10.0"
+]
 
 [project.scripts]
 mlx = "mlx.cli:main"

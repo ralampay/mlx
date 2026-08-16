@@ -67,8 +67,20 @@ immutable per-frame track results
 The built-in `sort` and `bytetrack` implementations consume the normalized
 `DetectionAdapter` output produced by either provider. `--tracker
 package.module:ClassName` loads an external structural implementation without an MLX
-base class. Runs stream confirmed observations to MOTChallenge `tracks.txt`; passing
-`--ground-truth` also writes MOTA, MOTP, IDF1, and error counts to `metrics.json`.
+base class. Runs stream confirmed observations to class-aware `tracks.jsonl` and
+MOTChallenge `tracks.txt`; passing `--ground-truth` also writes MOTA, MOTP, IDF1,
+and error counts to `metrics.json`. The class-aware file can be filtered and
+converted back to strict MOT with `track --action export-mot`.
+
+```bash
+python -m mlx --mode track --action export-mot \
+    --tracking-jsonl ./tracking-run/tracks.jsonl \
+    --track-class-id 0 \
+    --output ./person-mot
+```
+
+Class IDs and labels remain in `tracks.jsonl` and the replay artifacts; the derived
+`tracks.txt` deliberately remains class-agnostic for MOT compatibility.
 
 See the complete [tracking guide](../../TRACKING.md) for commands using both
 providers, tracker JSON options, output format, benchmarking behavior, memory rules,

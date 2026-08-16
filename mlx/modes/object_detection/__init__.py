@@ -8,6 +8,8 @@ from mlx.modes.object_detection.commands import (
 from mlx.modes.object_detection.models import Detection, DetectionAdapter, DetectionResult
 from mlx.modes.object_detection.tracking import (
     BoundingBox,
+    ClassAwareTrackingRecord,
+    ExportMOTFromClassAwareTracking,
     ExportTrackingReplay,
     RunObjectDetectionTrackingCommand,
     RunTrackByDetectionCommand,
@@ -25,12 +27,14 @@ from mlx.modes.object_detection.tracking import (
 
 __all__ = [
     "BoundingBox",
+    "ClassAwareTrackingRecord",
     "ConvertObjectDetectionModel",
     "CreateObjectDetector",
     "Detection",
     "DetectionAdapter",
     "DetectionResult",
     "ExportTrackingReplay",
+    "ExportMOTFromClassAwareTracking",
     "ListObjectDetectionModels",
     "RunObjectDetectionStream",
     "RunObjectDetectionTrackingCommand",

@@ -19,6 +19,7 @@ from mlx.modes.object_detection.streaming import (
     MetadataFrameSource,
     OpenCVFrameSource,
 )
+from mlx.modes.object_detection.tracking.class_aware import TrackingResultWriter
 from mlx.modes.object_detection.tracking.detection import (
     RunObjectDetectionTrackingCommand,
 )
@@ -49,6 +50,7 @@ class TrackingRunResult:
     stopped_by_user: bool = False
     replay_data_path: Path | None = None
     replay_html_path: Path | None = None
+    class_aware_output_path: Path | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -58,6 +60,7 @@ class _ProcessedTrackingVideo:
     stopped_by_user: bool
     frame_width: int
     frame_height: int
+    class_aware_output_path: Path | None
 
 
 class RunTrackingVideo:
@@ -72,7 +75,7 @@ class RunTrackingVideo:
         frame_source: FrameSource | None = None,
         frame_sink: FrameSink | None = None,
         renderer: Callable[[np.ndarray, TrackingFrameResult], np.ndarray] | None = None,
-        writer: MOTResultWriter | None = None,
+        writer: MOTResultWriter | TrackingResultWriter | None = None,
         reporter: WorkflowReporter | None = None,
     ) -> None:
         self.request = request
@@ -136,15 +139,22 @@ class RunTrackingVideo:
             processed=processed,
             source_metadata=source_metadata,
             benchmark=benchmark,
+            class_aware_path=processed.class_aware_output_path,
             source_name=video_path.name if video_path is not None else source_label,
             tracker_label=tracker_label,
         )
 
+        class_aware_summary = (
+            f" Class-aware records: {processed.class_aware_output_path}."
+            if processed.class_aware_output_path is not None
+            else ""
+        )
         emit(
             self.reporter,
             "success",
             f"Tracked {processed.frames_processed} frame(s) and wrote "
-            f"{writer.rows_written} MOT row(s) to {processed.output_path}. "
+            f"{writer.rows_written} MOT row(s) to {processed.output_path}."
+            f"{class_aware_summary} "
             f"Offline replay: {replay.html_path}.",
         )
         return TrackingRunResult(
@@ -156,6 +166,7 @@ class RunTrackingVideo:
             stopped_by_user=processed.stopped_by_user,
             replay_data_path=replay.data_path,
             replay_html_path=replay.html_path,
+            class_aware_output_path=processed.class_aware_output_path,
         )
 
     def _create_algorithm(self) -> TrackingAlgorithm:
@@ -176,8 +187,11 @@ class RunTrackingVideo:
             raise RuntimeError("Validated video path is unavailable.")
         return OpenCVFrameSource(source="video", file_path=str(video_path))
 
-    def _create_writer(self, output_dir: Path) -> MOTResultWriter:
-        return self.writer or MOTResultWriter(
+    def _create_writer(
+        self,
+        output_dir: Path,
+    ) -> MOTResultWriter | TrackingResultWriter:
+        return self.writer or TrackingResultWriter(
             output_dir=output_dir,
             overwrite=self.request.overwrite,
         )
@@ -187,7 +201,7 @@ class RunTrackingVideo:
         *,
         source_label: str,
         source: FrameSource,
-        writer: MOTResultWriter,
+        writer: MOTResultWriter | TrackingResultWriter,
         tracking: RunObjectDetectionTrackingCommand,
     ) -> _ProcessedTrackingVideo:
         frames_processed = 0
@@ -230,6 +244,11 @@ class RunTrackingVideo:
                 stopped_by_user=stopped_by_user,
                 frame_width=frame_width,
                 frame_height=frame_height,
+                class_aware_output_path=getattr(
+                    writer,
+                    "class_aware_output_path",
+                    None,
+                ),
             )
         finally:
             self._cleanup_session(
@@ -245,7 +264,7 @@ class RunTrackingVideo:
         *,
         source: FrameSource,
         tracking: RunObjectDetectionTrackingCommand,
-        writer: MOTResultWriter,
+        writer: MOTResultWriter | TrackingResultWriter,
         abort_writer: bool,
         active_error: BaseException | None,
     ) -> None:
@@ -317,11 +336,13 @@ class RunTrackingVideo:
         processed: _ProcessedTrackingVideo,
         source_metadata: FrameSourceMetadata,
         benchmark: TrackingBenchmarkResult | None,
+        class_aware_path: Path | None,
         source_name: str,
         tracker_label: str,
     ) -> TrackingReplayResult:
         return ExportTrackingReplay(
             predictions_path=predictions_path,
+            class_aware_path=class_aware_path,
             ground_truth_path=(
                 Path(self.request.ground_truth).expanduser()
                 if self.request.ground_truth
@@ -365,7 +386,7 @@ class RunTrackingVideo:
         if any(class_id < 0 for class_id in self.request.track_class_ids):
             raise MLXUserError("--track-class-id values must be zero or greater.")
         output_dir = Path(self.request.output_path).expanduser()
-        output_paths = [output_dir / "tracks.txt"]
+        output_paths = [output_dir / "tracks.txt", output_dir / "tracks.jsonl"]
         output_paths.extend((output_dir / "replay.json", output_dir / "replay.html"))
         if self.request.ground_truth:
             output_paths.append(output_dir / "metrics.json")

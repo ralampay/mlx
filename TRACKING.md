@@ -6,7 +6,7 @@ frame is detected by the selected object-detection provider, normalized to MLX
 
 ```text
 video → Ultralytics or LibreYOLO adapter → normalized detections
-      → selected tracker → tracks.txt → optional MOT benchmark
+      → selected tracker → tracks.jsonl + tracks.txt → optional MOT benchmark
 ```
 
 The tracker never imports or invokes YOLO. This makes the same tracker compatible
@@ -68,9 +68,10 @@ The output directory contains:
 
 ```text
 tracking/sort/
-├── tracks.txt    # MOTChallenge predictions
+├── tracks.jsonl  # lossless class-aware MLX tracking records
+├── tracks.txt    # strict 10-column MOTChallenge predictions
 ├── metrics.json  # only when --ground-truth is supplied
-├── replay.json   # portable projected boxes, metadata, GT, and metrics
+├── replay.json   # portable projected boxes, classes, metadata, GT, and metrics
 └── replay.html   # self-contained interactive 2D replay
 ```
 
@@ -91,9 +92,10 @@ The top-left summary shows the 1-based frame number and visible-track count.
 Temporarily lost tracks remain available to the algorithm for recovery but are not
 drawn because they were not observed in the displayed frame.
 
-Press `q` or `Esc` to stop playback. MLX finalizes `tracks.txt` for the frames that
-were processed. If ground truth was supplied, benchmarking is skipped after an
-early stop because the partial prediction file does not cover the complete video.
+Press `q` or `Esc` to stop playback. MLX finalizes `tracks.jsonl` and `tracks.txt`
+for the frames that were processed. If ground truth was supplied, benchmarking is
+skipped after an early stop because the partial prediction file does not cover the
+complete video.
 
 Use `--no-display` on a headless machine or when processing without an interactive
 window:
@@ -121,7 +123,8 @@ server, CDN, Python environment, or network connection.
 The player provides:
 
 - play/pause, frame scrubbing, keyboard stepping, and playback speed;
-- stable per-ID prediction colors and two-second center-point motion trails;
+- stable per-ID prediction colors, class labels, confidence, and two-second
+  center-point motion trails;
 - ground-truth overlays when `--ground-truth` was used;
 - independent toggles for predictions, ground truth, and trails;
 - benchmark metric cards and per-frame prediction/GT counts.
@@ -136,11 +139,58 @@ Use [notebooks/tracking_replay.ipynb](./notebooks/tracking_replay.ipynb) for a
 Matplotlib trajectory projection and notebook-native 2D animation. Change only its
 `RESULT_DIR`; neither visualization needs the source video.
 
+## Class-Aware Output and MOT Extraction
+
+Each tracking run writes the same confirmed, currently observed tracks to two
+separate artifacts. `tracks.jsonl` is the lossless MLX interchange format and keeps
+`class_id`, `label`, `xyxy` coordinates, confidence, frame ID, and track ID.
+`tracks.txt` is the class-agnostic, exactly 10-column MOTChallenge projection used
+by the benchmark command and standard MOT tools. MLX does not put an unofficial
+eleventh class column in the MOT file.
+
+In short, class information is stored in `tracks.jsonl` and copied into prediction
+rows in `replay.json`; it is intentionally absent from `tracks.txt` because the
+standard MOT prediction format has no class column. Ground-truth replay rows also
+have `class_id: null` and `label: null` when the input is standard 10-column MOT.
+
+One `tracks.jsonl` line looks like this:
+
+```json
+{"schema_version":"mlx.tracking.record/v1","frame_id":1,"track_id":1,"class_id":0,"label":"person","bounding_box":{"x1":88.0,"y1":99.0,"x2":149.08,"y2":317.56},"confidence":0.92}
+```
+
+The class fields come from the `TrackResult` returned by the selected tracking
+class. Built-in trackers preserve the normalized detector class and label. Custom
+trackers must do the same if those values should appear in logs and replay output.
+
+You can recreate a standard MOT file from any MLX class-aware result without the
+video or detector. Omit `--track-class-id` to export all classes, or repeat it to
+select classes before class-agnostic MOT evaluation:
+
+```bash
+python -m mlx --mode track --action export-mot \
+    --tracking-jsonl ./tracking/run/tracks.jsonl \
+    --track-class-id 0 \
+    --output ./tracking/person-mot
+```
+
+The command validates the JSONL schema and rejects duplicate frame/track pairs. It
+writes `./tracking/person-mot/tracks.txt`; pass `--overwrite` if that output exists.
+With no class filter, the extracted file is the same MOT projection produced during
+the original run.
+
+`--track-class-id` has two related but distinct meanings:
+
+- with `--action run`, it filters detections before tracking and can therefore
+  affect association and assigned track IDs;
+- with `--action export-mot`, it filters completed `tracks.jsonl` records and never
+  reruns the detector or tracker.
+
 ## MOT Input and Output
 
 For the complete in-memory `TrackingDetection`/`TrackingFrameResult` contracts,
-MOT and replay JSON schemas, coordinate conversion rules, column definitions, and
-export eligibility, see
+class-aware JSONL, MOT, and replay JSON schemas, coordinate conversion rules,
+column definitions, and export eligibility, see
 [Expected Tracking Formats](./CUSTOM_TRACKING.md#expected-tracking-formats).
 
 Ground truth and predictions are headerless, comma-separated MOTChallenge rows:
@@ -157,6 +207,40 @@ Benchmarking uses class-agnostic framewise matching at `--benchmark-iou 0.5` by
 default and writes MOTA, mean matched IoU (MOTP), IDF1, precision, recall, matches,
 false positives, misses, and ID switches. Ground-truth rows with a non-positive
 confidence/mark field are ignored.
+
+The normal run benchmarks its generated `tracks.txt` automatically when
+`--ground-truth` is supplied:
+
+```bash
+python -m mlx --mode track --action run \
+    --provider libreyolo \
+    --tracker bytetrack \
+    --model-path ./best.pt \
+    --file-path ./video.mp4 \
+    --ground-truth ./gt.txt \
+    --track-class-id 0 \
+    --output ./tracking/run \
+    --no-display
+```
+
+To evaluate a class-filtered MOT file extracted after a run, use the reusable
+benchmark command from Python or pass the resulting `tracks.txt` to another standard
+MOT evaluator:
+
+```python
+from pathlib import Path
+
+from mlx.modes.object_detection.tracking.evaluation import BenchmarkMOTTracking
+
+result = BenchmarkMOTTracking(
+    ground_truth_path=Path("./gt.txt"),
+    predictions_path=Path("./tracking/person-mot/tracks.txt"),
+    output_path=Path("./tracking/person-mot/metrics.json"),
+    iou_threshold=0.5,
+    overwrite=True,
+).execute()
+print(result.mota, result.idf1)
+```
 
 ## Built-in Examples
 

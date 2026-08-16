@@ -87,6 +87,7 @@ def build_parser() -> RichArgumentParser:
     parser.add_argument("--confidence", type=float, default=0.25)
     parser.add_argument("--tracker", default="bytetrack")
     parser.add_argument("--tracker-config", default=None, dest="tracker_config")
+    parser.add_argument("--tracking-jsonl", default=None, dest="tracking_jsonl")
     parser.add_argument(
         "--ground-truth",
         "--gt-file",
@@ -196,6 +197,7 @@ def _render_help() -> None:
     usage.add_row("python -m mlx --mode object_detection --action convert --model-path ./runs/draxnet/exp/weights/best.pt --output ./exports")
     usage.add_row("python -m mlx --mode track --tracker bytetrack --model yolo26 --model-path ./best.pt --file-path ./video.mp4 --output ./tracking-run")
     usage.add_row("python -m mlx --mode track --provider libreyolo --tracker sort --model-path ./best.onnx --file-path ./video.mp4 --ground-truth ./gt.txt --output ./tracking-run")
+    usage.add_row("python -m mlx --mode track --action export-mot --tracking-jsonl ./tracking-run/tracks.jsonl --track-class-id 0 --output ./person-mot")
     usage.add_row("python -m mlx --mode image_classification --action train --output ./artifacts/resnet18 --dataset ./dataset --model resnet18")
     usage.add_row("python -m mlx --mode image_classification --action ls-models")
     usage.add_row("python -m mlx --mode image_classification --action train --output ./artifacts/siamese --dataset ./omniglot --model siamese-le-net")
@@ -252,6 +254,7 @@ def _render_help() -> None:
     options.add_row("--confidence", "0.25", "Detection confidence threshold.")
     options.add_row("--tracker", "bytetrack", "Tracking algorithm alias or external package.module:ClassName.")
     options.add_row("--tracker-config", "None", "Optional JSON object file passed as keyword arguments to the tracker constructor.")
+    options.add_row("--tracking-jsonl", "None", "Class-aware tracks.jsonl input used by track --action export-mot.")
     options.add_row("--ground-truth / --gt-file", "None", "Optional 10-column MOTChallenge ground-truth file used for tracking benchmarks.")
     options.add_row("--track-class-id", "all", "Repeatable detector class ID included in tracking; all classes are used by default.")
     options.add_row("--benchmark-iou", "0.5", "Minimum box IoU used for MOT benchmark matching.")
@@ -311,7 +314,7 @@ def _render_help() -> None:
     available.add_column("Mode", style="cyan", no_wrap=True)
     available.add_column("Actions", style="white")
     available.add_row("object_detection", "train, infer-camera, infer-video, convert, ls-models")
-    available.add_row("track", "run, ls-trackers")
+    available.add_row("track", "run, export-mot, ls-trackers")
     available.add_row("image_classification", "train, test, benchmark, infer-image, cam, build-dataset, ls-models")
     available.add_row("segmentation", "train, test, benchmark, infer-image, infer-camera, infer-video, build-dataset, ls-models")
     available.add_row("nlp", "embed")

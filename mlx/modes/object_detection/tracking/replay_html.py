@@ -216,7 +216,12 @@ _HTML_TEMPLATE = """<!doctype html>
       ctx.lineWidth = dashed ? 2 : 3;
       ctx.setLineDash(dashed ? [8, 5] : []);
       ctx.strokeRect(row.left, row.top, row.width, row.height);
-      const text = `${prefix} ${row.track_id}${dashed ? "" : ` · ${row.confidence.toFixed(2)}`}`;
+      const classLabel = row.label ?? (
+        row.class_id === null || row.class_id === undefined ? "" : `class ${row.class_id}`
+      );
+      const predictionDetails = [classLabel, row.confidence.toFixed(2)]
+        .filter(Boolean).join(" · ");
+      const text = `${prefix} ${row.track_id}${dashed ? "" : ` · ${predictionDetails}`}`;
       ctx.font = "bold 12px ui-sans-serif, system-ui, sans-serif";
       const textWidth = ctx.measureText(text).width;
       const labelY = Math.max(4, row.top - 20);

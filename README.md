@@ -90,7 +90,7 @@ Available CLI modes are:
 | Mode | Actions |
 | --- | --- |
 | `object_detection` | `train`, `infer-camera`, `infer-video`, `convert`, `ls-models` |
-| `track` | `run`, `ls-trackers` |
+| `track` | `run`, `export-mot`, `ls-trackers` |
 | `image_classification` | `train`, `test`, `benchmark`, `infer-image`, `cam`, `build-dataset`, `ls-models` |
 | `segmentation` | `train`, `test`, `benchmark`, `infer-image`, `infer-camera`, `infer-video`, `build-dataset`, `ls-models` |
 | `nlp` | `embed` |
@@ -191,13 +191,16 @@ frame source → detection adapter → normalized detections
              → tracking algorithm → immutable track results
 ```
 
-The run writes MOTChallenge-compatible `tracks.txt`, portable `replay.json`, and a
-self-contained `replay.html` 2D player that does not require the source video. When
-ground truth is provided, it also writes standard MOT metrics in `metrics.json` and
-includes GT boxes in the replay. External algorithms can be selected with
+The run writes class-aware `tracks.jsonl`, MOTChallenge-compatible `tracks.txt`,
+portable `replay.json`, and a self-contained `replay.html` 2D player that does not
+require the source video. `track --action export-mot` can extract all classes or a
+selected class from the JSONL into a strict MOT file. When ground truth is provided,
+the run also writes standard MOT metrics in `metrics.json` and includes GT boxes in
+the replay. External algorithms can be selected with
 `--tracker package.module:ClassName`. See [TRACKING.md](./TRACKING.md) for provider
-examples, output details, configuration, lower-level APIs, and a copyable custom
-tracker.
+examples, output details, configuration, lower-level APIs, and see
+[CUSTOM_TRACKING.md](./CUSTOM_TRACKING.md) for the complete tracker contract and a
+copyable custom tracker.
 
 ## Image classification
 

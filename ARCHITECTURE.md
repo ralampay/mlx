@@ -66,7 +66,7 @@ The primary workflow commands are:
 | Image classification | `TrainImageClassificationModel`, `SmokeTestImageClassificationModel`, `BenchmarkImageClassification`, `InferImageClassification`, `GenerateImageClassificationCams`, `BuildImageClassificationDataset`, `ListImageClassificationModels` |
 | Segmentation | `TrainSegmentationModel`, `SmokeTestSegmentationModel`, `BenchmarkSegmentation`, `InferSegmentationImage`, `RunSegmentationStreamInference`, `BuildSegmentationDataset`, `ListSegmentationModels` |
 | Object detection | `TrainObjectDetectionModel`, `CreateObjectDetector`, `ConvertObjectDetectionModel`, `ListObjectDetectionModels`, `RunObjectDetectionStream` |
-| Tracking | `CreateTrackingAlgorithm`, `RunObjectDetectionTrackingCommand`, `RunTrackByDetectionCommand`, `RunTrackingVideo`, `BenchmarkMOTTracking`, `ExportTrackingReplay` |
+| Tracking | `CreateTrackingAlgorithm`, `RunObjectDetectionTrackingCommand`, `RunTrackByDetectionCommand`, `RunTrackingVideo`, `ExportMOTFromClassAwareTracking`, `BenchmarkMOTTracking`, `ExportTrackingReplay` |
 | NLP | `EmbedCsvCommand` (`EmbedCsv` is the legacy path-returning API) |
 
 Large commands should keep `execute()` readable by delegating cohesive steps to private methods
@@ -93,26 +93,34 @@ supports four capabilities:
 
 The `track` CLI mode routes to the nested tracking runner because tracking-by-detection remains
 owned by object detection. `RunTrackingVideo` composes the selected provider's `DetectionAdapter`,
-an OpenCV frame source, a registry-selected `TrackingAlgorithm`, streaming MOT output, optional
-MOT evaluation, portable replay export, and an optional injected frame sink/renderer pair. Trackers receive only normalized
+an OpenCV frame source, a registry-selected `TrackingAlgorithm`, composed streaming class-aware
+JSONL and MOT output, optional MOT evaluation, portable replay export, and an optional injected
+frame sink/renderer pair. Trackers receive only normalized
 `TrackingDetection` values and may be selected by
 built-in alias or an external `package.module:ClassName`; constructor keyword arguments come from
 an optional JSON configuration. The built-in registry is immutable, and applications extend it by
 creating and injecting a new `TrackerRegistry` rather than changing process-wide state. SORT and
 ByteTrack are the built-in reference implementations.
 
-Tracking output is a headerless 10-column MOTChallenge file with 1-based frame and track IDs.
-Only confirmed tracks observed in the current frame are persisted; lost and tentative state remain
+Tracking output has two synchronized projections with 1-based frame and track IDs.
+`tracks.jsonl` is the versioned, provider-neutral source that retains class ID, optional label,
+confidence, and `xyxy` geometry. `tracks.txt` is a strict headerless 10-column MOTChallenge file
+and deliberately has no nonstandard class column. `TrackingResultWriter` composes the focused
+writers so tracker classes remain unaware of serialization. `ExportMOTFromClassAwareTracking`
+validates the JSONL and can select classes while recreating the standard MOT projection. Only
+confirmed tracks observed in the current frame are persisted; lost and tentative state remain
 algorithm details. Benchmarking ignores unavailable world coordinates and reports MOTA, mean
 matched IoU, IDF1, precision, recall, false positives, misses, and identity switches. Session
 memory is bounded by active/lost tracks and current-frame detections; video frames and complete
 trajectory histories are not retained.
 
-`ExportTrackingReplay` is downstream of MOT serialization and does not depend on a detector,
+`ExportTrackingReplay` is downstream of tracking serialization and does not depend on a detector,
 tracker, OpenCV, or source video. It writes a versioned `replay.json` projection plus a
 self-contained `replay.html` browser player. The JSON preserves canvas/FPS metadata, run settings,
-prediction boxes, optional ground-truth boxes, and optional metrics, but omits provider objects and
-absolute video paths. `OpenCVFrameSource` exposes FPS and geometry through the optional
+prediction boxes and class metadata, optional ground-truth boxes, and optional metrics, but omits
+provider objects and absolute video paths. It validates that the optional class-aware sidecar and
+MOT predictions describe identical rows before combining them. `OpenCVFrameSource` exposes FPS
+and geometry through the optional
 `MetadataFrameSource` capability; commands still accept minimal `FrameSource` implementations,
 and decoded frame shapes remain authoritative for replay canvas dimensions. This interface
 segregation keeps fake, camera, and future non-OpenCV sources portable.

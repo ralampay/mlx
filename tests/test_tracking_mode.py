@@ -15,11 +15,14 @@ from mlx.modes.object_detection.models import Detection, DetectionResult
 from mlx.modes.object_detection.streaming import FrameSourceMetadata
 from mlx.modes.object_detection.tracking import (
     BoundingBox,
+    ClassAwareTrackingRecord,
+    ExportMOTFromClassAwareTracking,
     ExportTrackingReplay,
     TrackResult,
     TrackStatus,
     TrackingDetection,
     TrackingFrameResult,
+    read_class_aware_tracking_file,
 )
 from mlx.modes.object_detection.tracking.algorithms import (
     ByteTrackAlgorithm,
@@ -66,11 +69,14 @@ def test_cli_registers_tracking_mode_and_flags() -> None:
             "0",
             "--track-class-id",
             "2",
+            "--tracking-jsonl",
+            "tracks.jsonl",
         ]
     )
     assert namespace.tracker == "sort"
     assert namespace.ground_truth == "gt.txt"
     assert namespace.track_class_ids == [0, 2]
+    assert namespace.tracking_jsonl == "tracks.jsonl"
 
 
 def test_tracking_request_reads_no_display_flag() -> None:
@@ -236,6 +242,94 @@ def test_mot_writer_uses_ten_columns_and_omits_lost_tracks(tmp_path: Path) -> No
     assert rows[0].endswith(",-1,-1,-1")
 
 
+def test_class_aware_records_export_standard_mot_with_optional_class_filter(
+    tmp_path: Path,
+) -> None:
+    source = tmp_path / "tracks.jsonl"
+    records = (
+        ClassAwareTrackingRecord(
+            frame_id=1,
+            track_id=1,
+            class_id=0,
+            label="person",
+            bounding_box=BoundingBox(1, 2, 11, 22),
+            confidence=0.9,
+        ),
+        ClassAwareTrackingRecord(
+            frame_id=1,
+            track_id=2,
+            class_id=2,
+            label="car",
+            bounding_box=BoundingBox(20, 20, 25, 25),
+            confidence=0.8,
+        ),
+    )
+    source.write_text(
+        "".join(record.to_json_line() + "\n" for record in records),
+        encoding="utf-8",
+    )
+
+    result = ExportMOTFromClassAwareTracking(
+        source_path=source,
+        output_dir=tmp_path / "person-mot",
+        class_ids=(0,),
+    ).execute()
+
+    mot_records = read_mot_file(result.output_path)
+    assert result.rows_written == 1
+    assert result.source_rows == 2
+    assert len(result.output_path.read_text(encoding="utf-8").split(",")) == 10
+    assert [(record.frame_id, record.track_id) for record in mot_records] == [(1, 1)]
+
+    all_result = ExportMOTFromClassAwareTracking(
+        source_path=source,
+        output_dir=tmp_path / "all-mot",
+    ).execute()
+    assert all_result.output_path.read_text(encoding="utf-8") == "".join(
+        record.to_mot_record().to_line() + "\n" for record in records
+    )
+
+
+def test_class_aware_reader_rejects_invalid_schema_and_duplicate_rows(
+    tmp_path: Path,
+) -> None:
+    source = tmp_path / "tracks.jsonl"
+    source.write_text(
+        '{"schema_version":"unknown","frame_id":1}\n',
+        encoding="utf-8",
+    )
+    with pytest.raises(MLXUserError, match="unsupported schema_version"):
+        read_class_aware_tracking_file(source)
+
+    invalid_id = ClassAwareTrackingRecord(
+        frame_id=1,
+        track_id=1,
+        class_id=0,
+        label=None,
+        bounding_box=BoundingBox(0, 0, 10, 10),
+        confidence=1,
+    ).to_dict()
+    invalid_id["frame_id"] = 1.5
+    source.write_text(json.dumps(invalid_id) + "\n", encoding="utf-8")
+    with pytest.raises(MLXUserError, match="frame_id must be a JSON integer"):
+        read_class_aware_tracking_file(source)
+
+    record = ClassAwareTrackingRecord(
+        frame_id=1,
+        track_id=1,
+        class_id=0,
+        label=None,
+        bounding_box=BoundingBox(0, 0, 10, 10),
+        confidence=1,
+    )
+    source.write_text(
+        f"{record.to_json_line()}\n{record.to_json_line()}\n",
+        encoding="utf-8",
+    )
+    with pytest.raises(MLXUserError, match="appears more than once"):
+        read_class_aware_tracking_file(source)
+
+
 def test_mot_reader_rejects_malformed_rows(tmp_path: Path) -> None:
     path = tmp_path / "bad.txt"
     path.write_text("1,2,3\n", encoding="utf-8")
@@ -398,9 +492,15 @@ def test_tracking_video_command_streams_results_and_filters_classes(tmp_path: Pa
     ).execute()
 
     records = read_mot_file(result.output_path)
+    class_records = read_class_aware_tracking_file(result.class_aware_output_path)
     assert result.frames_processed == 2
     assert result.tracks_written == 2
     assert {record.track_id for record in records} == {1}
+    assert result.class_aware_output_path == tmp_path / "output" / "tracks.jsonl"
+    assert [(record.class_id, record.label) for record in class_records] == [
+        (0, "person"),
+        (0, "person"),
+    ]
     assert source.released is True
     assert result.replay_data_path == tmp_path / "output" / "replay.json"
     assert result.replay_html_path == tmp_path / "output" / "replay.html"
@@ -409,6 +509,10 @@ def test_tracking_video_command_streams_results_and_filters_classes(tmp_path: Pa
     assert replay["canvas"] == {"width": 40, "height": 30}
     assert replay["fps"] == pytest.approx(12.5)
     assert replay["predictions"]["record_count"] == 2
+    assert {
+        (row["class_id"], row["label"])
+        for row in replay["predictions"]["records"]
+    } == {(0, "person")}
     assert events[-1].level == "success"
 
 
@@ -530,6 +634,63 @@ def test_export_tracking_replay_is_portable_and_infers_canvas(tmp_path: Path) ->
         ).execute()
 
 
+def test_export_tracking_replay_rejects_mismatched_class_metadata(
+    tmp_path: Path,
+) -> None:
+    predictions = tmp_path / "tracks.txt"
+    class_aware = tmp_path / "tracks.jsonl"
+    predictions.write_text(
+        MOTRecord(1, 1, 0, 0, 10, 10, 0.9).to_line() + "\n",
+        encoding="utf-8",
+    )
+    class_aware.write_text(
+        ClassAwareTrackingRecord(
+            frame_id=1,
+            track_id=2,
+            class_id=0,
+            label="person",
+            bounding_box=BoundingBox(0, 0, 10, 10),
+            confidence=0.9,
+        ).to_json_line()
+        + "\n",
+        encoding="utf-8",
+    )
+
+    with pytest.raises(MLXUserError, match="same frame/track rows"):
+        ExportTrackingReplay(
+            predictions_path=predictions,
+            class_aware_path=class_aware,
+            output_dir=tmp_path / "replay",
+        ).execute()
+
+
+def test_tracking_runner_exports_mot_from_class_aware_jsonl(tmp_path: Path) -> None:
+    from mlx.modes.object_detection.tracking import runner
+
+    source = tmp_path / "tracks.jsonl"
+    record = ClassAwareTrackingRecord(
+        frame_id=1,
+        track_id=1,
+        class_id=3,
+        label="bike",
+        bounding_box=BoundingBox(1, 2, 4, 6),
+        confidence=0.7,
+    )
+    source.write_text(record.to_json_line() + "\n", encoding="utf-8")
+
+    result = runner.run_tracking(
+        {
+            "action": "export-mot",
+            "tracking_jsonl": str(source),
+            "output_path": str(tmp_path / "mot"),
+            "track_class_ids": [3],
+        }
+    )
+
+    assert result.output_path == tmp_path / "mot" / "tracks.txt"
+    assert result.rows_written == 1
+
+
 def test_tracking_runner_wires_visualization_from_display_flag(monkeypatch) -> None:
     from mlx.modes.object_detection.tracking import runner
 
@@ -590,6 +751,8 @@ def test_tracking_video_command_removes_temporary_output_for_empty_video(
     assert source.released is True
     assert not (output / "tracks.txt").exists()
     assert not (output / ".tracks.txt.tmp").exists()
+    assert not (output / "tracks.jsonl").exists()
+    assert not (output / ".tracks.jsonl.tmp").exists()
 
 
 def test_tracking_video_command_rejects_existing_metric_before_processing(

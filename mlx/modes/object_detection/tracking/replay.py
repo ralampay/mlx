@@ -8,6 +8,10 @@ from pathlib import Path
 from typing import Any
 
 from mlx.core.exceptions import MLXUserError
+from mlx.modes.object_detection.tracking.class_aware import (
+    ClassAwareTrackingRecord,
+    read_class_aware_tracking_file,
+)
 from mlx.modes.object_detection.tracking.mot import MOTRecord, read_mot_file
 from mlx.modes.object_detection.tracking.replay_html import (
     render_tracking_replay_html,
@@ -34,6 +38,7 @@ class ExportTrackingReplay:
         *,
         predictions_path: Path,
         output_dir: Path,
+        class_aware_path: Path | None = None,
         frame_width: int | None = None,
         frame_height: int | None = None,
         frame_count: int | None = None,
@@ -49,6 +54,7 @@ class ExportTrackingReplay:
     ) -> None:
         self.predictions_path = predictions_path
         self.output_dir = output_dir
+        self.class_aware_path = class_aware_path
         self.frame_width = frame_width
         self.frame_height = frame_height
         self.frame_count = frame_count
@@ -67,6 +73,16 @@ class ExportTrackingReplay:
         self._validate_outputs(data_path, html_path)
 
         predictions = read_mot_file(self.predictions_path)
+        class_aware_records = (
+            read_class_aware_tracking_file(self.class_aware_path)
+            if self.class_aware_path is not None
+            else ()
+        )
+        class_metadata = _validate_class_metadata(
+            predictions,
+            class_aware_records,
+            class_aware_path=self.class_aware_path,
+        )
         ground_truth = (
             read_mot_file(self.ground_truth_path, ground_truth=True)
             if self.ground_truth_path is not None
@@ -87,7 +103,11 @@ class ExportTrackingReplay:
                 for record in ground_truth
                 if record.frame_id <= self.frame_count
             )
-        payload = self._build_payload(predictions, ground_truth)
+        payload = self._build_payload(
+            predictions,
+            ground_truth,
+            class_metadata=class_metadata,
+        )
         try:
             data_text = json.dumps(payload, indent=2, allow_nan=False) + "\n"
             html_text = self.html_renderer(payload)
@@ -138,6 +158,8 @@ class ExportTrackingReplay:
         self,
         predictions: tuple[MOTRecord, ...],
         ground_truth: tuple[MOTRecord, ...],
+        *,
+        class_metadata: Mapping[tuple[int, int], ClassAwareTrackingRecord],
     ) -> dict[str, Any]:
         all_records = predictions + ground_truth
         max_frame = max((record.frame_id for record in all_records), default=0)
@@ -161,7 +183,10 @@ class ExportTrackingReplay:
             "frame_count": frame_count,
             "fps": float(self.fps),
             "run": dict(self.run_metadata),
-            "predictions": _record_collection(predictions),
+            "predictions": _record_collection(
+                predictions,
+                class_metadata=class_metadata,
+            ),
             "ground_truth": (
                 _record_collection(ground_truth) if self.ground_truth_path else None
             ),
@@ -221,7 +246,12 @@ class ExportTrackingReplay:
             ) from exc
 
 
-def _record_collection(records: tuple[MOTRecord, ...]) -> dict[str, Any]:
+def _record_collection(
+    records: tuple[MOTRecord, ...],
+    *,
+    class_metadata: Mapping[tuple[int, int], ClassAwareTrackingRecord] | None = None,
+) -> dict[str, Any]:
+    class_metadata = class_metadata or {}
     return {
         "record_count": len(records),
         "track_count": len({record.track_id for record in records}),
@@ -234,7 +264,59 @@ def _record_collection(records: tuple[MOTRecord, ...]) -> dict[str, Any]:
                 "width": record.width,
                 "height": record.height,
                 "confidence": record.confidence,
+                "class_id": (
+                    class_metadata[(record.frame_id, record.track_id)].class_id
+                    if (record.frame_id, record.track_id) in class_metadata
+                    else None
+                ),
+                "label": (
+                    class_metadata[(record.frame_id, record.track_id)].label
+                    if (record.frame_id, record.track_id) in class_metadata
+                    else None
+                ),
             }
             for record in records
         ],
     }
+
+
+def _validate_class_metadata(
+    predictions: tuple[MOTRecord, ...],
+    class_aware_records: tuple[ClassAwareTrackingRecord, ...],
+    *,
+    class_aware_path: Path | None,
+) -> dict[tuple[int, int], ClassAwareTrackingRecord]:
+    if class_aware_path is None:
+        return {}
+    prediction_by_key = {
+        (record.frame_id, record.track_id): record for record in predictions
+    }
+    class_by_key = {
+        (record.frame_id, record.track_id): record
+        for record in class_aware_records
+    }
+    if prediction_by_key.keys() != class_by_key.keys():
+        missing = sorted(prediction_by_key.keys() - class_by_key.keys())
+        extra = sorted(class_by_key.keys() - prediction_by_key.keys())
+        raise MLXUserError(
+            f"Class-aware tracking file '{class_aware_path}' does not describe the "
+            f"same frame/track rows as the MOT predictions. Missing keys: "
+            f"{missing[:3]}; extra keys: {extra[:3]}."
+        )
+    for key, mot_record in prediction_by_key.items():
+        extracted = class_by_key[key].to_mot_record()
+        values_match = all(
+            math.isclose(first, second, rel_tol=1e-9, abs_tol=1e-6)
+            for first, second in (
+                (mot_record.left, extracted.left),
+                (mot_record.top, extracted.top),
+                (mot_record.width, extracted.width),
+                (mot_record.height, extracted.height),
+                (mot_record.confidence, extracted.confidence),
+            )
+        )
+        if not values_match:
+            raise MLXUserError(
+                f"Class-aware tracking row {key} does not match its MOT prediction."
+            )
+    return class_by_key

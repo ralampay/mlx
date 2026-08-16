@@ -15,7 +15,7 @@ video frame
     → TrackingDetection values
     → your TrackingAlgorithm.update(...)
     → TrackingFrameResult
-    → tracks.txt and optional MOT metrics
+    → tracks.jsonl + tracks.txt and optional MOT metrics
 ```
 
 This boundary makes one tracking class usable with both detection providers.
@@ -28,6 +28,9 @@ mlx/modes/object_detection/tracking/
 ├── models.py                 input, state, and result types
 ├── registry.py               built-in names used by --tracker
 ├── detection.py              detection-to-tracking composition
+├── class_aware.py            class-aware writer and MOT extraction command
+├── mot.py                    strict MOT serialization and parsing
+├── replay.py                 portable replay projection command
 ├── session.py                complete video workflow
 └── algorithms/
     ├── motion.py             shared Kalman, IoU, and association code
@@ -37,16 +40,30 @@ mlx/modes/object_detection/tracking/
 
 ## Expected Tracking Formats
 
-There are four related formats in the workflow:
+There are five related formats in the workflow:
 
 1. `TrackingDetection` values supplied to the algorithm;
 2. `TrackingFrameResult` values returned by the algorithm;
-3. 10-column MOT rows written to disk and accepted as ground truth.
-4. the provider-neutral `replay.json` projection exported from those MOT rows.
+3. class-aware `tracks.jsonl` records written to disk;
+4. 10-column MOT rows written to disk and accepted as ground truth;
+5. the provider-neutral `replay.json` projection exported from those artifacts.
 
 Do not pass provider-specific Ultralytics or LibreYOLO result objects into a tracker.
 Do not return MOT `left, top, width, height` rows directly from `update()`. MLX owns
 the conversion between its in-memory types and the file format.
+
+The class fields have one clear source of truth: the `class_id` and `label` on each
+returned `TrackResult`. MLX copies those values into `tracks.jsonl`, `replay.json`,
+the live overlay, and the offline HTML replay. They are not stored in `tracks.txt`,
+because strict MOTChallenge prediction rows do not define a class column.
+
+| Consumer/artifact | Stores class ID and label? | Notes |
+| --- | --- | --- |
+| Live OpenCV overlay | Yes | Uses the current `TrackingFrameResult` directly |
+| `tracks.jsonl` | Yes | Versioned MLX class-aware interchange format |
+| `tracks.txt` | No | Strict, class-agnostic 10-column MOT format |
+| Prediction rows in `replay.json` | Yes | Joined from `tracks.jsonl` and `tracks.txt` |
+| Ground-truth rows in `replay.json` | No | Class fields are `null` for standard MOT GT |
 
 The default CLI visualization consumes the same `TrackingFrameResult`; a custom
 tracker does not implement any OpenCV drawing. For every track whose
@@ -89,6 +106,11 @@ Bounding boxes use absolute image pixels in `xyxy` form:
 - `x2` must be greater than or equal to `x1`; the same applies to `y2` and `y1`.
 - `confidence` is the detector score and must be finite.
 - `class_id` and `label` have already been normalized by the selected provider.
+
+For a matched track, preserve the detection's class values in the emitted
+`TrackResult`. If an algorithm permits a track's class to change, the value emitted
+for that frame is what MLX records; most trackers should instead restrict
+association to detections with the same class.
 
 The sequence contains only the current frame's detections. `--track-class-id`
 filtering happens before the sequence reaches the algorithm.
@@ -187,6 +209,77 @@ Therefore:
 This policy ensures `tracks.txt` contains observations supported by a detection in
 that frame while the tracking class remains free to keep bounded lost-track state.
 
+The same eligibility rule applies to `tracks.jsonl`, so both output files describe
+the same `(frame_id, track_id)` rows.
+
+### Class-aware file output: `tracks.jsonl`
+
+MOTChallenge prediction rows have no class field. MLX therefore writes a separate,
+versioned JSON Lines file that preserves each track's detector class without
+changing the MOT standard. Every non-empty line is one independent JSON object:
+
+```json
+{"schema_version":"mlx.tracking.record/v1","frame_id":1,"track_id":1,"class_id":0,"label":"person","bounding_box":{"x1":88.0,"y1":99.0,"x2":149.08,"y2":317.56},"confidence":0.92}
+```
+
+| Field | Type | Meaning |
+| --- | --- | --- |
+| `schema_version` | string | Must be `mlx.tracking.record/v1` |
+| `frame_id` | positive integer | 1-based video frame number |
+| `track_id` | positive integer | Stable identity within the run |
+| `class_id` | non-negative integer | Provider-normalized detector class |
+| `label` | string or null | Optional human-readable detector label |
+| `bounding_box` | object | Finite `x1`, `y1`, `x2`, `y2` pixel coordinates |
+| `confidence` | finite number | Most recent matched detector confidence |
+
+The file is safe to stream line by line and does not contain provider-specific
+objects. Within one frame, a track ID can occur only once. Use the public parser
+when consuming it from Python:
+
+```python
+from pathlib import Path
+
+from mlx.modes.object_detection.tracking import read_class_aware_tracking_file
+
+records = read_class_aware_tracking_file(Path("./tracking/tracks.jsonl"))
+for record in records:
+    print(record.frame_id, record.track_id, record.class_id, record.label)
+```
+
+To extract a strict MOTChallenge prediction file, including an optional class
+selection, use the command API:
+
+```python
+from pathlib import Path
+
+from mlx.modes.object_detection.tracking import ExportMOTFromClassAwareTracking
+
+result = ExportMOTFromClassAwareTracking(
+    source_path=Path("./tracking/tracks.jsonl"),
+    output_dir=Path("./tracking/person-mot"),
+    class_ids=(0,),  # Empty tuple exports all classes.
+    overwrite=True,
+).execute()
+print(result.output_path)
+```
+
+The equivalent CLI is:
+
+```bash
+python -m mlx --mode track --action export-mot \
+    --tracking-jsonl ./tracking/tracks.jsonl \
+    --track-class-id 0 \
+    --output ./tracking/person-mot
+```
+
+This separation is intentional: `tracks.jsonl` is lossless and class-aware, while
+the derived `tracks.txt` always remains interoperable with MOT tooling.
+
+During `track --action run`, repeatable `--track-class-id` values filter detections
+before they enter the tracking algorithm. During `track --action export-mot`, the
+same flag filters already-written JSONL records. Post-run extraction does not alter
+track IDs or rerun association.
+
 ### Benchmark matching
 
 When `--ground-truth` is supplied, MLX groups prediction and GT rows by frame and
@@ -202,11 +295,33 @@ The benchmark writes `metrics.json` containing:
 - match, false-positive, miss, and ID-switch counts;
 - processed frame, prediction, and ground-truth-object counts.
 
+The video command invokes this benchmark automatically against its strict
+`tracks.txt` when `--ground-truth` is supplied. An extracted MOT projection can be
+benchmarked independently:
+
+```python
+from pathlib import Path
+
+from mlx.modes.object_detection.tracking.evaluation import BenchmarkMOTTracking
+
+benchmark = BenchmarkMOTTracking(
+    ground_truth_path=Path("./gt.txt"),
+    predictions_path=Path("./tracking/person-mot/tracks.txt"),
+    output_path=Path("./tracking/person-mot/metrics.json"),
+    iou_threshold=0.5,
+    overwrite=True,
+).execute()
+```
+
+Because standard MOT ground truth does not identify detector classes, make sure the
+extracted prediction classes correspond to the population represented by the GT.
+
 ### Portable replay JSON
 
 `RunTrackingVideo` also exports `replay.json` using schema version
-`mlx.tracking.replay/v1`. It is derived from `tracks.txt` and optional ground truth;
-trackers do not return or write this schema themselves. A shortened example is:
+`mlx.tracking.replay/v1`. It combines `tracks.txt`, `tracks.jsonl`, and optional
+ground truth; trackers do not return or write this schema themselves. A shortened
+example is:
 
 ```json
 {
@@ -238,7 +353,9 @@ trackers do not return or write this schema themselves. A shortened example is:
         "top": 99.0,
         "width": 61.08,
         "height": 218.56,
-        "confidence": 0.92
+        "confidence": 0.92,
+        "class_id": 0,
+        "label": "person"
       }
     ]
   },
@@ -247,8 +364,10 @@ trackers do not return or write this schema themselves. A shortened example is:
 }
 ```
 
-When ground truth and metrics are available, `ground_truth` uses the same collection
-shape as `predictions` and `metrics` contains the values from `metrics.json`.
+Prediction rows receive `class_id` and `label` from `tracks.jsonl`. Ground-truth
+rows use the same collection shape but set both fields to `null`, because standard
+10-column MOT ground truth has no class column. When metrics are available,
+`metrics` contains the values from `metrics.json`.
 `source.name` may preserve only the input filename; no absolute video path or video
 pixels are required. `replay.html` embeds this payload for offline playback.
 
@@ -261,6 +380,7 @@ from mlx.modes.object_detection.tracking import ExportTrackingReplay
 
 result = ExportTrackingReplay(
     predictions_path=Path("./tracking/tracks.txt"),
+    class_aware_path=Path("./tracking/tracks.jsonl"),
     ground_truth_path=Path("./gt.txt"),
     output_dir=Path("./tracking"),
     frame_width=640,
@@ -274,6 +394,12 @@ result = ExportTrackingReplay(
 If dimensions are omitted, the exporter expands the canvas to the maximum box
 extent. Supplying the decoded frame dimensions is preferred because it preserves
 empty margins and makes projections comparable across runs.
+
+When `class_aware_path` is omitted, replay export remains compatible with an
+existing MOT-only file, but prediction `class_id` and `label` fields are `null` and
+the player cannot display a class label. When it is supplied, the exporter validates
+that both files contain the same frame/track pairs and matching geometry before
+combining them.
 
 ## Required Class Contract
 
@@ -479,9 +605,9 @@ python -m mlx --mode track --action run \
     --output ./tracking/sort-confidence
 ```
 
-The run automatically produces live boxes, `tracks.txt`, `metrics.json`,
-`replay.json`, and `replay.html`. Compare the benchmark with the unmodified default
-before deciding whether `0.35` improves your sequence.
+The run automatically produces live boxes, `tracks.jsonl`, `tracks.txt`,
+`metrics.json`, `replay.json`, and `replay.html`. Compare the benchmark with the
+unmodified default before deciding whether `0.35` improves your sequence.
 
 ### 3. Add one focused regression test
 
@@ -560,9 +686,9 @@ tracks. MLX, rather than this class, decides which snapshots are written or draw
 ```text
 your TrackingFrameResult
     ├── current tentative/confirmed → live bounding-box visualization
-    ├── current confirmed           → tracks.txt
+    ├── current confirmed           → tracks.jsonl + tracks.txt
     ├── tracks.txt + gt.txt         → metrics.json
-    └── MOT rows                    → replay.json + replay.html
+    └── both tracking projections   → replay.json + replay.html
 ```
 
 ### 1. Add the algorithm module
@@ -968,9 +1094,11 @@ python -m mlx --mode track --action run \
 ```
 
 Confirm that `tracks.txt` has exactly 10 comma-separated fields per row and inspect
+`tracks.jsonl` to confirm that class IDs and labels are retained. Inspect
 `metrics.json` for MOTA, MOTP, IDF1, precision, recall, false positives, misses, and
-ID switches. Open `replay.html` to confirm that IDs and boxes behave as expected
-over time, and inspect `replay.json` when integrating another projection tool.
+ID switches. Open `replay.html` to confirm that IDs, classes, and boxes behave as
+expected over time, and inspect `replay.json` when integrating another projection
+tool.
 
 ## Contribution Checklist
 

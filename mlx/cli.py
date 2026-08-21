@@ -1,4 +1,5 @@
 import argparse
+import json
 import sys
 from importlib import import_module
 from pathlib import Path
@@ -51,6 +52,20 @@ def build_parser() -> RichArgumentParser:
     parser = RichArgumentParser(add_help=False, prog="python -m mlx")
     parser.add_argument("-h", "--help", action="store_true", dest="help")
     parser.add_argument("--mode", default=None)
+    parser.add_argument("--platform", choices=("local", "aws"), default="local")
+    parser.add_argument("--config", default=None, dest="config_path")
+    parser.add_argument("--profile", default=None)
+    parser.add_argument("--job-name", default=None, dest="job_name")
+    parser.add_argument("--instance-type", default=None, dest="instance_type")
+    parser.add_argument("--watch", action="store_true", default=False)
+    parser.add_argument("--poll-interval", type=float, default=30.0, dest="poll_interval")
+    parser.add_argument("--rebuild-image", action="store_true", default=False, dest="rebuild_image")
+    parser.add_argument(
+        "--format",
+        choices=("table", "json"),
+        default="table",
+        dest="output_format",
+    )
     parser.add_argument("--provider", default="ultralytics")
     parser.add_argument("--model", default=None)
     parser.add_argument("--height", type=int, default=256)
@@ -192,6 +207,9 @@ def _render_help() -> None:
     usage.add_row("python -m mlx --mode object_detection --provider libreyolo --action ls-models")
     usage.add_row("python -m mlx --mode object_detection --provider libreyolo --action train --dataset coco8 --model yolo9-t")
     usage.add_row("python -m mlx --mode object_detection --action train --dataset coco8 --model yolo26")
+    usage.add_row("python -m mlx --mode object_detection --platform aws --action train --config ./aws-training.yaml")
+    usage.add_row("python -m mlx --mode object_detection --platform aws --action status --config ./aws-training.yaml --job-name JOB_NAME --watch")
+    usage.add_row("python -m mlx --mode object_detection --platform aws --action resume --config ./aws-training.yaml --job-name JOB_NAME")
     usage.add_row("python -m mlx --mode object_detection --action train --dataset coco8 --model draxnet-yolo26 --output ./runs/draxnet")
     usage.add_row("python -m mlx --mode object_detection --action infer-camera --model draxnet-yolo26 --model-path ./runs/draxnet/exp/weights/best.pt")
     usage.add_row("python -m mlx --mode object_detection --action convert --model-path ./runs/draxnet/exp/weights/best.pt --output ./exports")
@@ -220,6 +238,14 @@ def _render_help() -> None:
     options.add_column("Default", style="magenta")
     options.add_column("Description", style="white")
     options.add_row("--mode", "None", "Mode to run: object_detection, track, image_classification, segmentation, or nlp.")
+    options.add_row("--platform", "local", "Execution platform. AWS is supported for object-detection training lifecycle actions.")
+    options.add_row("--config", "None", "AWS YAML job configuration. Local execution does not read this file.")
+    options.add_row("--profile", "YAML/default", "AWS shared-credentials profile. An explicit value overrides aws.profile in YAML.")
+    options.add_row("--job-name", "None", "SageMaker job name used by status, stop, and resume.")
+    options.add_row("--instance-type", "YAML", "Explicit AWS instance-type override for train or resume.")
+    options.add_row("--watch", "False", "Poll AWS job status until it reaches a terminal state.")
+    options.add_row("--format", "table", "Render AWS lifecycle results as a table or JSON.")
+    options.add_row("--rebuild-image", "False", "Force a new content-tagged SageMaker image build and ECR push.")
     options.add_row("--provider", "ultralytics", "Object-detection provider: ultralytics or libreyolo.")
     options.add_row("--model", "None", "Provider-specific model identifier, YAML path, or architecture name.")
     options.add_row("--action", "mode-specific", "Sub-action such as train, ls-models, infer-video, convert, benchmark, or build-dataset.")
@@ -313,7 +339,7 @@ def _render_help() -> None:
     available = Table(title="Available Modes", show_header=True)
     available.add_column("Mode", style="cyan", no_wrap=True)
     available.add_column("Actions", style="white")
-    available.add_row("object_detection", "train, infer-camera, infer-video, convert, ls-models")
+    available.add_row("object_detection", "train, resume, status, stop, infer-camera, infer-video, convert, ls-models")
     available.add_row("track", "run, export-mot, ls-trackers")
     available.add_row("image_classification", "train, test, benchmark, infer-image, cam, build-dataset, ls-models")
     available.add_row("segmentation", "train, test, benchmark, infer-image, infer-camera, infer-video, build-dataset, ls-models")
@@ -328,6 +354,22 @@ def _build_config(namespace: argparse.Namespace) -> Dict[str, Any]:
         config["mode"] = config["mode"].replace("-", "_")
     config["input_size"] = (config["width"], config["height"])
     return config
+
+
+def _explicit_option_destinations(
+    parser: argparse.ArgumentParser,
+    args: Sequence[str],
+) -> set[str]:
+    """Return argparse destinations explicitly present on the command line."""
+
+    destinations: set[str] = set()
+    option_actions = parser._option_string_actions
+    for token in args:
+        option = token.split("=", 1)[0]
+        action = option_actions.get(option)
+        if action is not None:
+            destinations.add(action.dest)
+    return destinations
 
 
 def _resolve_mode_runner(mode: str) -> ModeRunner:
@@ -372,25 +414,36 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
         return 2
 
     config = _build_config(namespace)
+    config["_explicit_options"] = _explicit_option_destinations(parser, args)
     apply_global_seed(config.get("random_seed"))
-    print_startup(
-        config["mode"],
-        config.get("action"),
-        config.get("model") or config.get("model_file"),
-    )
+    if config.get("output_format") != "json":
+        print_startup(
+            config["mode"],
+            config.get("action"),
+            config.get("model") or config.get("model_file"),
+        )
 
     try:
         runner = _resolve_mode_runner(config["mode"])
         runner(config)
     except UnknownModeError as exc:
-        print_error(str(exc))
-        _render_unknown_mode()
+        if config.get("output_format") == "json":
+            print(json.dumps({"error": str(exc)}), file=sys.stderr)
+        else:
+            print_error(str(exc))
+            _render_unknown_mode()
         return 1
     except MLXAbort:
-        print_warning("Action cancelled.")
+        if config.get("output_format") == "json":
+            print(json.dumps({"error": "Action cancelled."}), file=sys.stderr)
+        else:
+            print_warning("Action cancelled.")
         return 1
     except MLXUserError as exc:
-        print_error(str(exc))
+        if config.get("output_format") == "json":
+            print(json.dumps({"error": str(exc)}), file=sys.stderr)
+        else:
+            print_error(str(exc))
         return 1
 
     return 0

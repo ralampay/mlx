@@ -37,6 +37,10 @@ tracking = [
     "motmetrics>=1.4.0",
     "scipy>=1.10.0"
 ]
+aws = [
+    "boto3>=1.34.0",
+    "PyYAML>=6.0.1"
+]
 
 [project.scripts]
 mlx = "mlx.cli:main"
@@ -47,3 +51,7 @@ build-backend = "setuptools.build_meta"
 
 [tool.setuptools.packages.find]
 include = ["mlx*"]
+
+[tool.setuptools.package-data]
+mlx = [".dockerignore"]
+"mlx.modes.object_detection.aws" = ["Dockerfile"]

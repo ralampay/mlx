@@ -4,7 +4,7 @@ import csv
 from collections.abc import Iterable
 from numbers import Real
 from pathlib import Path
-from typing import Any, Optional, Union
+from typing import Any, Callable, Optional, Union
 
 from rich.panel import Panel
 from rich.table import Table
@@ -24,11 +24,17 @@ from mlx.modes.object_detection.ultralytics.utils import (
 
 
 class TrainUltralyticsObjectDetection:
-    def __init__(self, config: dict[str, Any]) -> None:
+    def __init__(
+        self,
+        config: dict[str, Any],
+        *,
+        checkpoint_observer: Optional[Callable[[Path], None]] = None,
+    ) -> None:
         self.config = config
+        self.checkpoint_observer = checkpoint_observer
 
     def execute(self):
-        return _run_training(self.config)
+        return _run_training(self.config, checkpoint_observer=self.checkpoint_observer)
 
 
 def train_object_detection(config: dict[str, Any]):
@@ -37,7 +43,11 @@ def train_object_detection(config: dict[str, Any]):
     return TrainUltralyticsObjectDetection(config).execute()
 
 
-def _run_training(config: dict[str, Any]):
+def _run_training(
+    config: dict[str, Any],
+    *,
+    checkpoint_observer: Optional[Callable[[Path], None]] = None,
+):
     resolved_cfg, resolved_weights = resolve_model_paths(
         config,
         require_yaml=True,
@@ -107,6 +117,11 @@ def _run_training(config: dict[str, Any]):
     overrides["amp"] = bool(config.get("amp", overrides.get("amp", True)))
     model.overrides = overrides
     model.ckpt_path = str(effective_weights) if effective_weights else None
+    if checkpoint_observer is not None:
+        model.add_callback(
+            "on_model_save",
+            lambda trainer: checkpoint_observer(Path(trainer.last)),
+        )
 
     train_kwargs = {
         "batch": batch_size,
@@ -119,6 +134,7 @@ def _run_training(config: dict[str, Any]):
         "plots": bool(config.get("plots", True)),
         "pretrained": overrides["pretrained"],
         "project": str(project_dir),
+        "save_period": int(config.get("save_period", -1)),
     }
     if auto_resume_checkpoint is not None:
         train_kwargs["resume"] = str(auto_resume_checkpoint)

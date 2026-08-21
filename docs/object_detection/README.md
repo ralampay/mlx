@@ -43,9 +43,65 @@ The neutral source is split by responsibility:
 - `providers.py`: lazy provider registry and provider protocol.
 - `streaming.py`: frame-source and frame-sink ports plus OpenCV adapters.
 - `artifacts.py`: provider-shared checkpoint discovery and ONNX destination rules.
+- `aws/`: SageMaker Managed Spot submission, status, stop, resume, and container recovery.
 - `libreyolo/`: Ralampay LibreYOLO training, conversion, model resolution, and decoding.
 - `ultralytics/`: Ultralytics training, conversion, model resolution, and decoding.
 - `tracking/`: detector-neutral online tracking types, protocol, and per-frame command.
+
+## AWS SageMaker Managed Spot Training
+
+AWS training is asynchronous and uses Managed Spot by default. The dataset ZIP and checkpoint
+bucket/prefix must already exist in the same region. MLX does not create or delete user S3
+buckets. The complete [AWS setup and operations guide](./aws-sagemaker-training.md) documents
+local profiles, least-privilege caller and execution-role policies, S3 preparation, VPC/KMS
+options, lifecycle commands, recovery, and troubleshooting. Start with
+[the example configuration](./aws-training.example.yaml):
+
+```bash
+python -m pip install ".[aws,object-detection]"
+
+python -m mlx --mode object-detection --action train \
+    --platform aws --config ./docs/object_detection/aws-training.example.yaml \
+    --profile mlx-training
+```
+
+The first submission creates or reuses a SageMaker execution role and ECR repository, then builds
+and pushes the included SageMaker Docker image. Later submissions reuse the content-tagged image.
+The caller therefore needs Docker plus AWS permissions for S3 validation, IAM, ECR, SageMaker,
+CloudWatch, STS, and `iam:PassRole`. Supply `aws.execution_role_arn` or `aws.image_uri` to reuse
+pre-provisioned infrastructure.
+
+The submit result includes a job name and copyable locations. Inspect it once or watch until it
+finishes:
+
+```bash
+python -m mlx --mode object-detection --action status \
+    --platform aws --config ./aws-training.yaml --job-name JOB_NAME
+
+python -m mlx --mode object-detection --action status \
+    --platform aws --config ./aws-training.yaml --job-name JOB_NAME --watch
+```
+
+Stop and later continue a run without locating a checkpoint manually:
+
+```bash
+python -m mlx --mode object-detection --action stop \
+    --platform aws --config ./aws-training.yaml --job-name JOB_NAME
+
+python -m mlx --mode object-detection --action resume \
+    --platform aws --config ./aws-training.yaml --job-name JOB_NAME
+```
+
+SageMaker automatically restores checkpoints when Spot capacity is interrupted. Manual resume
+creates a new SageMaker attempt for the same logical run and reuses the original image and shared
+recovery prefix. A resumed configuration may select another instance type, change runtime/wait
+limits, or raise the total epoch target; dataset, provider, and model must remain unchanged.
+
+MLX retains two alternating validated resume snapshots plus the best model. Recovery is at an
+epoch boundary, so an interruption can repeat work from the incomplete epoch but not earlier
+validated epochs. `status` reports recoverable epoch progress, Spot interruptions, active and
+billable time, ETA when enough epoch data exists, failure information, and artifact URIs. Use
+`--format json` for automation; watched JSON output is JSON Lines.
 
 ## Generic Tracking by Detection
 

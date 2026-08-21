@@ -148,6 +148,7 @@ class TrainLibreYOLOObjectDetection:
             "nbs": int(self.config.get("nbs", 64)),
             "warmup_epochs": float(self.config.get("warmup_epochs", 3.0)),
             "save_plots": bool(self.config.get("plots", True)),
+            "save_period": int(self.config.get("save_period", -1)),
         }
         if allow_pretrained:
             kwargs["pretrained"] = bool(self.config.get("pretrained", False))

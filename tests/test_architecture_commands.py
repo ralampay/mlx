@@ -95,8 +95,11 @@ def test_cli_routes_detection_through_neutral_runner_and_parses_provider() -> No
     assert MODE_REGISTRY["object_detection"] == (
         "mlx.modes.object_detection.runner:run_object_detection"
     )
-    namespace = build_parser().parse_args(["--provider", "custom"])
+    namespace = build_parser().parse_args(
+        ["--provider", "custom", "--profile", "mlx-training"]
+    )
     assert namespace.provider == "custom"
+    assert namespace.profile == "mlx-training"
 
 
 def test_typed_request_round_trips_legacy_extra_values() -> None:

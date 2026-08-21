@@ -1,0 +1,20 @@
+version: 1
+
+aws:
+  region: ap-southeast-1
+  # Optional. An explicit CLI --profile overrides this value.
+  profile: mlx-training
+  dataset_s3_uri: s3://my-dataset-bucket/datasets/object-detection.zip
+  checkpoint_s3_uri: s3://my-training-bucket/mlx-checkpoints
+  instance_type: ml.g4dn.xlarge
+  managed_spot: true
+  max_runtime_seconds: 86400
+  # Defaults to twice max_runtime_seconds when omitted.
+  max_wait_seconds: 172800
+
+training:
+  provider: ultralytics
+  model: yolo26
+  epochs: 100
+  batch_size: 16
+  # Omit device to choose GPU 0 when SageMaker exposes a GPU.

@@ -23,6 +23,11 @@ from mlx.modes.object_detection.streaming import OpenCVFrameSink, OpenCVFrameSou
 
 
 def run_object_detection(config: dict[str, Any]) -> Any:
+    if config.get("platform", "local") == "aws":
+        from mlx.modes.object_detection.aws.runner import run_aws_object_detection
+
+        return run_aws_object_detection(config)
+
     action = config.get("action") or "train"
     reporter = RichWorkflowReporter()
 
@@ -71,4 +76,3 @@ def run_object_detection(config: dict[str, Any]) -> Any:
     raise MLXUserError(
         f"Unsupported action '{action}' for object-detection. Available actions: {available}."
     )
-

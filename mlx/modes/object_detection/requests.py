@@ -41,6 +41,7 @@ class TrainObjectDetectionRequest(ObjectDetectionRequest):
     loss_clip: Optional[float] = None
     random_seed: Optional[int] = None
     plots: bool = True
+    save_period: int = -1
 
 
 @dataclass(frozen=True)
@@ -62,4 +63,3 @@ class ListObjectDetectionModelsRequest:
     @classmethod
     def from_config(cls, config: Mapping[str, Any]):
         return cls(provider=str(config.get("provider") or "ultralytics"))
-

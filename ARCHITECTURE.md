@@ -53,6 +53,7 @@ mlx/
     │   ├── commands.py           neutral train, create, convert, list, and stream commands
     │   ├── artifacts.py          shared checkpoint discovery and export-path rules
     │   ├── streaming.py          frame ports, optional metadata capability, OpenCV adapters
+    │   ├── aws/                  SageMaker Spot submission, lifecycle, and recovery boundary
     │   ├── tracking/             tracking, MOT evaluation, replay export, registry, algorithms
     │   ├── libreyolo/            LibreYOLO implementation using the Ralampay fork
     │   └── ultralytics/          Ultralytics implementation and compatibility exports
@@ -65,7 +66,7 @@ The primary workflow commands are:
 | --- | --- |
 | Image classification | `TrainImageClassificationModel`, `SmokeTestImageClassificationModel`, `BenchmarkImageClassification`, `InferImageClassification`, `GenerateImageClassificationCams`, `BuildImageClassificationDataset`, `ListImageClassificationModels` |
 | Segmentation | `TrainSegmentationModel`, `SmokeTestSegmentationModel`, `BenchmarkSegmentation`, `InferSegmentationImage`, `RunSegmentationStreamInference`, `BuildSegmentationDataset`, `ListSegmentationModels` |
-| Object detection | `TrainObjectDetectionModel`, `CreateObjectDetector`, `ConvertObjectDetectionModel`, `ListObjectDetectionModels`, `RunObjectDetectionStream` |
+| Object detection | `TrainObjectDetectionModel`, `CreateObjectDetector`, `ConvertObjectDetectionModel`, `ListObjectDetectionModels`, `RunObjectDetectionStream`, AWS submit/status/stop/resume commands |
 | Tracking | `CreateTrackingAlgorithm`, `RunObjectDetectionTrackingCommand`, `RunTrackByDetectionCommand`, `RunTrackingVideo`, `ExportMOTFromClassAwareTracking`, `BenchmarkMOTTracking`, `ExportTrackingReplay` |
 | NLP | `EmbedCsvCommand` (`EmbedCsv` is the legacy path-returning API) |
 
@@ -153,6 +154,36 @@ B5 only, attention and efficient mode enabled, average fusion, and zero drop pat
 conversion adapters may accept other axis-aligned detection checkpoints supported by the fork,
 but non-detection tasks and cross-provider checkpoint loading are outside the neutral provider
 contract.
+
+## AWS SageMaker Training
+
+Object-detection training selects an execution platform independently from its model provider.
+`local` remains the default and never reads AWS configuration. `--platform aws` routes to the
+mode-owned `mlx.modes.object_detection.aws` package, where command classes coordinate injected
+S3, ECR, IAM, SageMaker, CloudWatch, Docker, and checkpoint components. The neutral
+`TrainObjectDetectionModel` still owns provider selection inside the training container.
+Local AWS authentication is selected at the composition boundary: an explicit `--profile`
+overrides `aws.profile` in YAML, which otherwise delegates to Boto3's standard credential chain.
+Credential material never crosses into commands, manifests, images, or training hyperparameters.
+
+AWS training uses one logical MLX run across one or more SageMaker job attempts. Managed Spot is
+the default. SageMaker restores `/opt/ml/checkpoints` after an interruption; the container then
+validates two alternating recovery slots by epoch and SHA-256 before reconstructing the
+provider's `last.pt`. Manual resume creates a new SageMaker job attempt for the same logical run,
+reuses the original immutable image reference, and permits only capacity/runtime changes and a
+higher total epoch target. Provider/model/dataset changes are rejected at that boundary.
+
+Users own the dataset ZIP and shared checkpoint S3 bucket or prefix. MLX never creates, deletes,
+empties, or attaches lifecycle policies to those buckets. Logical runs and attempts receive
+separate prefixes under the configured checkpoint base. MLX may create and reuse a tagged ECR
+repository and narrowly scoped SageMaker execution role when the caller does not provide them.
+Stopping compute preserves checkpoints and returns a resumable job identity.
+
+Recovery is intentionally a completed-epoch guarantee. Provider `last.pt` files include model,
+epoch, optimizer, scaler, EMA, and available scheduler/RNG state; a project-owned publisher only
+announces CloudWatch progress after copying and validating a complete checkpoint into the
+inactive recovery slot. If the newest slot is corrupt, the prior slot is used. Work from an
+incomplete interrupted epoch may be repeated.
 
 ## Presentation, Errors, and Compatibility
 

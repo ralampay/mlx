@@ -75,7 +75,11 @@ the object-detection provider they need:
 python -m pip install ".[object-detection-ultralytics]"
 python -m pip install ".[object-detection-libreyolo]"
 python -m pip install ".[object-detection]"  # both providers
+python -m pip install ".[aws,object-detection]"  # SageMaker training lifecycle
 ```
+
+For local AWS credentials, least-privilege IAM policies, S3 preparation, and SageMaker lifecycle
+commands, see the [AWS object-detection training guide](docs/object_detection/aws-sagemaker-training.md).
 
 ## Command-line interface
 
@@ -89,7 +93,7 @@ Available CLI modes are:
 
 | Mode | Actions |
 | --- | --- |
-| `object_detection` | `train`, `infer-camera`, `infer-video`, `convert`, `ls-models` |
+| `object_detection` | `train`, AWS `resume`/`status`/`stop`, `infer-camera`, `infer-video`, `convert`, `ls-models` |
 | `track` | `run`, `export-mot`, `ls-trackers` |
 | `image_classification` | `train`, `test`, `benchmark`, `infer-image`, `cam`, `build-dataset`, `ls-models` |
 | `segmentation` | `train`, `test`, `benchmark`, `infer-image`, `infer-camera`, `infer-video`, `build-dataset`, `ls-models` |

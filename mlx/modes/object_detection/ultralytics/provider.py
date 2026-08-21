@@ -18,7 +18,19 @@ class UltralyticsProvider:
         )
 
         emit(reporter, "info", "Starting Ultralytics object-detection training.")
-        return TrainUltralyticsObjectDetection(request.to_config()).execute()
+
+        def report_checkpoint(path) -> None:
+            emit(
+                reporter,
+                "progress",
+                "Ultralytics completed a recoverable training epoch.",
+                payload={"checkpoint_path": str(path)},
+            )
+
+        return TrainUltralyticsObjectDetection(
+            request.to_config(),
+            checkpoint_observer=report_checkpoint,
+        ).execute()
 
     def create_detector(self, request: ObjectDetectionRequest):
         from mlx.modes.object_detection.ultralytics.adapters import build_detection_adapter
@@ -64,4 +76,3 @@ class UltralyticsProvider:
 
 def get_provider() -> UltralyticsProvider:
     return UltralyticsProvider()
-

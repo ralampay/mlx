@@ -10,7 +10,14 @@ from mlx.modes.image_classification.evaluation import BenchmarkImageClassificati
 from mlx.modes.image_classification.inference import InferImageClassification
 from mlx.modes.image_classification.list_models import ListImageClassificationModels
 from mlx.modes.image_classification.models import DEFAULT_MODEL, model_family_for
-from mlx.modes.image_classification.presentation import print_config_summary
+from mlx.modes.image_classification.presentation import (
+    display_cam_results,
+    display_classification_predictions,
+    display_similarity_matches,
+    print_config_summary,
+    RichImageClassificationReporter,
+    resolve_image_dataset_build_request,
+)
 from mlx.modes.image_classification.requests import (
     BuildImageClassificationDatasetRequest,
     ImageClassificationRequest,
@@ -52,25 +59,49 @@ def _list_models(config: dict[str, Any]):
     return summaries
 
 
+def _infer_image(config: dict[str, Any]):
+    result = InferImageClassification(
+        ImageClassificationRequest.from_config(config),
+        reporter=RichImageClassificationReporter(),
+    ).execute()
+    if config.get("display", True):
+        if "top_matches" in result:
+            display_similarity_matches(result)
+        else:
+            display_classification_predictions(result)
+    return result
+
+
+def _generate_cams(config: dict[str, Any]):
+    results = GenerateImageClassificationCams(
+        ImageClassificationRequest.from_config(config),
+        reporter=RichImageClassificationReporter(),
+    ).execute()
+    if config.get("display", True):
+        display_cam_results(results, delay=int(config.get("window_delay", 0)))
+    return results
+
+
 ACTION_HANDLERS = {
     "benchmark": lambda config: BenchmarkImageClassification(
-        ImageClassificationRequest.from_config(config)
+        ImageClassificationRequest.from_config(config),
+        reporter=RichImageClassificationReporter(),
     ).execute(),
     "build-dataset": lambda config: BuildImageClassificationDataset(
-        BuildImageClassificationDatasetRequest.from_config(config)
+        BuildImageClassificationDatasetRequest.from_config(config),
+        reporter=RichImageClassificationReporter(),
+        input_resolver=resolve_image_dataset_build_request,
     ).execute(),
-    "infer-image": lambda config: InferImageClassification(
-        ImageClassificationRequest.from_config(config)
-    ).execute(),
+    "infer-image": _infer_image,
     "ls-models": _list_models,
-    "cam": lambda config: GenerateImageClassificationCams(
-        ImageClassificationRequest.from_config(config)
-    ).execute(),
+    "cam": _generate_cams,
     "test": lambda config: SmokeTestImageClassificationModel(
-        ImageClassificationRequest.from_config(config)
+        ImageClassificationRequest.from_config(config),
+        reporter=RichImageClassificationReporter(),
     ).execute(),
     "train": lambda config: TrainImageClassificationModel(
-        ImageClassificationRequest.from_config(config)
+        ImageClassificationRequest.from_config(config),
+        reporter=RichImageClassificationReporter(),
     ).execute(),
 }
 

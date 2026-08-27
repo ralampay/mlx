@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from mlx.core.commands import WorkflowReporter, emit
 from mlx.modes.object_detection.requests import (
+    BenchmarkObjectDetectionRequest,
     ConvertObjectDetectionRequest,
     ListObjectDetectionModelsRequest,
     ObjectDetectionRequest,
@@ -16,7 +17,25 @@ class LibreYOLOProvider:
         from mlx.modes.object_detection.libreyolo.training import TrainLibreYOLOObjectDetection
 
         emit(reporter, "info", "Starting LibreYOLO object-detection training.")
-        return TrainLibreYOLOObjectDetection(request.to_config()).execute()
+        return TrainLibreYOLOObjectDetection(request, reporter=reporter).execute()
+
+    def benchmark(
+        self,
+        request: BenchmarkObjectDetectionRequest,
+        reporter: WorkflowReporter,
+    ):
+        from mlx.modes.object_detection.libreyolo.evaluation import (
+            BenchmarkLibreYOLOObjectDetection,
+        )
+
+        emit(reporter, "info", "Benchmarking a LibreYOLO object detector.")
+        result = BenchmarkLibreYOLOObjectDetection(request).execute()
+        emit(
+            reporter,
+            "success",
+            f"Object-detection benchmark artifacts written to {result.output_dir}.",
+        )
+        return result
 
     def create_detector(self, request: ObjectDetectionRequest):
         from mlx.modes.object_detection.libreyolo.adapters import build_detection_adapter
@@ -40,7 +59,7 @@ class LibreYOLOProvider:
         )
 
         emit(reporter, "info", "Exporting a LibreYOLO checkpoint.")
-        return ConvertLibreYOLOObjectDetectionModel(request.to_config()).execute()
+        return ConvertLibreYOLOObjectDetectionModel(request, reporter=reporter).execute()
 
     def list_models(
         self,

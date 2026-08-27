@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from mlx.core.commands import WorkflowReporter, emit
 from mlx.modes.object_detection.requests import (
+    BenchmarkObjectDetectionRequest,
     ConvertObjectDetectionRequest,
     ListObjectDetectionModelsRequest,
     ObjectDetectionRequest,
@@ -27,10 +28,30 @@ class UltralyticsProvider:
                 payload={"checkpoint_path": str(path)},
             )
 
-        return TrainUltralyticsObjectDetection(
-            request.to_config(),
+        command = TrainUltralyticsObjectDetection(
+            request,
             checkpoint_observer=report_checkpoint,
-        ).execute()
+        )
+        command.reporter = reporter
+        return command.execute()
+
+    def benchmark(
+        self,
+        request: BenchmarkObjectDetectionRequest,
+        reporter: WorkflowReporter,
+    ):
+        from mlx.modes.object_detection.ultralytics.evaluation import (
+            BenchmarkUltralyticsObjectDetection,
+        )
+
+        emit(reporter, "info", "Benchmarking an Ultralytics object detector.")
+        result = BenchmarkUltralyticsObjectDetection(request).execute()
+        emit(
+            reporter,
+            "success",
+            f"Object-detection benchmark artifacts written to {result.output_dir}.",
+        )
+        return result
 
     def create_detector(self, request: ObjectDetectionRequest):
         from mlx.modes.object_detection.ultralytics.adapters import build_detection_adapter
@@ -60,7 +81,7 @@ class UltralyticsProvider:
         )
 
         emit(reporter, "info", "Exporting an Ultralytics checkpoint.")
-        return ConvertUltralyticsObjectDetectionModel(request.to_config()).execute()
+        return ConvertUltralyticsObjectDetectionModel(request, reporter=reporter).execute()
 
     def list_models(
         self,

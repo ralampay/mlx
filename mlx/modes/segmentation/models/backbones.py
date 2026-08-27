@@ -7,8 +7,10 @@ import torch
 from torch import nn
 
 from mlx.core.exceptions import MLXUserError
-from mlx.modes.image_classification.models import build_image_classification_model
-from mlx.modes.image_classification.models.drax_mobilenet import DraxMobileNetV3Large
+from mlx.modes.segmentation.models.backbone_factory import (
+    ClassificationBackboneFactory,
+    build_default_classification_backbone,
+)
 
 
 @dataclass(frozen=True)
@@ -184,7 +186,7 @@ class SequentialStageEncoder(SegmentationEncoder):
 class DraxMobileNetEncoder(SequentialStageEncoder):
     def __init__(
         self,
-        model: DraxMobileNetV3Large,
+        model: nn.Module,
         output_channels: tuple[int, ...],
     ) -> None:
         super().__init__(
@@ -215,6 +217,8 @@ class DraxMobileNetEncoder(SequentialStageEncoder):
 def build_segmentation_encoder(
     model_name: str,
     config: dict[str, Any],
+    *,
+    backbone_factory: ClassificationBackboneFactory | None = None,
 ) -> SegmentationEncoder:
     try:
         spec = BACKBONE_SPECS[model_name]
@@ -233,7 +237,8 @@ def build_segmentation_encoder(
     ):
         model_config["drax_mobilenet_fusion_mode"] = spec.fusion_mode
 
-    classifier = build_image_classification_model(
+    factory = backbone_factory or build_default_classification_backbone
+    classifier = factory(
         spec.classification_model,
         model_config,
         num_classes=1,

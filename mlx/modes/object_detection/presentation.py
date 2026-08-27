@@ -4,14 +4,36 @@ import hashlib
 
 import cv2
 import numpy as np
+from rich.panel import Panel
+from rich.table import Table
 
 from mlx.core.commands import WorkflowEvent
-from mlx.core.ui import print_error, print_info, print_success, print_warning
-from mlx.modes.object_detection.models import DetectionResult
+from mlx.core.ui import console, print_error, print_info, print_success, print_warning
+from mlx.modes.object_detection.models import DetectionResult, ObjectDetectionBenchmarkResult
 
 
 class RichWorkflowReporter:
     def emit(self, event: WorkflowEvent) -> None:
+        if isinstance(event.payload, dict):
+            event_name = event.payload.get("event")
+            if event_name == "training_summary":
+                _print_key_value_panel(
+                    "Training Configuration",
+                    event.payload.get("values", {}),
+                )
+                return
+            if event_name == "training_metrics":
+                _print_rows_table(
+                    "Final Validation Metrics",
+                    event.payload.get("rows", ()),
+                )
+                return
+            if event_name == "conversion_summary":
+                _print_key_value_panel(
+                    "Conversion Summary",
+                    event.payload.get("values", {}),
+                )
+                return
         if event.level == "error":
             print_error(event.message)
         elif event.level == "warning":
@@ -20,6 +42,49 @@ class RichWorkflowReporter:
             print_success(event.message)
         else:
             print_info(event.message)
+
+
+def _print_key_value_panel(title: str, values: object) -> None:
+    if not isinstance(values, dict):
+        print_info(str(values))
+        return
+    table = Table.grid(padding=(0, 2))
+    table.add_column(style="cyan", no_wrap=True)
+    table.add_column(style="magenta")
+    for key, value in values.items():
+        table.add_row(str(key), str(value))
+    console.print(Panel(table, title=title, border_style="cyan"))
+
+
+def _print_rows_table(title: str, rows: object) -> None:
+    table = Table(title=title, show_lines=True)
+    table.add_column("Metric", style="cyan", no_wrap=True)
+    table.add_column("Value", justify="right", style="magenta")
+    if isinstance(rows, (list, tuple)):
+        for row in rows:
+            if isinstance(row, (list, tuple)) and len(row) == 2:
+                table.add_row(str(row[0]), str(row[1]))
+    console.print(table)
+
+
+def print_benchmark_result(result: ObjectDetectionBenchmarkResult) -> None:
+    table = Table(title="Object Detection Benchmark", show_lines=True)
+    table.add_column("Metric", style="cyan")
+    table.add_column("Value", justify="right", style="magenta")
+    labels = {
+        "precision": "Precision",
+        "recall": "Recall",
+        "f1": "F1",
+        "map_50": "mAP@0.50",
+        "map_50_95": "mAP@0.50:0.95",
+    }
+    for key, label in labels.items():
+        table.add_row(label, f"{result.metrics[key]:.6f}")
+    table.add_section()
+    table.add_row("Provider", result.provider)
+    table.add_row("Evaluator", result.evaluation_backend)
+    table.add_row("Artifacts", str(result.output_dir))
+    console.print(table)
 
 
 def annotate_detections(frame: np.ndarray, result: DetectionResult) -> np.ndarray:

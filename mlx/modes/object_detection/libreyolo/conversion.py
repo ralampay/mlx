@@ -3,19 +3,30 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Any
 
+from mlx.core.commands import NullWorkflowReporter, WorkflowReporter, emit
 from mlx.core.exceptions import MLXUserError
-from mlx.core.ui import print_info, print_success
 from mlx.modes.object_detection.artifacts import resolve_onnx_output_target
 from mlx.modes.object_detection.libreyolo.utils import (
     dependency_error,
     resolve_imgsz,
     resolve_model_path,
 )
+from mlx.modes.object_detection.requests import ConvertObjectDetectionRequest
 
 
 class ConvertLibreYOLOObjectDetectionModel:
-    def __init__(self, config: dict[str, Any]) -> None:
-        self.config = config
+    def __init__(
+        self,
+        config: dict[str, Any] | ConvertObjectDetectionRequest,
+        *,
+        reporter: WorkflowReporter | None = None,
+    ) -> None:
+        self.config = (
+            config.to_config()
+            if isinstance(config, ConvertObjectDetectionRequest)
+            else dict(config)
+        )
+        self.reporter = reporter or NullWorkflowReporter()
 
     def execute(self) -> Path:
         try:
@@ -32,13 +43,29 @@ class ConvertLibreYOLOObjectDetectionModel:
         output_target = resolve_onnx_output_target(self.config, resolved_weights)
         output_target.parent.mkdir(parents=True, exist_ok=True)
         device = str(self.config.get("device", "cpu"))
+        image_size = resolve_imgsz(self.config)
+
+        emit(
+            self.reporter,
+            "info",
+            "LibreYOLO object-detection ONNX export configured.",
+            payload={
+                "event": "conversion_summary",
+                "values": {
+                    "Model Path": resolved_weights,
+                    "Output Path": output_target,
+                    "Device": device,
+                    "Image Size": image_size,
+                },
+            },
+        )
 
         try:
-            print_info(f"Loading LibreYOLO checkpoint: {resolved_weights}")
+            emit(self.reporter, "info", f"Loading LibreYOLO checkpoint: {resolved_weights}")
             model = LibreYOLO(str(resolved_weights), device=device, task="detect")
-            print_info("Exporting LibreYOLO checkpoint to ONNX...")
+            emit(self.reporter, "info", "Exporting LibreYOLO checkpoint to ONNX...")
             exported_path = Path(
-                model.export(format="onnx", imgsz=resolve_imgsz(self.config), device=device)
+                model.export(format="onnx", imgsz=image_size, device=device)
             ).expanduser()
             if not exported_path.exists():
                 raise MLXUserError(
@@ -63,11 +90,16 @@ class ConvertLibreYOLOObjectDetectionModel:
                 "object-detection-libreyolo extra with ONNX export dependencies."
             ) from exc
 
-        print_success(f"LibreYOLO ONNX export complete: {final_path}")
+        emit(self.reporter, "success", f"LibreYOLO ONNX export complete: {final_path}")
         return final_path
 
 
 def convert_object_detection_model(config: dict[str, Any]) -> Path:
     """Compatibility function for direct LibreYOLO-provider callers."""
 
-    return ConvertLibreYOLOObjectDetectionModel(config).execute()
+    from mlx.modes.object_detection.presentation import RichWorkflowReporter
+
+    return ConvertLibreYOLOObjectDetectionModel(
+        config,
+        reporter=RichWorkflowReporter(),
+    ).execute()

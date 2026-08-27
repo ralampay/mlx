@@ -9,14 +9,12 @@ from typing import Any
 import cv2
 import numpy as np
 import torch
-from rich.table import Table
 from sklearn.metrics import matthews_corrcoef
 from torch import nn
 from torch.utils.data import DataLoader
-from tqdm import tqdm
 
+from mlx.core.commands import NullWorkflowReporter, WorkflowReporter, emit
 from mlx.core.exceptions import MLXUserError
-from mlx.core.ui import console, print_success
 from mlx.modes.segmentation.data import (
     SegmentationEvaluationDataset,
     resolve_segmentation_evaluation_split,
@@ -31,7 +29,7 @@ from mlx.modes.segmentation.metrics import (
     probability_metrics,
     threshold_sweep,
 )
-from mlx.modes.segmentation.presentation import blend_overlay, colorize_mask
+from mlx.modes.segmentation.visualization import blend_overlay, colorize_mask
 from mlx.modes.segmentation.research import (
     write_class_metrics_plot,
     write_confusion_matrix_artifacts,
@@ -47,7 +45,12 @@ from mlx.modes.segmentation.requests import SegmentationRequest
 
 
 class BenchmarkSegmentation:
-    def __init__(self, config: dict[str, Any] | SegmentationRequest) -> None:
+    def __init__(
+        self,
+        config: dict[str, Any] | SegmentationRequest,
+        *,
+        reporter: WorkflowReporter | None = None,
+    ) -> None:
         if isinstance(config, SegmentationRequest):
             config = config.to_config()
         self.config = config
@@ -56,6 +59,7 @@ class BenchmarkSegmentation:
         self.boundary_tolerance = int(config.get("boundary_tolerance", 2))
         self.calibration_bins = int(config.get("calibration_bins", 15))
         self.threshold_steps = int(config.get("threshold_steps", 101))
+        self.reporter = reporter or NullWorkflowReporter()
 
     def execute(self) -> dict[str, float]:
         self._validate_config()
@@ -91,7 +95,16 @@ class BenchmarkSegmentation:
             class_names,
         )
         result.metrics.update(timing)
-        self._render(result.metrics, result.class_rows)
+        emit(
+            self.reporter,
+            "success",
+            "Segmentation benchmark complete.",
+            payload={
+                "event": "segmentation_benchmark",
+                "metrics": result.metrics,
+                "class_rows": result.class_rows,
+            },
+        )
         output_dir = self._output_dir()
         if output_dir is not None:
             self._write_artifacts(
@@ -139,7 +152,7 @@ class BenchmarkSegmentation:
             torch.cuda.reset_peak_memory_stats()
 
         with torch.no_grad():
-            for images, masks in tqdm(loader, desc="Benchmarking segmentation"):
+            for batch_index, (images, masks) in enumerate(loader, start=1):
                 images = images.to(self.device)
                 masks_device = masks.to(self.device)
                 self._synchronize()
@@ -220,6 +233,13 @@ class BenchmarkSegmentation:
                             metadata,
                         )
                 sample_offset += len(images)
+                emit(
+                    self.reporter,
+                    "progress",
+                    f"Benchmarked segmentation batch {batch_index} of {len(loader)}.",
+                    current=batch_index,
+                    total=len(loader),
+                )
 
         wall_seconds = time.perf_counter() - wall_start
         targets = np.concatenate(target_batches, axis=0)
@@ -420,43 +440,11 @@ class BenchmarkSegmentation:
                 "config": self.config,
             },
         )
-        print_success(f"Segmentation research artifacts written to {output_dir}")
-
-    def _render(self, metrics: dict[str, float], class_rows: list[dict[str, Any]]) -> None:
-        table = Table(title="Segmentation Benchmark Results", show_lines=True)
-        table.add_column("Metric", style="cyan")
-        table.add_column("Value", justify="right", style="magenta")
-        for key in (
-            "cross_entropy_loss",
-            "pixel_accuracy",
-            "macro_dice",
-            "mean_foreground_dice",
-            "mean_iou",
-            "mean_foreground_iou",
-            "frequency_weighted_iou",
-            "cohen_kappa",
-            "multiclass_mcc",
-            "macro_roc_auc",
-            "macro_average_precision",
-            "expected_calibration_error",
-            "images_per_second_forward",
-        ):
-            table.add_row(key, f"{metrics[key]:.6f}")
-        console.print(table)
-        class_table = Table(title="Per-Class Segmentation Metrics")
-        for heading in ("Class", "Precision", "Recall", "Specificity", "Dice", "IoU", "ROC AUC"):
-            class_table.add_column(heading, justify="right" if heading != "Class" else "left")
-        for row in class_rows:
-            class_table.add_row(
-                str(row["class_name"]),
-                _format_metric(row.get("precision")),
-                _format_metric(row.get("recall")),
-                _format_metric(row.get("specificity")),
-                _format_metric(row.get("dice")),
-                _format_metric(row.get("iou")),
-                _format_metric(row.get("roc_auc")),
-            )
-        console.print(class_table)
+        emit(
+            self.reporter,
+            "success",
+            f"Segmentation research artifacts written to {output_dir}",
+        )
 
     def _synchronize(self) -> None:
         if self.device.startswith("cuda") and torch.cuda.is_available():
@@ -478,10 +466,3 @@ def _sha256(path: Path) -> str:
         while chunk := input_file.read(1024 * 1024):
             digest.update(chunk)
     return digest.hexdigest()
-
-
-def _format_metric(value: Any) -> str:
-    if value is None:
-        return "-"
-    numeric = float(value)
-    return f"{numeric:.4f}" if np.isfinite(numeric) else "nan"

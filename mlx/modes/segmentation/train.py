@@ -7,23 +7,11 @@ from typing import Any
 import cv2
 import numpy as np
 import torch
-from rich.console import Group
-from rich.live import Live
-from rich.panel import Panel
-from rich.progress import (
-    BarColumn,
-    Progress,
-    SpinnerColumn,
-    TextColumn,
-    TimeElapsedColumn,
-    TimeRemainingColumn,
-)
-from rich.table import Table
 from torch import nn, optim
 from torch.utils.data import DataLoader
 
+from mlx.core.commands import NullWorkflowReporter, WorkflowReporter, emit
 from mlx.core.exceptions import MLXUserError
-from mlx.core.ui import console, print_info, print_success
 from mlx.modes.segmentation.data import load_segmentation_datasets
 from mlx.modes.segmentation.metrics import (
     aggregate_confusion_metrics,
@@ -49,7 +37,12 @@ from mlx.modes.segmentation.utils import (
 
 
 class TrainSegmentationModel:
-    def __init__(self, config: dict[str, Any] | SegmentationRequest) -> None:
+    def __init__(
+        self,
+        config: dict[str, Any] | SegmentationRequest,
+        *,
+        reporter: WorkflowReporter | None = None,
+    ) -> None:
         if isinstance(config, SegmentationRequest):
             config = config.to_config()
         self.config = dict(config)
@@ -64,13 +57,16 @@ class TrainSegmentationModel:
         self.class_names = resolve_class_names(config, self.num_classes)
         self.config["class_names"] = self.class_names
         self.paths = resolve_train_output_paths(config, model_name=self.model_name)
+        self.reporter = reporter or NullWorkflowReporter()
 
     def execute(self) -> None:
         if self.epochs < 1:
             raise MLXUserError("--epochs must be at least 1 for segmentation training.")
         if self.num_classes < 2:
             raise MLXUserError("--num-classes must be at least 2 for segmentation training.")
-        print_info(
+        emit(
+            self.reporter,
+            "info",
             f"Starting segmentation training on device={self.device} for {self.epochs} epochs"
         )
         train_dataset, val_dataset = load_segmentation_datasets(
@@ -122,44 +118,19 @@ class TrainSegmentationModel:
                 "numpy_version": np.__version__,
             },
         )
-        progress = _build_progress(
-            epochs=self.epochs,
-            train_loader_size=len(train_loader),
-        )
-        epoch_task, batch_task = progress.task_ids
-        progress.update(epoch_task, completed=start_epoch)
-        checkpoint_panel = Panel(
-            (
-                f"Resumed at epoch {start_epoch} from {self.config['model_path']}"
-                if start_epoch
-                else "No model saved yet"
-            ),
-            title="Checkpoint",
-            border_style="dim",
-        )
-
-        with Live(
-            Group(progress, checkpoint_panel),
-            refresh_per_second=int(self.config.get("refresh_per_second", 2)),
-            transient=False,
-        ) as live:
-            for epoch in range(start_epoch, self.epochs):
+        for epoch in range(start_epoch, self.epochs):
                 epoch_start = time.perf_counter()
                 train_loss = self._train_epoch(
                     model,
                     train_loader,
                     criterion,
                     optimizer,
-                    progress,
-                    batch_task,
-                    epoch,
                 )
                 val_loss, val_metrics, class_rows = self._validate(
                     model,
                     val_loader,
                     criterion,
                 )
-                progress.advance(epoch_task)
                 row = {
                     "epoch": epoch + 1,
                     "learning_rate": optimizer.param_groups[0]["lr"],
@@ -208,25 +179,23 @@ class TrainSegmentationModel:
                     history=history,
                 )
                 messages.append(f"last → {self.paths['last_checkpoint_path']}")
-                checkpoint_panel = Panel(
-                    "\n".join(messages),
-                    title="Checkpoint",
-                    border_style="green",
+                emit(
+                    self.reporter,
+                    "progress",
+                    f"Completed segmentation epoch {epoch + 1}/{self.epochs}.",
+                    current=epoch + 1,
+                    total=self.epochs,
+                    payload={
+                        "event": "segmentation_epoch",
+                        "train_loss": train_loss,
+                        "val_loss": val_loss,
+                        "metrics": val_metrics,
+                        "checkpoints": messages,
+                    },
                 )
-                live.update(
-                    Group(
-                        progress,
-                        _metrics_table(
-                            epoch=epoch + 1,
-                            epochs=self.epochs,
-                            train_loss=train_loss,
-                            val_loss=val_loss,
-                            metrics=val_metrics,
-                        ),
-                        checkpoint_panel,
-                    )
-                )
-        print_success(
+        emit(
+            self.reporter,
+            "success",
             f"Segmentation training complete; research artifacts are in {self.paths['output_dir']}"
         )
 
@@ -264,15 +233,10 @@ class TrainSegmentationModel:
         loader,
         criterion,
         optimizer,
-        progress: Progress,
-        batch_task,
-        epoch: int,
     ) -> float:
         model.train()
         running_loss = 0.0
         sample_count = 0
-        progress.reset(batch_task)
-        progress.update(batch_task, description=f"[cyan]Epoch {epoch + 1} batches")
         for images, masks in loader:
             images, masks = images.to(self.device), masks.to(self.device)
             optimizer.zero_grad()
@@ -282,7 +246,6 @@ class TrainSegmentationModel:
             optimizer.step()
             running_loss += float(loss.item()) * len(images)
             sample_count += len(images)
-            progress.advance(batch_task)
         return running_loss / max(1, sample_count)
 
     def _validate(self, model, loader, criterion) -> tuple[float, dict[str, float], list[dict[str, Any]]]:
@@ -312,78 +275,61 @@ class TrainSegmentationModel:
 
 
 def train_segmentation(config: dict[str, Any]) -> None:
-    TrainSegmentationModel(config).execute()
+    from mlx.modes.segmentation.presentation import RichSegmentationReporter
+
+    TrainSegmentationModel(config, reporter=RichSegmentationReporter()).execute()
 
 
 class SmokeTestSegmentationModel:
-    def __init__(self, request: SegmentationRequest) -> None:
+    def __init__(
+        self,
+        request: SegmentationRequest,
+        *,
+        reporter: WorkflowReporter | None = None,
+    ) -> None:
         self.request = request
+        self.reporter = reporter or NullWorkflowReporter()
 
     def execute(self) -> None:
-        _run_smoke_test(self.request.to_config())
+        _run_smoke_test(self.request.to_config(), reporter=self.reporter)
 
 
 def smoke_test_segmentation(config: dict[str, Any]) -> None:
-    SmokeTestSegmentationModel(SegmentationRequest.from_config(config)).execute()
+    from mlx.modes.segmentation.presentation import RichSegmentationReporter
+
+    SmokeTestSegmentationModel(
+        SegmentationRequest.from_config(config),
+        reporter=RichSegmentationReporter(),
+    ).execute()
 
 
-def _run_smoke_test(config: dict[str, Any]) -> None:
+def _run_smoke_test(
+    config: dict[str, Any],
+    *,
+    reporter: WorkflowReporter | None = None,
+) -> None:
+    reporter = reporter or NullWorkflowReporter()
     model_name = resolve_model_name(config)
     batch = int(config["batch_size"])
     width, height = config["input_size"]
     device = config["device"]
     num_classes = int(config.get("num_classes", 2))
-    print_info(
+    emit(
+        reporter,
+        "info",
         f"Running segmentation test on device={device} | input={width}x{height} "
         f"| batch={batch} | classes={num_classes}"
     )
     model = build_segmentation_model(model_name, config, num_classes=num_classes).to(device)
     channels = 3 if config.get("colored", True) else 1
     output = model(torch.randn(batch, channels, height, width).to(device))
-    print_success("Test completed successfully!")
-    print_info(f"Output tensor shape: {list(output.shape)}")
-    table = Table(title="Segmentation Model Output", show_header=True)
-    table.add_column("Index", justify="center", style="cyan")
-    table.add_column("Value", justify="center", style="magenta")
-    for index, value in enumerate(output.flatten().tolist()[:16]):
-        table.add_row(str(index), f"{value:.6f}")
-    console.print(table)
-
-
-def _build_progress(*, epochs: int, train_loader_size: int) -> Progress:
-    progress = Progress(
-        SpinnerColumn(),
-        TextColumn("[bold blue]{task.description}"),
-        BarColumn(),
-        "[progress.percentage]{task.percentage:>3.0f}%",
-        "•",
-        TimeElapsedColumn(),
-        TimeRemainingColumn(),
+    emit(
+        reporter,
+        "success",
+        "Test completed successfully!",
+        payload={
+            "event": "segmentation_tensor_output",
+            "shape": list(output.shape),
+            "values": output.flatten().tolist()[:16],
+        },
     )
-    progress.add_task("[magenta]Epoch Progress", total=epochs)
-    progress.add_task("[cyan]Batch Progress", total=train_loader_size)
-    return progress
-
-
-def _metrics_table(
-    *,
-    epoch: int,
-    epochs: int,
-    train_loss: float,
-    val_loss: float,
-    metrics: dict[str, float],
-) -> Table:
-    table = Table(title=f"Epoch {epoch}/{epochs}", show_lines=True)
-    table.add_column("Metric", style="cyan")
-    table.add_column("Value", justify="right", style="magenta")
-    for label, value in (
-        ("Train Loss", train_loss),
-        ("Validation Loss", val_loss),
-        ("Pixel Accuracy", metrics["pixel_accuracy"]),
-        ("Macro Dice", metrics["macro_dice"]),
-        ("Foreground Dice", metrics["mean_foreground_dice"]),
-        ("Mean IoU", metrics["mean_iou"]),
-        ("Foreground IoU", metrics["mean_foreground_iou"]),
-    ):
-        table.add_row(label, f"{value:.6f}")
-    return table

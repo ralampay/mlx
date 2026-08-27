@@ -12,7 +12,12 @@ from mlx.modes.segmentation.inference import (
 )
 from mlx.modes.segmentation.list_models import ListSegmentationModels
 from mlx.modes.segmentation.models import DEFAULT_MODEL
-from mlx.modes.segmentation.presentation import print_segmentation_config_summary
+from mlx.modes.segmentation.presentation import (
+    display_segmentation_result,
+    print_segmentation_config_summary,
+    RichSegmentationReporter,
+    resolve_segmentation_dataset_build_request,
+)
 from mlx.modes.segmentation.requests import (
     BuildSegmentationDatasetRequest,
     SegmentationRequest,
@@ -20,6 +25,10 @@ from mlx.modes.segmentation.requests import (
 from mlx.modes.segmentation.train import (
     SmokeTestSegmentationModel,
     TrainSegmentationModel,
+)
+from mlx.modes.segmentation.streaming import (
+    OpenCVSegmentationFrameSink,
+    OpenCVSegmentationFrameSource,
 )
 
 DEFAULT_CONFIG = {
@@ -44,28 +53,60 @@ def _list_models(config: dict[str, Any]):
     return summaries
 
 
+def _infer_image(config: dict[str, Any]):
+    result = InferSegmentationImage(
+        SegmentationRequest.from_config(config)
+    ).execute()
+    if config.get("display", True):
+        display_segmentation_result(result)
+    return result
+
+
+def _run_stream(config: dict[str, Any], *, source: str):
+    request = SegmentationRequest.from_config(config)
+    frame_source = OpenCVSegmentationFrameSource(
+        source=source,
+        camera_index=request.camera_index,
+        file_path=request.file_path,
+    )
+    frame_sink = OpenCVSegmentationFrameSink(
+        title=(
+            "MLX Segmentation (Camera)"
+            if source == "camera"
+            else "MLX Segmentation (Video)"
+        ),
+        delay_ms=1 if source == "camera" else 10,
+    )
+    return RunSegmentationStreamInference(
+        request,
+        source=source,
+        frame_source=frame_source,
+        frame_sink=frame_sink,
+        reporter=RichSegmentationReporter(),
+    ).execute()
+
+
 ACTION_HANDLERS = {
     "benchmark": lambda config: BenchmarkSegmentation(
-        SegmentationRequest.from_config(config)
+        SegmentationRequest.from_config(config),
+        reporter=RichSegmentationReporter(),
     ).execute(),
     "build-dataset": lambda config: BuildSegmentationDataset(
-        BuildSegmentationDatasetRequest.from_config(config)
+        BuildSegmentationDatasetRequest.from_config(config),
+        reporter=RichSegmentationReporter(),
+        input_resolver=resolve_segmentation_dataset_build_request,
     ).execute(),
-    "infer-camera": lambda config: RunSegmentationStreamInference(
-        SegmentationRequest.from_config(config), source="camera"
-    ).execute(),
-    "infer-image": lambda config: InferSegmentationImage(
-        SegmentationRequest.from_config(config)
-    ).execute(),
-    "infer-video": lambda config: RunSegmentationStreamInference(
-        SegmentationRequest.from_config(config), source="video"
-    ).execute(),
+    "infer-camera": lambda config: _run_stream(config, source="camera"),
+    "infer-image": _infer_image,
+    "infer-video": lambda config: _run_stream(config, source="video"),
     "ls-models": _list_models,
     "test": lambda config: SmokeTestSegmentationModel(
-        SegmentationRequest.from_config(config)
+        SegmentationRequest.from_config(config),
+        reporter=RichSegmentationReporter(),
     ).execute(),
     "train": lambda config: TrainSegmentationModel(
-        SegmentationRequest.from_config(config)
+        SegmentationRequest.from_config(config),
+        reporter=RichSegmentationReporter(),
     ).execute(),
 }
 

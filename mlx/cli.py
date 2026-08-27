@@ -1,13 +1,19 @@
 import argparse
 import json
 import sys
-from importlib import import_module
 from pathlib import Path
-from typing import Any, Callable, Dict, Optional, Sequence
+from typing import Any, Dict, Optional, Sequence
 
 from rich.panel import Panel
 from rich.table import Table
 
+from mlx.cli_config import build_runtime_config, explicit_option_destinations
+from mlx.cli_routing import (
+    MODE_REGISTRY,
+    ModeRunner,
+    UnknownModeError,
+    resolve_mode_runner,
+)
 from mlx.core.exceptions import MLXAbort, MLXUserError
 from mlx.core.random import apply_global_seed
 from mlx.core.ui import console, print_error, print_startup, print_warning
@@ -25,27 +31,9 @@ class CLIUsageError(Exception):
     """Raised when command-line arguments are invalid."""
 
 
-class UnknownModeError(ValueError):
-    """Raised when the selected mode is not registered."""
-
-
 class RichArgumentParser(argparse.ArgumentParser):
     def error(self, message: str) -> None:
         raise CLIUsageError(message)
-
-
-ModeRunner = Callable[[Dict[str, Any]], Any]
-
-MODE_REGISTRY: Dict[str, str] = {
-    "image-classification": "mlx.modes.image_classification.runner:run_image_classification",
-    "image_classification": "mlx.modes.image_classification.runner:run_image_classification",
-    "object-detection": "mlx.modes.object_detection.runner:run_object_detection",
-    "object_detection": "mlx.modes.object_detection.runner:run_object_detection",
-    "track": "mlx.modes.object_detection.tracking.runner:run_tracking",
-    "tracking": "mlx.modes.object_detection.tracking.runner:run_tracking",
-    "segmentation": "mlx.modes.segmentation.runner:run_segmentation",
-    "nlp": "mlx.modes.nlp.runner:run_nlp",
-}
 
 
 def build_parser() -> RichArgumentParser:
@@ -100,6 +88,45 @@ def build_parser() -> RichArgumentParser:
     parser.add_argument("--file-path", default=None, dest="file_path")
     parser.add_argument("--input-img", default="/tmp/image.jpg", dest="input_img")
     parser.add_argument("--confidence", type=float, default=0.25)
+    parser.add_argument("--iou", type=float, default=0.6)
+    parser.add_argument("--max-detections", type=int, default=300, dest="max_detections")
+    parser.add_argument("--workers", type=int, default=4)
+    parser.add_argument(
+        "--save-predictions",
+        action=argparse.BooleanOptionalAction,
+        default=True,
+        dest="save_predictions",
+    )
+    parser.add_argument(
+        "--validate-after-training",
+        action=argparse.BooleanOptionalAction,
+        default=False,
+        dest="validate_after_training",
+    )
+    parser.add_argument(
+        "--validation-split",
+        choices=("train", "val", "test"),
+        default="val",
+        dest="validation_split",
+    )
+    parser.add_argument(
+        "--validation-confidence",
+        type=float,
+        default=0.001,
+        dest="validation_confidence",
+    )
+    parser.add_argument(
+        "--validation-iou",
+        type=float,
+        default=0.6,
+        dest="validation_iou",
+    )
+    parser.add_argument(
+        "--validation-max-detections",
+        type=int,
+        default=300,
+        dest="validation_max_detections",
+    )
     parser.add_argument("--tracker", default="bytetrack")
     parser.add_argument("--tracker-config", default=None, dest="tracker_config")
     parser.add_argument("--tracking-jsonl", default=None, dest="tracking_jsonl")
@@ -124,6 +151,7 @@ def build_parser() -> RichArgumentParser:
     )
     parser.add_argument("--camera-index", type=int, default=0, dest="camera_index")
     parser.add_argument("--pretrained", action=argparse.BooleanOptionalAction, default=False)
+    parser.add_argument("--plots", action=argparse.BooleanOptionalAction, default=True)
     parser.add_argument("--verbose", action=argparse.BooleanOptionalAction, default=False)
     parser.add_argument("--use-best", action=argparse.BooleanOptionalAction, default=True, dest="use_best")
     parser.add_argument(
@@ -207,6 +235,7 @@ def _render_help() -> None:
     usage.add_row("python -m mlx --mode object_detection --provider libreyolo --action ls-models")
     usage.add_row("python -m mlx --mode object_detection --provider libreyolo --action train --dataset coco8 --model yolo9-t")
     usage.add_row("python -m mlx --mode object_detection --action train --dataset coco8 --model yolo26")
+    usage.add_row("python -m mlx --mode object_detection --action benchmark --dataset ./dataset --model-path ./best.pt --split test --output ./benchmark")
     usage.add_row("python -m mlx --mode object_detection --platform aws --action train --config ./aws-training.yaml")
     usage.add_row("python -m mlx --mode object_detection --platform aws --action status --config ./aws-training.yaml --job-name JOB_NAME --watch")
     usage.add_row("python -m mlx --mode object_detection --platform aws --action resume --config ./aws-training.yaml --job-name JOB_NAME")
@@ -278,6 +307,12 @@ def _render_help() -> None:
         "Drax residual fusion: fixed average or adaptive SKNet channel weighting.",
     )
     options.add_row("--confidence", "0.25", "Detection confidence threshold.")
+    options.add_row("--iou", "0.6", "NMS IoU threshold for object-detection benchmarks.")
+    options.add_row("--max-detections", "300", "Maximum detections per image during object-detection benchmarking.")
+    options.add_row("--workers", "4", "Evaluation dataloader worker count.")
+    options.add_row("--save-predictions / --no-save-predictions", "True", "Write provider-native prediction JSON during object-detection benchmarking.")
+    options.add_row("--validate-after-training", "False", "Run the provider-neutral benchmark after object-detection training.")
+    options.add_row("--validation-split", "val", "Dataset split benchmarked after object-detection training.")
     options.add_row("--tracker", "bytetrack", "Tracking algorithm alias or external package.module:ClassName.")
     options.add_row("--tracker-config", "None", "Optional JSON object file passed as keyword arguments to the tracker constructor.")
     options.add_row("--tracking-jsonl", "None", "Class-aware tracks.jsonl input used by track --action export-mot.")
@@ -286,6 +321,7 @@ def _render_help() -> None:
     options.add_row("--benchmark-iou", "0.5", "Minimum box IoU used for MOT benchmark matching.")
     options.add_row("--camera-index", "0", "Camera index for webcam inference.")
     options.add_row("--pretrained / --no-pretrained", "False", "Toggle supported pretrained model initialization.")
+    options.add_row("--plots / --no-plots", "True", "Write supported provider-native training or benchmark plots.")
     options.add_row("--verbose / --no-verbose", "False", "Show per-epoch live progress bars when supported.")
     options.add_row(
         "--use-best / --no-use-best",
@@ -314,7 +350,7 @@ def _render_help() -> None:
     options.add_row("--run-name", "None", "Optional provider run folder name.")
     options.add_row("--num-classes", "2", "Number of image-classification or segmentation output classes.")
     options.add_row("--class-names", "generated", "Comma-separated segmentation class names stored in checkpoints and research artifacts.")
-    options.add_row("--split", "test", "Segmentation dataset split used by benchmark: train, val, or test.")
+    options.add_row("--split", "test", "Object-detection or segmentation dataset split used by benchmark: train, val, or test.")
     options.add_row("--boundary-tolerance", "2", "Boundary-metric matching tolerance in resized-image pixels.")
     options.add_row("--calibration-bins", "15", "Confidence bins used for segmentation calibration metrics.")
     options.add_row("--threshold-steps", "101", "Number of binary segmentation thresholds evaluated by benchmark.")
@@ -339,7 +375,7 @@ def _render_help() -> None:
     available = Table(title="Available Modes", show_header=True)
     available.add_column("Mode", style="cyan", no_wrap=True)
     available.add_column("Actions", style="white")
-    available.add_row("object_detection", "train, resume, status, stop, infer-camera, infer-video, convert, ls-models")
+    available.add_row("object_detection", "train, benchmark, resume, status, stop, infer-camera, infer-video, convert, ls-models")
     available.add_row("track", "run, export-mot, ls-trackers")
     available.add_row("image_classification", "train, test, benchmark, infer-image, cam, build-dataset, ls-models")
     available.add_row("segmentation", "train, test, benchmark, infer-image, infer-camera, infer-video, build-dataset, ls-models")
@@ -348,38 +384,18 @@ def _render_help() -> None:
 
 
 def _build_config(namespace: argparse.Namespace) -> Dict[str, Any]:
-    config = vars(namespace).copy()
-    config.pop("help", None)
-    if config.get("mode"):
-        config["mode"] = config["mode"].replace("-", "_")
-    config["input_size"] = (config["width"], config["height"])
-    return config
+    return build_runtime_config(namespace)
 
 
 def _explicit_option_destinations(
     parser: argparse.ArgumentParser,
     args: Sequence[str],
 ) -> set[str]:
-    """Return argparse destinations explicitly present on the command line."""
-
-    destinations: set[str] = set()
-    option_actions = parser._option_string_actions
-    for token in args:
-        option = token.split("=", 1)[0]
-        action = option_actions.get(option)
-        if action is not None:
-            destinations.add(action.dest)
-    return destinations
+    return explicit_option_destinations(parser, args)
 
 
 def _resolve_mode_runner(mode: str) -> ModeRunner:
-    dotted_path = MODE_REGISTRY.get(mode)
-    if dotted_path is None:
-        raise UnknownModeError(f"Unknown mode '{mode}'.")
-
-    module_path, func_name = dotted_path.split(":")
-    module = import_module(module_path)
-    return getattr(module, func_name)
+    return resolve_mode_runner(mode)
 
 
 def _render_unknown_mode() -> None:

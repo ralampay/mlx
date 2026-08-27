@@ -38,8 +38,9 @@ LibreYOLO from PyPI or the upstream repository.
 The neutral source is split by responsibility:
 
 - `runner.py`: action dispatch and CLI presentation wiring.
-- `commands.py`: provider-neutral training, model creation, conversion, listing, and streaming.
-- `models.py`: normalized detection records and the detector protocol.
+- `commands.py`: provider-neutral training, benchmarking, model creation, conversion, listing, and streaming.
+- `evaluation.py`: normalized research metrics and shared benchmark artifact serialization.
+- `models.py`: normalized detection records, benchmark results, and the detector protocol.
 - `providers.py`: lazy provider registry and provider protocol.
 - `streaming.py`: frame-source and frame-sink ports plus OpenCV adapters.
 - `artifacts.py`: provider-shared checkpoint discovery and ONNX destination rules.
@@ -102,6 +103,10 @@ epoch boundary, so an interruption can repeat work from the incomplete epoch but
 validated epochs. `status` reports recoverable epoch progress, Spot interruptions, active and
 billable time, ETA when enough epoch data exists, failure information, and artifact URIs. Use
 `--format json` for automation; watched JSON output is JSON Lines.
+
+Set `training.validate_after_training: true` and optionally `training.validation_split: test` in
+AWS YAML to run the same provider-neutral benchmark after training. The resulting benchmark
+directory is included under `benchmark/` in SageMaker's `model.tar.gz`.
 
 ## Generic Tracking by Detection
 
@@ -438,6 +443,47 @@ MLX also now writes extra training graphs into the resolved run directory, along
 - `per_class_map50_95.png`: bar chart of per-class `mAP@0.50:0.95`
 
 Ultralytics plotting is also explicitly enabled for training runs, so native artifacts such as PR/F1/P/R curves and confusion-matrix plots should continue to land in the same run directory when supported by the installed Ultralytics version.
+
+## Provider-neutral benchmarking
+
+Use the same command and output schema for an Ultralytics or LibreYOLO checkpoint:
+
+```bash
+python -m mlx --mode object-detection --action benchmark \
+    --provider libreyolo \
+    --model-path ./runs/libreyolo/weights/best.pt \
+    --dataset ./dataset \
+    --split test \
+    --batch-size 16 \
+    --height 640 --width 640 \
+    --confidence 0.001 --iou 0.6 --max-detections 300 \
+    --output ./benchmarks/libreyolo-test
+```
+
+The normalized outputs are identical for both providers:
+
+- `metrics.json` and `metrics.csv`: precision, recall, F1, `mAP@0.50`, and
+  `mAP@0.50:0.95`, using stable keys `precision`, `recall`, `f1`, `map_50`, and
+  `map_50_95`. F1 is the harmonic mean of the normalized aggregate precision and recall.
+- `native_metrics.json`: finite scalar values returned by the provider.
+- `run_metadata.json`: provider/evaluator versions, model SHA-256, dataset and split,
+  thresholds, device, image size, timestamps, and runtime environment.
+- Provider-native prediction JSON and plots when enabled with `--save-predictions` and
+  `--plots`.
+
+To run this same benchmark immediately after local training, add:
+
+```bash
+python -m mlx --mode object-detection --action train \
+    --provider ultralytics --model yolo26 --dataset ./dataset \
+    --validate-after-training --validation-split val
+```
+
+Post-training validation is opt-in because it adds a complete evaluation pass. It uses a
+confidence threshold of `0.001`, NMS IoU `0.6`, and 300 maximum detections by default; the
+`--validation-confidence`, `--validation-iou`, and `--validation-max-detections` options override
+those settings. For publishable comparisons, keep the dataset split, image size, thresholds,
+maximum detections, and evaluator backend consistent across models.
 
 ## Webcam Inference
 

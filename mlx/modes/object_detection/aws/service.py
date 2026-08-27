@@ -1,27 +1,26 @@
 from __future__ import annotations
 
-import base64
 import hashlib
 import json
 import re
-import subprocess
-import sys
 import time
-from dataclasses import replace
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Mapping, Optional
 from urllib.parse import quote, urlparse
 from uuid import uuid4
 
 from mlx.core.exceptions import MLXUserError
+from mlx.modes.object_detection.aws.clients import AwsClientBundle
 from mlx.modes.object_detection.aws.config import AwsTrainingConfig
+from mlx.modes.object_detection.aws.image import PublishSageMakerImage, source_digest
 from mlx.modes.object_detection.aws.models import (
     AwsInfrastructure,
     AwsTrainingStatus,
     AwsTrainingStopResult,
     AwsTrainingSubmission,
 )
+from mlx.modes.object_detection.aws.status import build_training_status, total_epochs
 from mlx.modes.object_detection.requests import TrainObjectDetectionRequest
 
 
@@ -50,36 +49,24 @@ def _dockerfile() -> Path:
 class SageMakerTrainingService:
     """AWS integration boundary used by the object-detection AWS commands."""
 
-    def __init__(self, config: AwsTrainingConfig) -> None:
+    def __init__(
+        self,
+        config: AwsTrainingConfig,
+        *,
+        clients: AwsClientBundle | None = None,
+    ) -> None:
         self.config = config
-        try:
-            import boto3
-            from botocore.exceptions import BotoCoreError, ClientError
-        except ImportError as exc:
-            raise MLXUserError(
-                "AWS training requires boto3. Install MLX with the 'aws' extra."
-            ) from exc
-
-        self._client_error = ClientError
-        self._boto_error = BotoCoreError
-        try:
-            self.session = boto3.Session(
-                profile_name=config.profile,
-                region_name=config.region,
-            )
-        except (BotoCoreError, ValueError) as exc:
-            raise MLXUserError(f"Unable to initialize the AWS session: {exc}") from exc
-        self.region = self.session.region_name
-        if not self.region:
-            raise MLXUserError(
-                "No AWS region is configured. Set aws.region or configure a default AWS region."
-            )
-        self.s3 = self.session.client("s3")
-        self.ecr = self.session.client("ecr")
-        self.iam = self.session.client("iam")
-        self.sts = self.session.client("sts")
-        self.sagemaker = self.session.client("sagemaker")
-        self.cloudwatch = self.session.client("cloudwatch")
+        resolved = clients or AwsClientBundle.create(config)
+        self.session = resolved.session
+        self.region = resolved.region
+        self.s3 = resolved.s3
+        self.ecr = resolved.ecr
+        self.iam = resolved.iam
+        self.sts = resolved.sts
+        self.sagemaker = resolved.sagemaker
+        self.cloudwatch = resolved.cloudwatch
+        self._client_error = resolved.client_error
+        self._boto_error = resolved.boto_error
 
     def _translate(self, action: str, exc: Exception) -> MLXUserError:
         return MLXUserError(f"AWS {action} failed: {exc}")
@@ -168,81 +155,19 @@ class SageMakerTrainingService:
         return name, repository["repositoryUri"], repository["repositoryArn"]
 
     def _source_digest(self) -> str:
-        root = _package_root()
-        paths = sorted(root.rglob("*.py"))
-        paths.extend([root / ".dockerignore", _dockerfile()])
-        digest = hashlib.sha256()
-        for path in paths:
-            if not path.is_file():
-                continue
-            digest.update(str(path.relative_to(root)).encode("utf-8"))
-            digest.update(path.read_bytes())
-        return digest.hexdigest()
+        return source_digest(_package_root(), _dockerfile())
 
     def _ensure_image(self, repository_name: str, repository_uri: str) -> str:
-        source_digest = self._source_digest()[:16]
-        tag = f"source-{source_digest}"
-        if self.config.rebuild_image:
-            tag = f"source-{source_digest}-{datetime.now(timezone.utc).strftime('%Y%m%d%H%M%S')}"
-        image_uri = f"{repository_uri}:{tag}"
-        if not self.config.rebuild_image:
-            try:
-                response = self.ecr.describe_images(
-                    repositoryName=repository_name,
-                    imageIds=[{"imageTag": tag}],
-                )
-                digest = response["imageDetails"][0]["imageDigest"]
-                return f"{repository_uri}@{digest}"
-            except self._client_error as exc:
-                if exc.response.get("Error", {}).get("Code") != "ImageNotFoundException":
-                    raise
-
-        root = _package_root()
-        dockerfile = _dockerfile()
-        if not dockerfile.is_file():
-            raise MLXUserError(
-                f"Packaged SageMaker Dockerfile not found: {dockerfile}. "
-                "Reinstall MLX or provide aws.image_uri."
-            )
-        try:
-            auth = self.ecr.get_authorization_token()["authorizationData"][0]
-            username, password = base64.b64decode(auth["authorizationToken"]).decode().split(":", 1)
-            subprocess.run(
-                ["docker", "login", "--username", username, "--password-stdin", auth["proxyEndpoint"]],
-                input=password,
-                text=True,
-                check=True,
-                stdout=subprocess.PIPE,
-                stderr=subprocess.PIPE,
-            )
-            subprocess.run(
-                ["docker", "build", "-f", str(dockerfile), "-t", image_uri, str(root)],
-                check=True,
-                stdout=sys.stderr,
-                stderr=sys.stderr,
-            )
-            subprocess.run(
-                ["docker", "push", image_uri],
-                check=True,
-                stdout=sys.stderr,
-                stderr=sys.stderr,
-            )
-        except FileNotFoundError as exc:
-            raise MLXUserError(
-                "Docker is required to publish the SageMaker image, but the docker executable was not found."
-            ) from exc
-        except subprocess.CalledProcessError as exc:
-            detail = exc.stderr.strip() if isinstance(exc.stderr, str) else str(exc)
-            raise MLXUserError(f"Unable to build or push the SageMaker image: {detail}") from exc
-        try:
-            response = self.ecr.describe_images(
-                repositoryName=repository_name,
-                imageIds=[{"imageTag": tag}],
-            )
-        except (self._client_error, self._boto_error) as exc:
-            raise self._translate("published image digest lookup", exc) from exc
-        digest = response["imageDetails"][0]["imageDigest"]
-        return f"{repository_uri}@{digest}"
+        return PublishSageMakerImage(
+            ecr=self.ecr,
+            repository_name=repository_name,
+            repository_uri=repository_uri,
+            package_root=_package_root(),
+            dockerfile=_dockerfile(),
+            rebuild=self.config.rebuild_image,
+            client_error=self._client_error,
+            boto_error=self._boto_error,
+        ).execute()
 
     def _ensure_execution_role(self, *, repository_arn: str) -> str:
         scope_digest = hashlib.sha256(
@@ -404,12 +329,21 @@ class SageMakerTrainingService:
         *,
         run_id: Optional[str] = None,
         training: Optional[TrainObjectDetectionRequest] = None,
+        training_payload: Optional[Mapping[str, Any]] = None,
         image_uri: Optional[str] = None,
         role_arn: Optional[str] = None,
         resume: bool = False,
     ) -> AwsTrainingSubmission:
         run_id = run_id or uuid4().hex
         request = training or self.config.training
+        request_config = request.to_config()
+        if training_payload is not None:
+            serialized_request = TrainObjectDetectionRequest.from_config(training_payload)
+            if serialized_request != request:
+                raise MLXUserError(
+                    "The serialized SageMaker training payload does not match the training request."
+                )
+            request_config = dict(training_payload)
         job_name = self._new_job_name(run_id)
         run_base = _join_s3(
             self.config.checkpoint_s3_uri,
@@ -431,7 +365,7 @@ class SageMakerTrainingService:
             "resource_prefix": self.config.resource_prefix,
             "image_uri": effective_image,
             "role_arn": effective_role,
-            "training": request.to_config(),
+            "training": request_config,
         }
         if not resume:
             self._put_json(run_spec_uri, run_spec)
@@ -488,7 +422,7 @@ class SageMakerTrainingService:
                 "mlx_run_id": run_id,
                 "mlx_run_spec_s3_uri": run_spec_uri,
                 "mlx_attempt_spec_s3_uri": attempt_spec_uri,
-                "mlx_training": json.dumps(request.to_config(), separators=(",", ":")),
+                "mlx_training": json.dumps(request_config, separators=(",", ":")),
                 "mlx_resume": str(resume).lower(),
                 "mlx_image_uri": effective_image,
                 "mlx_volume_size_gb": str(self.config.volume_size_gb),
@@ -542,7 +476,12 @@ class SageMakerTrainingService:
             raise MLXUserError("The resume configuration must use the original dataset_s3_uri.")
         if spec.get("checkpoint_base_s3_uri") != self.config.checkpoint_s3_uri:
             raise MLXUserError("The resume configuration must use the original checkpoint_s3_uri.")
-        original = TrainObjectDetectionRequest.from_config(spec["training"])
+        original_payload = spec.get("training")
+        if not isinstance(original_payload, Mapping):
+            raise MLXUserError(
+                f"Training job '{old_job_name}' has an invalid MLX run specification."
+            )
+        original = TrainObjectDetectionRequest.from_config(original_payload)
         current = self.config.training
         if (current.provider, current.model) != (original.provider, original.model):
             raise MLXUserError("Provider and model cannot change when resuming a training run.")
@@ -558,7 +497,9 @@ class SageMakerTrainingService:
             raise MLXUserError(
                 "A completed run can only be resumed with a higher total epoch target."
             )
-        resumed = replace(original, epochs=current.epochs)
+        resumed_payload = dict(original_payload)
+        resumed_payload["epochs"] = current.epochs
+        resumed = TrainObjectDetectionRequest.from_config(resumed_payload)
         infrastructure = AwsInfrastructure(
             region=self.region,
             account_id=old["TrainingJobArn"].split(":")[4],
@@ -569,6 +510,7 @@ class SageMakerTrainingService:
             infrastructure,
             run_id=run_id,
             training=resumed,
+            training_payload=resumed_payload,
             image_uri=spec["image_uri"],
             role_arn=spec["role_arn"],
             resume=True,
@@ -650,60 +592,9 @@ class SageMakerTrainingService:
 
     def status(self, job_name: str) -> AwsTrainingStatus:
         description = self._describe(job_name)
-        hyperparameters = description.get("HyperParameters", {})
-        transitions = description.get("SecondaryStatusTransitions", [])
-        secondary = transitions[-1].get("Status") if transitions else None
-        interruptions = sum(item.get("Status") == "Interrupted" for item in transitions)
-        creation = description.get("CreationTime")
-        start = description.get("TrainingStartTime")
-        end = description.get("TrainingEndTime")
-        now = datetime.now(timezone.utc)
-        elapsed = int(((end or now) - creation).total_seconds()) if creation else None
-        total_epochs = self._total_epochs(hyperparameters)
-        epoch = self._latest_metric(description, "mlx:epoch")
-        eta = self._latest_metric(description, "mlx:eta_seconds")
-        completed_epoch = int(epoch) if epoch is not None else None
-        progress = None
-        if completed_epoch is not None and total_epochs:
-            progress = min(100.0, completed_epoch / total_epochs * 100.0)
-        checkpoint = description.get("CheckpointConfig", {}).get("S3Uri")
-        output = description.get("ModelArtifacts", {}).get("S3ModelArtifacts")
-        if not output:
-            output = description.get("OutputDataConfig", {}).get("S3OutputPath")
-        training_seconds = description.get("TrainingTimeInSeconds")
-        billable_seconds = description.get("BillableTimeInSeconds")
-        spot_savings = None
-        if training_seconds and billable_seconds is not None:
-            spot_savings = max(
-                0.0,
-                min(100.0, (1.0 - billable_seconds / training_seconds) * 100.0),
-            )
-        eta_seconds = int(eta) if eta is not None else None
-        expected_completion = None
-        if eta_seconds is not None and secondary == "Training":
-            expected_completion = now + timedelta(seconds=eta_seconds)
-        return AwsTrainingStatus(
-            job_name=job_name,
-            run_id=hyperparameters.get("mlx_run_id"),
-            status=description["TrainingJobStatus"],
-            secondary_status=secondary,
-            completed_epoch=completed_epoch,
-            total_epochs=total_epochs,
-            progress_percent=progress,
-            elapsed_seconds=elapsed,
-            training_seconds=training_seconds,
-            billable_seconds=billable_seconds,
-            managed_spot=bool(description.get("EnableManagedSpotTraining", False)),
-            spot_savings_percent=spot_savings,
-            eta_seconds=eta_seconds,
-            expected_completion_time=expected_completion,
-            interruptions=interruptions,
-            checkpoint_s3_uri=checkpoint,
-            output_s3_uri=output,
-            failure_reason=description.get("FailureReason"),
-            creation_time=creation,
-            start_time=start,
-            end_time=end,
+        return build_training_status(
+            description,
+            latest_metric=self._latest_metric,
             console_url=self._console_url(job_name),
         )
 
@@ -808,11 +699,7 @@ class SageMakerTrainingService:
 
     @staticmethod
     def _total_epochs(hyperparameters: Mapping[str, str]) -> Optional[int]:
-        try:
-            training = json.loads(hyperparameters.get("mlx_training", "{}"))
-            return int(training["epochs"])
-        except (KeyError, TypeError, ValueError, json.JSONDecodeError):
-            return None
+        return total_epochs(hyperparameters)
 
     def _console_url(self, job_name: str) -> str:
         return (

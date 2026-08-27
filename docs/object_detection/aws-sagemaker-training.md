@@ -297,12 +297,20 @@ training:
   model: yolo26
   epochs: 100
   batch_size: 16
+  validate_after_training: true
+  validation_split: val
 ```
 
 `managed_spot` defaults to `true`. If `max_wait_seconds` is omitted, MLX uses twice
 `max_runtime_seconds`, capped at 30 days. `max_wait_seconds` must not be lower than runtime.
 `--instance-type`, `--profile`, and explicitly supplied training CLI options override YAML; parser
 defaults do not silently replace YAML values.
+
+Post-training validation is optional because it adds a complete dataset pass. When enabled, both
+Ultralytics and LibreYOLO use the provider-neutral benchmark artifact schema. SageMaker includes
+`benchmark/metrics.json`, `metrics.csv`, `native_metrics.json`, `run_metadata.json`, and supported
+provider plots/predictions in the final `model.tar.gz`. The regular CloudWatch `mlx:epoch`,
+`mlx:progress`, and `mlx:eta_seconds` series remain operational metrics.
 
 ## Submit, monitor, stop, and continue
 

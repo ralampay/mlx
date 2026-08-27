@@ -5,11 +5,10 @@ import random
 import shutil
 from math import floor
 from pathlib import Path
-from typing import Iterable, List, Sequence, Tuple
+from typing import Callable, Iterable, List, Sequence, Tuple
 
 import cv2
 import torch
-from rich.table import Table
 from torch.utils.data import Dataset
 from torchvision import transforms
 
@@ -20,18 +19,9 @@ except ImportError as exc:  # pragma: no cover - pillow is expected via torchvis
         "Pillow is required for image-classification datasets. Install it with 'pip install pillow'."
     ) from exc
 
+from mlx.core.commands import NullWorkflowReporter, WorkflowReporter, emit
 from mlx.core.exceptions import MLXUserError
 from mlx.modes.image_classification.requests import BuildImageClassificationDatasetRequest
-from mlx.core.ui import (
-    confirm_action,
-    console,
-    print_info,
-    print_success,
-    print_warning,
-    prompt_float,
-    prompt_int,
-    prompt_text,
-)
 
 IMAGE_EXTENSIONS = (".png", ".jpg", ".jpeg", ".bmp")
 
@@ -326,14 +316,6 @@ def _label_directories(dataset_path: Path) -> List[Path]:
     return sorted(path for path in dataset_path.iterdir() if path.is_dir())
 
 
-def _resolve_split_count(value: int | None, prompt: str) -> int:
-    return prompt_int(prompt) if value is None else value
-
-
-def _resolve_split_ratio(value: float | None, prompt: str) -> float:
-    return prompt_float(prompt) if value is None else value
-
-
 def _resolve_split_mode(
     split_mode: str | None,
     *,
@@ -396,8 +378,20 @@ def _counts_from_ratios(
 
 
 class BuildImageClassificationDataset:
-    def __init__(self, request: BuildImageClassificationDatasetRequest) -> None:
+    def __init__(
+        self,
+        request: BuildImageClassificationDatasetRequest,
+        *,
+        reporter: WorkflowReporter | None = None,
+        input_resolver: Callable[
+            [BuildImageClassificationDatasetRequest, dict[str, int]],
+            BuildImageClassificationDatasetRequest,
+        ]
+        | None = None,
+    ) -> None:
         self.request = request
+        self.reporter = reporter or NullWorkflowReporter()
+        self.input_resolver = input_resolver
 
     def execute(self) -> None:
         config = self.request.to_config()
@@ -413,6 +407,8 @@ class BuildImageClassificationDataset:
             output_path=config.get("output_path"),
             overwrite=bool(config.get("overwrite", False)),
             random_seed=config.get("random_seed"),
+            reporter=self.reporter,
+            input_resolver=self.input_resolver,
         )
 
 
@@ -430,6 +426,11 @@ def build_image_classification_dataset(
     overwrite: bool = False,
     random_seed: int | None = None,
 ) -> None:
+    from mlx.modes.image_classification.presentation import (
+        RichImageClassificationReporter,
+        resolve_image_dataset_build_request,
+    )
+
     request = BuildImageClassificationDatasetRequest(
         dataset_path=dataset_path,
         train_count=train_count,
@@ -443,7 +444,11 @@ def build_image_classification_dataset(
         overwrite=overwrite,
         random_seed=random_seed,
     )
-    return BuildImageClassificationDataset(request).execute()
+    return BuildImageClassificationDataset(
+        request,
+        reporter=RichImageClassificationReporter(),
+        input_resolver=resolve_image_dataset_build_request,
+    ).execute()
 
 
 def _build_image_classification_dataset(
@@ -459,7 +464,14 @@ def _build_image_classification_dataset(
     output_path: str | os.PathLike[str] | None = None,
     overwrite: bool = False,
     random_seed: int | None = None,
+    reporter: WorkflowReporter | None = None,
+    input_resolver: Callable[
+        [BuildImageClassificationDatasetRequest, dict[str, int]],
+        BuildImageClassificationDatasetRequest,
+    ]
+    | None = None,
 ) -> None:
+    reporter = reporter or NullWorkflowReporter()
     dataset_root = Path(dataset_path)
     if not dataset_root.exists():
         raise MLXUserError(f"Dataset path not found: {dataset_root}")
@@ -468,19 +480,41 @@ def _build_image_classification_dataset(
     if not label_dirs:
         raise MLXUserError(f"No label directories were found under: {dataset_root}")
 
-    print_info(f"Found {len(label_dirs)} label(s) under {dataset_root.name}")
-
-    table = Table(title="Label Summary", show_lines=True)
-    table.add_column("Label", style="cyan")
-    table.add_column("Images", justify="right", style="magenta")
-
     label_counts: dict[str, int] = {}
     for label_dir in label_dirs:
         count = len(_iter_image_paths(label_dir))
         label_counts[label_dir.name] = count
-        table.add_row(label_dir.name, str(count))
+    emit(
+        reporter,
+        "info",
+        f"Found {len(label_dirs)} label(s) under {dataset_root.name}",
+        payload={"event": "classification_dataset_summary", "labels": label_counts},
+    )
 
-    console.print(table)
+    request = BuildImageClassificationDatasetRequest(
+        dataset_path=dataset_path,
+        train_count=train_count,
+        val_count=val_count,
+        test_count=test_count,
+        train_ratio=train_ratio,
+        val_ratio=val_ratio,
+        test_ratio=test_ratio,
+        split_mode=split_mode,
+        output_path=str(output_path) if output_path is not None else None,
+        overwrite=overwrite,
+        random_seed=random_seed,
+    )
+    if input_resolver is not None:
+        request = input_resolver(request, label_counts)
+        train_count = request.train_count
+        val_count = request.val_count
+        test_count = request.test_count
+        train_ratio = request.train_ratio
+        val_ratio = request.val_ratio
+        test_ratio = request.test_ratio
+        split_mode = request.split_mode
+        output_path = request.output_path
+        overwrite = request.overwrite
 
     resolved_split_mode = _resolve_split_mode(
         split_mode,
@@ -493,17 +527,21 @@ def _build_image_classification_dataset(
     )
 
     if resolved_split_mode == "ratios":
-        train_ratio = _resolve_split_ratio(train_ratio, "Train ratio?")
-        val_ratio = _resolve_split_ratio(val_ratio, "Validation ratio?")
-        test_ratio = _resolve_split_ratio(test_ratio, "Test ratio?")
-        print_info(
+        if train_ratio is None or val_ratio is None or test_ratio is None:
+            raise MLXUserError(
+                "Ratio split mode requires --train-ratio, --val-ratio, and --test-ratio."
+            )
+        emit(
+            reporter,
+            "info",
             "Ratio mode splits each label independently using normalized ratios. "
             f"Ratios -> train: {train_ratio}, val: {val_ratio}, test: {test_ratio}."
         )
     else:
-        train_count = _resolve_split_count(train_count, "How many images per label for TRAIN?")
-        val_count = _resolve_split_count(val_count, "How many images per label for VAL?")
-        test_count = _resolve_split_count(test_count, "How many images per label for TEST?")
+        if train_count is None or val_count is None or test_count is None:
+            raise MLXUserError(
+                "Count split mode requires --train-count, --val-count, and --test-count."
+            )
 
     if resolved_split_mode == "counts":
         if train_count < 0 or val_count < 0 or test_count < 0:
@@ -511,23 +549,17 @@ def _build_image_classification_dataset(
         total_needed = train_count + val_count + test_count
         for label, count in label_counts.items():
             if count < total_needed:
-                print_warning(
+                emit(
+                    reporter,
+                    "warning",
                     f"Label '{label}' has only {count} images, less than requested total {total_needed}."
                 )
 
-    interactive_output = output_path is None
-    resolved_output_path = (
-        Path(prompt_text("Enter output path for split dataset"))
-        if interactive_output
-        else Path(output_path)
-    )
+    if output_path is None:
+        raise MLXUserError("Dataset building requires --output pointing to a destination directory.")
+    resolved_output_path = Path(output_path)
     if resolved_output_path.exists():
-        if interactive_output and not overwrite:
-            confirm_action(
-                f"Output directory '{resolved_output_path}' already exists. Overwrite?",
-                abort=True,
-            )
-        elif not overwrite:
+        if not overwrite:
             raise MLXUserError(
                 f"Output directory '{resolved_output_path}' already exists. "
                 "Re-run with --overwrite to replace it."
@@ -540,7 +572,7 @@ def _build_image_classification_dataset(
 
     rng = random.Random(random_seed)
 
-    print_info("Splitting dataset...")
+    emit(reporter, "info", "Splitting dataset...")
     for label_dir in label_dirs:
         images = _iter_image_paths(label_dir)
         rng.shuffle(images)
@@ -565,7 +597,7 @@ def _build_image_classification_dataset(
             for image_path in split_images:
                 shutil.copy2(image_path, out_dir / image_path.name)
 
-    print_success(f"Dataset created successfully at {resolved_output_path}")
+    emit(reporter, "success", f"Dataset created successfully at {resolved_output_path}")
 
 
 def resolve_evaluation_dir(dataset_path: os.PathLike[str] | str) -> Path:

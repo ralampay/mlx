@@ -7,13 +7,17 @@ import cv2
 import numpy as np
 import torch
 
+from mlx.core.commands import NullWorkflowReporter, WorkflowReporter, emit
 from mlx.core.exceptions import MLXUserError
-from mlx.core.ui import console, print_info, print_warning
 from mlx.modes.segmentation.data import load_image_tensor
-from mlx.modes.segmentation.presentation import (
+from mlx.modes.segmentation.streaming import (
+    SegmentationFrameSink,
+    SegmentationFrameSource,
+    SegmentationStreamResult,
+)
+from mlx.modes.segmentation.visualization import (
     blend_overlay,
     colorize_mask,
-    display_segmentation_result,
     stack_segmentation_views,
 )
 from mlx.modes.segmentation.utils import load_checkpoint_bundle
@@ -30,9 +34,14 @@ class InferSegmentationImage:
 
 def infer_segmentation_image(config: dict[str, Any]) -> dict[str, Any]:
     compatibility_config = {"display": True, **config}
-    return InferSegmentationImage(
+    result = InferSegmentationImage(
         SegmentationRequest.from_config(compatibility_config)
     ).execute()
+    if compatibility_config.get("display", True):
+        from mlx.modes.segmentation.presentation import display_segmentation_result
+
+        display_segmentation_result(result)
+    return result
 
 
 def _run_image_inference(config: dict[str, Any]) -> dict[str, Any]:
@@ -81,13 +90,19 @@ def _run_image_inference(config: dict[str, Any]) -> dict[str, Any]:
         "predicted_mask": predicted_mask,
         "window_image": window_image,
     }
-    if config.get("display", False):
-        display_segmentation_result(result)
     return result
 
 
 class RunSegmentationStreamInference:
-    def __init__(self, config: dict[str, Any] | SegmentationRequest, source: str) -> None:
+    def __init__(
+        self,
+        config: dict[str, Any] | SegmentationRequest,
+        source: str,
+        *,
+        frame_source: SegmentationFrameSource | None = None,
+        frame_sink: SegmentationFrameSink | None = None,
+        reporter: WorkflowReporter | None = None,
+    ) -> None:
         if isinstance(config, SegmentationRequest):
             config = config.to_config()
         self.config = config
@@ -95,35 +110,52 @@ class RunSegmentationStreamInference:
         self.device = config.get("device", "cpu")
         self.camera_index = int(config.get("camera_index", 0))
         self.overlay_alpha = float(config.get("overlay_alpha", 0.45))
-        self.model, self.metadata = load_checkpoint_bundle(config)
+        self.frame_source = frame_source
+        self.frame_sink = frame_sink
+        self.reporter = reporter or NullWorkflowReporter()
+        self.model = None
+        self.metadata: dict[str, Any] = {}
+
+    def execute(self) -> SegmentationStreamResult:
+        if self.frame_source is None or self.frame_sink is None:
+            raise MLXUserError(
+                "Segmentation stream inference requires injected frame source and sink adapters."
+            )
+        self.model, self.metadata = load_checkpoint_bundle(self.config)
         self.model = self.model.to(self.device)
         self.model.eval()
-
-    def execute(self) -> None:
-        print_info(
+        emit(
+            self.reporter,
+            "info",
             f"Using device: {self.device} | Input size: {self.metadata['input_size'][0]}x{self.metadata['input_size'][1]}"
         )
-        print_warning("Press 'q' or 'Esc' to exit.")
-        capture, window_title = self._open_capture()
+        frames_processed = 0
+        stopped_by_user = False
         try:
             while True:
-                ok, frame = capture.read()
-                if not ok:
-                    print_warning(
+                ok, frame = self.frame_source.read()
+                if not ok or frame is None:
+                    emit(
+                        self.reporter,
+                        "warning",
                         "No more frames to process."
                         if self.source == "video"
-                        else "Failed to read frame from camera."
+                        else "Failed to read frame from camera.",
                     )
                     break
                 rendered = self._render_frame(frame)
-                cv2.imshow(window_title, rendered)
-                key = cv2.waitKey(1 if self.source == "camera" else 10) & 0xFF
-                if key in (ord("q"), 27):
-                    print_info("Exiting inference.")
+                frames_processed += 1
+                if not self.frame_sink.show(rendered):
+                    stopped_by_user = True
+                    emit(self.reporter, "info", "Exiting inference.")
                     break
         finally:
-            capture.release()
-            cv2.destroyAllWindows()
+            self.frame_source.release()
+            self.frame_sink.close()
+        return SegmentationStreamResult(
+            frames_processed=frames_processed,
+            stopped_by_user=stopped_by_user,
+        )
 
     def _render_frame(self, frame_bgr: np.ndarray) -> np.ndarray:
         frame_rgb = cv2.cvtColor(frame_bgr, cv2.COLOR_BGR2RGB)
@@ -152,31 +184,5 @@ class RunSegmentationStreamInference:
             cv2.drawContours(overlay_bgr, contours, -1, (0, 255, 0), 2)
 
         return overlay_bgr
-
-    def _open_capture(self):
-        if self.source == "camera":
-            capture = cv2.VideoCapture(self.camera_index)
-            if not capture.isOpened():
-                raise MLXUserError(
-                    f"Unable to open camera index {self.camera_index}. Check the camera and permissions."
-                )
-            return capture, "MLX Segmentation (Camera)"
-
-        if self.source == "video":
-            video_path = self.config.get("file_path")
-            if not video_path:
-                raise MLXUserError("Video inference requires --file-path pointing to the video file.")
-            resolved_video = Path(video_path).expanduser()
-            if not resolved_video.exists():
-                raise MLXUserError(f"Video file not found: {resolved_video}")
-            capture = cv2.VideoCapture(str(resolved_video))
-            if not capture.isOpened():
-                raise MLXUserError(
-                    f"Unable to open video file: {resolved_video}. Check that it is a readable video."
-                )
-            return capture, f"MLX Segmentation (Video: {resolved_video.name})"
-
-        raise MLXUserError(f"Unsupported source type: {self.source}")
-
 
 StreamSegmentationInferenceRunner = RunSegmentationStreamInference

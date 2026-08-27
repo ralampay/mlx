@@ -9,14 +9,14 @@ import numpy as np
 import torch
 from torch import nn
 
+from mlx.core.commands import NullWorkflowReporter, WorkflowReporter, emit
 from mlx.core.exceptions import MLXUserError
-from mlx.core.ui import print_info, print_success
 from mlx.modes.image_classification.data import (
     load_image_tensor,
     load_standard_classification_directory,
     resolve_evaluation_dir,
 )
-from mlx.modes.image_classification.evaluation import _build_one_shot_benchmark_pairs
+from mlx.modes.image_classification.evaluation import build_one_shot_benchmark_pairs
 from mlx.modes.image_classification.utils import load_checkpoint_bundle
 from mlx.modes.image_classification.requests import ImageClassificationRequest
 
@@ -67,18 +67,34 @@ class _SiameseBranchWrapper(nn.Module):
 
 
 class GenerateImageClassificationCams:
-    def __init__(self, request: ImageClassificationRequest) -> None:
+    def __init__(
+        self,
+        request: ImageClassificationRequest,
+        *,
+        reporter: WorkflowReporter | None = None,
+    ) -> None:
         self.request = request
+        self.reporter = reporter or NullWorkflowReporter()
 
     def execute(self) -> list[CamResult]:
-        return _generate_cams(self.request.to_config())
+        results = _generate_cams(self.request.to_config())
+        emit(
+            self.reporter,
+            "success",
+            f"Generated {len(results)} CAM image(s)",
+            payload={"event": "cam_completed", "count": len(results)},
+        )
+        return results
 
 
 def generate_image_classification_cams(config: dict[str, Any]) -> list[CamResult]:
     config = {"display": True, **config}
-    return GenerateImageClassificationCams(
+    results = GenerateImageClassificationCams(
         ImageClassificationRequest.from_config(config)
     ).execute()
+    if config.get("display", True):
+        display_cam_results(results, delay=int(config.get("window_delay", 0)))
+    return results
 
 
 def _generate_cams(config: dict[str, Any]) -> list[CamResult]:
@@ -93,10 +109,6 @@ def _generate_cams(config: dict[str, Any]) -> list[CamResult]:
     else:
         results = generate_standard_cams(model, metadata, config, device=device, method=method)
 
-    if config.get("display", True):
-        display_cam_results(results, delay=int(config.get("window_delay", 0)))
-
-    print_success(f"Generated {len(results)} CAM image(s)")
     return results
 
 
@@ -182,7 +194,7 @@ def generate_one_shot_cams(
     method: str,
 ) -> list[CamResult]:
     test_path = resolve_evaluation_dir(config["dataset_path"])
-    pairs = _build_one_shot_benchmark_pairs(
+    pairs = build_one_shot_benchmark_pairs(
         test_path,
         pairs_per_class=int(config.get("num_pairs", 100)),
         random_seed=config.get("random_seed"),
@@ -257,14 +269,9 @@ def overlay_cam(rgb_image: np.ndarray, grayscale_cam: np.ndarray) -> np.ndarray:
 
 
 def display_cam_results(results: Iterable[CamResult], *, delay: int = 0) -> None:
-    for result in results:
-        title = f"{result.method}: {result.source_path.name}"
-        image_bgr = cv2.cvtColor(result.visualization, cv2.COLOR_RGB2BGR)
-        cv2.imshow(title, image_bgr)
-        key = cv2.waitKey(delay)
-        cv2.destroyWindow(title)
-        if key in (ord("q"), 27):
-            break
+    from mlx.modes.image_classification.presentation import display_cam_results as display
+
+    display(results, delay=delay)
 
 
 def _resolve_cam_class(method: str):
@@ -370,5 +377,4 @@ def _save_cam_image(
     safe_label = "".join(char if char.isalnum() or char in {"-", "_"} else "_" for char in source_path.parent.name)
     output_path = output_dir / f"{safe_label}-{source_path.stem}-{safe_prefix}.png"
     cv2.imwrite(str(output_path), cv2.cvtColor(visualization, cv2.COLOR_RGB2BGR))
-    print_info(f"Wrote {output_path}")
     return output_path

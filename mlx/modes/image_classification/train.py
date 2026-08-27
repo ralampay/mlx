@@ -1,29 +1,15 @@
 from __future__ import annotations
 
 import csv
-from collections import deque
 from pathlib import Path
 from typing import Any
 
 import torch
-from rich.console import Group
-from rich.live import Live
-from rich.panel import Panel
-from rich.text import Text
-from rich.progress import (
-    BarColumn,
-    Progress,
-    SpinnerColumn,
-    TextColumn,
-    TimeElapsedColumn,
-    TimeRemainingColumn,
-)
-from rich.table import Table
 from torch import nn, optim
 from torch.utils.data import DataLoader
 
+from mlx.core.commands import NullWorkflowReporter, WorkflowReporter, emit
 from mlx.core.exceptions import MLXUserError
-from mlx.core.ui import console, print_info, print_success
 from mlx.modes.image_classification.data import (
     load_one_shot_datasets,
     load_standard_classification_datasets,
@@ -75,8 +61,14 @@ SVDD_TRAINING_CSV_COLUMNS = [
 
 
 class TrainImageClassificationModel:
-    def __init__(self, request: ImageClassificationRequest) -> None:
+    def __init__(
+        self,
+        request: ImageClassificationRequest,
+        *,
+        reporter: WorkflowReporter | None = None,
+    ) -> None:
         self.request = request
+        self.reporter = reporter or NullWorkflowReporter()
 
     def execute(self) -> None:
         config = self.request.to_config()
@@ -91,36 +83,56 @@ class TrainImageClassificationModel:
                     "Deep SVDD is supported only for standard image-classification models, "
                     "not one-shot models."
                 )
-            _train_one_shot(model_name, config)
+            _train_one_shot(model_name, config, reporter=self.reporter)
             return
-        _train_standard(model_name, config)
+        _train_standard(model_name, config, reporter=self.reporter)
 
 
 class SmokeTestImageClassificationModel:
-    def __init__(self, request: ImageClassificationRequest) -> None:
+    def __init__(
+        self,
+        request: ImageClassificationRequest,
+        *,
+        reporter: WorkflowReporter | None = None,
+    ) -> None:
         self.request = request
+        self.reporter = reporter or NullWorkflowReporter()
 
     def execute(self) -> None:
         config = self.request.to_config()
         model_name = resolve_model_name(config)
         family = model_family_for(model_name)
         if family == "one-shot":
-            _test_one_shot(model_name, config)
+            _test_one_shot(model_name, config, reporter=self.reporter)
             return
-        _test_standard(model_name, config)
+        _test_standard(model_name, config, reporter=self.reporter)
 
 
 def train_image_classification(config: dict[str, Any]) -> None:
-    TrainImageClassificationModel(ImageClassificationRequest.from_config(config)).execute()
+    from mlx.modes.image_classification.presentation import RichImageClassificationReporter
 
-
-def smoke_test_image_classification(config: dict[str, Any]) -> None:
-    SmokeTestImageClassificationModel(
-        ImageClassificationRequest.from_config(config)
+    TrainImageClassificationModel(
+        ImageClassificationRequest.from_config(config),
+        reporter=RichImageClassificationReporter(),
     ).execute()
 
 
-def _train_one_shot(model_name: str, config: dict[str, Any]) -> None:
+def smoke_test_image_classification(config: dict[str, Any]) -> None:
+    from mlx.modes.image_classification.presentation import RichImageClassificationReporter
+
+    SmokeTestImageClassificationModel(
+        ImageClassificationRequest.from_config(config),
+        reporter=RichImageClassificationReporter(),
+    ).execute()
+
+
+def _train_one_shot(
+    model_name: str,
+    config: dict[str, Any],
+    *,
+    reporter: WorkflowReporter | None = None,
+) -> None:
+    reporter = reporter or NullWorkflowReporter()
     device = config["device"]
     dataset_path = config["dataset_path"]
     batch_size = config.get("batch_size", 4)
@@ -128,15 +140,13 @@ def _train_one_shot(model_name: str, config: dict[str, Any]) -> None:
     learning_rate = config.get("lr") or 1e-4
     input_size = config.get("input_size", (105, 105))
     colored = config.get("colored", True)
-    refresh_rate = config.get("refresh_per_second", 2)
     use_best = bool(config.get("use_best", False))
-    verbose = bool(config.get("verbose", False))
     output_paths = resolve_train_output_paths(config, model_name=model_name)
     checkpoint_path = output_paths["checkpoint_path"]
     last_checkpoint_path = output_paths["last_checkpoint_path"]
     training_csv_path = output_paths["training_csv_path"]
 
-    print_info(f"Starting one-shot training on device={device} for {epochs} epochs")
+    emit(reporter, "info", f"Starting one-shot training on device={device} for {epochs} epochs")
 
     model = build_image_classification_model(model_name, config).to(device)
     criterion = nn.BCELoss()
@@ -149,6 +159,7 @@ def _train_one_shot(model_name: str, config: dict[str, Any]) -> None:
         family="one-shot",
         checkpoint_path=checkpoint_path,
         training_csv_path=training_csv_path,
+        reporter=reporter,
     )
 
     train_dataset, val_dataset = load_one_shot_datasets(
@@ -160,128 +171,80 @@ def _train_one_shot(model_name: str, config: dict[str, Any]) -> None:
     train_loader = DataLoader(train_dataset, batch_size=batch_size, shuffle=True, num_workers=2)
     val_loader = DataLoader(val_dataset, batch_size=batch_size, shuffle=False, num_workers=2)
 
-    epoch_log = _build_epoch_log()
-    last_saved_panel = _initial_checkpoint_panel(start_epoch, last_checkpoint_path)
+    for epoch in range(start_epoch, epochs):
+        model.train()
+        running_loss = 0.0
+        for img1, img2, label in train_loader:
+            img1, img2, label = img1.to(device), img2.to(device), label.to(device)
+            optimizer.zero_grad()
+            output = model(img1, img2)
+            loss = criterion(output, label.unsqueeze(1))
+            loss.backward()
+            optimizer.step()
+            running_loss += loss.item()
 
-    progress = _build_progress(epochs=epochs, train_loader_size=len(train_loader)) if verbose else None
-    epoch_task, batch_task = _progress_tasks(progress) if progress is not None else (None, None)
-    if progress is not None and epoch_task is not None:
-        progress.update(epoch_task, completed=start_epoch)
-
-    live = (
-        Live(_render_training_view(epoch_log, progress, last_saved_panel), refresh_per_second=refresh_rate, transient=False)
-        if verbose and progress is not None
-        else None
-    )
-
-    with (live or _nullcontext()):
-        for epoch in range(start_epoch, epochs):
-            model.train()
-            running_loss = 0.0
-            if progress is not None and batch_task is not None and epoch_task is not None:
-                progress.reset(batch_task)
-                progress.update(epoch_task, description=f"[magenta]Epoch {epoch + 1}/{epochs}")
-
-            for batch_index, (img1, img2, label) in enumerate(train_loader, start=1):
-                img1, img2, label = img1.to(device), img2.to(device), label.to(device)
-                optimizer.zero_grad()
-                output = model(img1, img2)
-                loss = criterion(output, label.unsqueeze(1))
-                loss.backward()
-                optimizer.step()
-                running_loss += loss.item()
-                if progress is not None and batch_task is not None:
-                    progress.advance(batch_task)
-                    progress.update(batch_task, description=f"[cyan]Batch {batch_index}/{len(train_loader)}")
-
-            avg_train_loss = running_loss / len(train_loader)
-            if progress is not None and epoch_task is not None:
-                progress.advance(epoch_task)
-            avg_val_loss, val_metrics = _validate_one_shot(model, val_loader, criterion, device)
-            history.append(
-                _training_history_row(
-                    epoch=epoch + 1,
-                    train_loss=avg_train_loss,
-                    val_loss=avg_val_loss,
-                    metrics=val_metrics,
-                )
-            )
-            _write_training_csv(training_csv_path, history)
-            epoch_log = _append_epoch_log(
-                epoch_log,
+        avg_train_loss = running_loss / len(train_loader)
+        avg_val_loss, val_metrics = _validate_one_shot(model, val_loader, criterion, device)
+        history.append(
+            _training_history_row(
                 epoch=epoch + 1,
-                epochs=epochs,
-                values=[
-                    ("loss", avg_train_loss),
-                    ("val_loss", avg_val_loss),
-                    ("accuracy", val_metrics["accuracy"]),
-                    ("precision", val_metrics["precision"]),
-                    ("recall", val_metrics["recall"]),
-                    ("f1", val_metrics["f1"]),
-                ],
+                train_loss=avg_train_loss,
+                val_loss=avg_val_loss,
+                metrics=val_metrics,
             )
+        )
+        _write_training_csv(training_csv_path, history)
 
-            improved = avg_val_loss < best_val_loss
-            if improved:
-                best_val_loss = avg_val_loss
-            saved_checkpoint = not use_best or improved
-            if saved_checkpoint:
-                save_checkpoint(
-                    checkpoint_path,
-                    model,
-                    model_name=model_name,
-                    family="one-shot",
-                    config=config,
-                )
-                checkpoint_message = (
-                    f"Saved new best model at {checkpoint_path}"
-                    if use_best
-                    else f"Saved epoch {epoch + 1} model at {checkpoint_path}"
-                )
-                last_saved_panel = Panel(
-                    f"[green]{checkpoint_message}[/]",
-                    title="Checkpoint",
-                    border_style="green",
-                )
-            else:
-                checkpoint_message = None
-                last_saved_panel = Panel("No improvement", title="Checkpoint", border_style="dim")
-
-            save_training_checkpoint(
-                last_checkpoint_path,
+        improved = avg_val_loss < best_val_loss
+        if improved:
+            best_val_loss = avg_val_loss
+        saved_checkpoint = not use_best or improved
+        checkpoint_message = None
+        if saved_checkpoint:
+            save_checkpoint(
+                checkpoint_path,
                 model,
-                optimizer,
                 model_name=model_name,
                 family="one-shot",
                 config=config,
-                completed_epoch=epoch + 1,
-                best_val_loss=best_val_loss,
-                history=history,
+            )
+            checkpoint_message = (
+                f"Saved new best model at {checkpoint_path}"
+                if use_best
+                else f"Saved epoch {epoch + 1} model at {checkpoint_path}"
             )
 
-            if live is not None and progress is not None:
-                live.update(_render_training_view(epoch_log, progress, last_saved_panel))
-            else:
-                _print_epoch_summary(
-                    epoch=epoch + 1,
-                    epochs=epochs,
-                    values=[
-                        ("loss", avg_train_loss),
-                        ("val_loss", avg_val_loss),
-                        ("accuracy", val_metrics["accuracy"]),
-                        ("precision", val_metrics["precision"]),
-                        ("recall", val_metrics["recall"]),
-                        ("f1", val_metrics["f1"]),
-                    ],
-                    checkpoint_path=checkpoint_path,
-                    saved_checkpoint=saved_checkpoint,
-                    checkpoint_message=checkpoint_message,
-                )
+        save_training_checkpoint(
+            last_checkpoint_path,
+            model,
+            optimizer,
+            model_name=model_name,
+            family="one-shot",
+            config=config,
+            completed_epoch=epoch + 1,
+            best_val_loss=best_val_loss,
+            history=history,
+        )
+        _emit_epoch_result(
+            reporter,
+            epoch=epoch + 1,
+            epochs=epochs,
+            train_loss=avg_train_loss,
+            val_loss=avg_val_loss,
+            metrics=val_metrics,
+            checkpoint_message=checkpoint_message,
+        )
 
-    print_success("One-shot training complete!")
+    emit(reporter, "success", "One-shot training complete!")
 
 
-def _train_standard(model_name: str, config: dict[str, Any]) -> None:
+def _train_standard(
+    model_name: str,
+    config: dict[str, Any],
+    *,
+    reporter: WorkflowReporter | None = None,
+) -> None:
+    reporter = reporter or NullWorkflowReporter()
     device = config["device"]
     dataset_path = config["dataset_path"]
     batch_size = config.get("batch_size", 16)
@@ -290,9 +253,7 @@ def _train_standard(model_name: str, config: dict[str, Any]) -> None:
     input_size = config.get("input_size", (224, 224))
     colored = config.get("colored", True)
     apply_transformations = bool(config.get("apply_transformations", False))
-    refresh_rate = config.get("refresh_per_second", 2)
     use_best = bool(config.get("use_best", False))
-    verbose = bool(config.get("verbose", False))
     joint_svdd = config.get("ood_method", "none") == "deep-svdd"
     svdd_weight = float(config.get("svdd_weight", 0.05))
     svdd_warmup_epochs = int(config.get("svdd_warmup_epochs", 0))
@@ -301,7 +262,11 @@ def _train_standard(model_name: str, config: dict[str, Any]) -> None:
     last_checkpoint_path = output_paths["last_checkpoint_path"]
     training_csv_path = output_paths["training_csv_path"]
 
-    print_info(f"Starting standard classification training on device={device} for {epochs} epochs")
+    emit(
+        reporter,
+        "info",
+        f"Starting standard classification training on device={device} for {epochs} epochs",
+    )
     train_dataset, val_dataset, classes = load_standard_classification_datasets(
         dataset_path,
         input_size=input_size,
@@ -327,155 +292,104 @@ def _train_standard(model_name: str, config: dict[str, Any]) -> None:
         checkpoint_path=checkpoint_path,
         training_csv_path=training_csv_path,
         classes=classes,
+        reporter=reporter,
     )
     if joint_svdd and start_epoch == 0:
         initialize_svdd_center(model, train_loader, device)
 
-    epoch_log = _build_epoch_log()
-    last_saved_panel = _initial_checkpoint_panel(start_epoch, last_checkpoint_path)
-
-    progress = _build_progress(epochs=epochs, train_loader_size=len(train_loader)) if verbose else None
-    epoch_task, batch_task = _progress_tasks(progress) if progress is not None else (None, None)
-    if progress is not None and epoch_task is not None:
-        progress.update(epoch_task, completed=start_epoch)
-
-    live = (
-        Live(_render_training_view(epoch_log, progress, last_saved_panel), refresh_per_second=refresh_rate, transient=False)
-        if verbose and progress is not None
-        else None
-    )
-
-    with (live or _nullcontext()):
-        for epoch in range(start_epoch, epochs):
-            model.train()
-            running_loss = 0.0
-            running_classification_loss = 0.0
-            running_svdd_loss = 0.0
-            if progress is not None and batch_task is not None and epoch_task is not None:
-                progress.reset(batch_task)
-                progress.update(epoch_task, description=f"[magenta]Epoch {epoch + 1}/{epochs}")
-
-            for batch_index, (images, targets) in enumerate(train_loader, start=1):
-                images, targets = images.to(device), targets.to(device)
-                optimizer.zero_grad()
-                output = model(images)
-                if joint_svdd:
-                    classification_loss = criterion(output.logits, targets)
-                    svdd_loss = compute_svdd_loss(model, output.svdd_embedding)
-                    loss = classification_loss
-                    if epoch >= svdd_warmup_epochs:
-                        loss = loss + svdd_weight * svdd_loss
-                    running_classification_loss += classification_loss.item()
-                    running_svdd_loss += svdd_loss.item()
-                else:
-                    loss = criterion(output, targets)
-                loss.backward()
-                optimizer.step()
-                running_loss += loss.item()
-                if progress is not None and batch_task is not None:
-                    progress.advance(batch_task)
-                    progress.update(batch_task, description=f"[cyan]Batch {batch_index}/{len(train_loader)}")
-
-            avg_train_loss = running_loss / len(train_loader)
-            if progress is not None and epoch_task is not None:
-                progress.advance(epoch_task)
+    for epoch in range(start_epoch, epochs):
+        model.train()
+        running_loss = 0.0
+        running_classification_loss = 0.0
+        running_svdd_loss = 0.0
+        for images, targets in train_loader:
+            images, targets = images.to(device), targets.to(device)
+            optimizer.zero_grad()
+            output = model(images)
             if joint_svdd:
-                avg_val_loss, val_metrics, val_details = _validate_joint_svdd(
-                    model, val_loader, criterion, device, svdd_weight
-                )
-                history.append(
-                    _svdd_training_history_row(
-                        epoch=epoch + 1,
-                        train_loss=avg_train_loss,
-                        train_classification_loss=running_classification_loss / len(train_loader),
-                        train_svdd_loss=running_svdd_loss / len(train_loader),
-                        val_loss=avg_val_loss,
-                        val_classification_loss=val_details["classification_loss"],
-                        val_svdd_loss=val_details["svdd_loss"],
-                        metrics=val_metrics,
-                    )
-                )
+                classification_loss = criterion(output.logits, targets)
+                svdd_loss = compute_svdd_loss(model, output.svdd_embedding)
+                loss = classification_loss
+                if epoch >= svdd_warmup_epochs:
+                    loss = loss + svdd_weight * svdd_loss
+                running_classification_loss += classification_loss.item()
+                running_svdd_loss += svdd_loss.item()
             else:
-                avg_val_loss, val_metrics = _validate_standard(model, val_loader, criterion, device)
-                history.append(_training_history_row(
+                loss = criterion(output, targets)
+            loss.backward()
+            optimizer.step()
+            running_loss += loss.item()
+
+        avg_train_loss = running_loss / len(train_loader)
+        if joint_svdd:
+            avg_val_loss, val_metrics, val_details = _validate_joint_svdd(
+                model, val_loader, criterion, device, svdd_weight
+            )
+            history.append(
+                _svdd_training_history_row(
+                    epoch=epoch + 1,
+                    train_loss=avg_train_loss,
+                    train_classification_loss=running_classification_loss / len(train_loader),
+                    train_svdd_loss=running_svdd_loss / len(train_loader),
+                    val_loss=avg_val_loss,
+                    val_classification_loss=val_details["classification_loss"],
+                    val_svdd_loss=val_details["svdd_loss"],
+                    metrics=val_metrics,
+                )
+            )
+        else:
+            avg_val_loss, val_metrics = _validate_standard(model, val_loader, criterion, device)
+            history.append(
+                _training_history_row(
                     epoch=epoch + 1,
                     train_loss=avg_train_loss,
                     val_loss=avg_val_loss,
                     metrics=val_metrics,
-                ))
-            _write_training_csv(training_csv_path, history)
-            epoch_log = _append_epoch_log(
-                epoch_log,
-                epoch=epoch + 1,
-                epochs=epochs,
-                values=[
-                    ("loss", avg_train_loss),
-                    ("val_loss", avg_val_loss),
-                    ("accuracy", val_metrics["accuracy"]),
-                    ("precision", val_metrics["precision"]),
-                    ("recall", val_metrics["recall"]),
-                    ("f1", val_metrics["f1"]),
-                ],
+                )
             )
+        _write_training_csv(training_csv_path, history)
 
-            improved = avg_val_loss < best_val_loss
-            if improved:
-                best_val_loss = avg_val_loss
-            saved_checkpoint = not use_best or improved
-            if saved_checkpoint:
-                save_checkpoint(
-                    checkpoint_path,
-                    model,
-                    model_name=model_name,
-                    family="standard",
-                    config=config,
-                    classes=classes,
-                )
-                checkpoint_message = (
-                    f"Saved new best model at {checkpoint_path}"
-                    if use_best
-                    else f"Saved epoch {epoch + 1} model at {checkpoint_path}"
-                )
-                last_saved_panel = Panel(
-                    f"[green]{checkpoint_message}[/]",
-                    title="Checkpoint",
-                    border_style="green",
-                )
-            else:
-                checkpoint_message = None
-                last_saved_panel = Panel("No improvement", title="Checkpoint", border_style="dim")
-
-            save_training_checkpoint(
-                last_checkpoint_path,
+        improved = avg_val_loss < best_val_loss
+        if improved:
+            best_val_loss = avg_val_loss
+        saved_checkpoint = not use_best or improved
+        checkpoint_message = None
+        if saved_checkpoint:
+            save_checkpoint(
+                checkpoint_path,
                 model,
-                optimizer,
                 model_name=model_name,
                 family="standard",
                 config=config,
-                completed_epoch=epoch + 1,
-                best_val_loss=best_val_loss,
-                history=history,
                 classes=classes,
             )
+            checkpoint_message = (
+                f"Saved new best model at {checkpoint_path}"
+                if use_best
+                else f"Saved epoch {epoch + 1} model at {checkpoint_path}"
+            )
 
-            if live is not None and progress is not None:
-                live.update(_render_training_view(epoch_log, progress, last_saved_panel))
-            else:
-                _print_epoch_summary(
-                    epoch=epoch + 1,
-                    epochs=epochs,
-                    values=[
-                        ("loss", avg_train_loss),
-                        ("val_loss", avg_val_loss),
-                        ("accuracy", val_metrics["accuracy"]),
-                        ("precision", val_metrics["precision"]),
-                        ("recall", val_metrics["recall"]),
-                        ("f1", val_metrics["f1"]),
-                    ],
-                    checkpoint_path=checkpoint_path,
-                    saved_checkpoint=saved_checkpoint,
-                    checkpoint_message=checkpoint_message,
-                )
+        save_training_checkpoint(
+            last_checkpoint_path,
+            model,
+            optimizer,
+            model_name=model_name,
+            family="standard",
+            config=config,
+            completed_epoch=epoch + 1,
+            best_val_loss=best_val_loss,
+            history=history,
+            classes=classes,
+        )
+        _emit_epoch_result(
+            reporter,
+            epoch=epoch + 1,
+            epochs=epochs,
+            train_loss=avg_train_loss,
+            val_loss=avg_val_loss,
+            metrics=val_metrics,
+            checkpoint_message=checkpoint_message,
+        )
 
     if joint_svdd:
         CalibrateDeepSVDDCheckpoints(
@@ -486,17 +400,24 @@ def _train_standard(model_name: str, config: dict[str, Any]) -> None:
             model_name=model_name,
             config=config,
             classes=classes,
+            reporter=reporter,
         ).execute()
-    print_success("Standard classification training complete!")
+    emit(reporter, "success", "Standard classification training complete!")
 
 
-def _test_one_shot(model_name: str, config: dict[str, Any]) -> None:
+def _test_one_shot(
+    model_name: str,
+    config: dict[str, Any],
+    *,
+    reporter: WorkflowReporter | None = None,
+) -> None:
+    reporter = reporter or NullWorkflowReporter()
     batch = config["batch_size"]
     height, width = config["input_size"]
     device = config["device"]
     colored = config["colored"]
 
-    print_info(f"Running one-shot test on device={device} | input={height}x{width} | batch={batch}")
+    emit(reporter, "info", f"Running one-shot test on device={device} | input={height}x{width} | batch={batch}")
     model = build_image_classification_model(model_name, config).to(device)
 
     channels = 3 if colored else 1
@@ -504,17 +425,25 @@ def _test_one_shot(model_name: str, config: dict[str, Any]) -> None:
     x2 = torch.randn(batch, channels, height, width).to(device)
     output = model(x1, x2)
 
-    _render_test_output("One-Shot Model Output", output)
+    _report_test_output(reporter, "One-Shot Model Output", output)
 
 
-def _test_standard(model_name: str, config: dict[str, Any]) -> None:
+def _test_standard(
+    model_name: str,
+    config: dict[str, Any],
+    *,
+    reporter: WorkflowReporter | None = None,
+) -> None:
+    reporter = reporter or NullWorkflowReporter()
     batch = config["batch_size"]
     height, width = config["input_size"]
     device = config["device"]
     colored = config["colored"]
     num_classes = config.get("num_classes", 4)
 
-    print_info(
+    emit(
+        reporter,
+        "info",
         f"Running standard classification test on device={device} | input={height}x{width} | batch={batch}"
     )
     model = build_image_classification_model(
@@ -528,19 +457,25 @@ def _test_standard(model_name: str, config: dict[str, Any]) -> None:
     output = model(x)
     if hasattr(output, "logits"):
         output = output.logits
-    _render_test_output("Classification Model Output", output)
+    _report_test_output(reporter, "Classification Model Output", output)
 
 
-def _render_test_output(title: str, output: torch.Tensor) -> None:
-    print_success("Test completed successfully!")
-    print_info(f"Output tensor shape: {list(output.shape)}")
-
-    table = Table(title=title, show_header=True)
-    table.add_column("Index", justify="center", style="cyan")
-    table.add_column("Value", justify="center", style="magenta")
-    for index, value in enumerate(output.flatten().tolist()[:16]):
-        table.add_row(str(index), f"{value:.6f}")
-    console.print(table)
+def _report_test_output(
+    reporter: WorkflowReporter,
+    title: str,
+    output: torch.Tensor,
+) -> None:
+    emit(
+        reporter,
+        "success",
+        "Test completed successfully!",
+        payload={
+            "event": "tensor_output",
+            "title": title,
+            "shape": list(output.shape),
+            "values": output.flatten().tolist()[:16],
+        },
+    )
 
 
 def _validate_one_shot(model, val_loader, criterion, device: str) -> tuple[float, dict[str, float]]:
@@ -652,25 +587,6 @@ def _compute_classification_metrics(targets: list[int], preds: list[int]) -> dic
     }
 
 
-def _build_progress(*, epochs: int, train_loader_size: int) -> Progress:
-    progress = Progress(
-        SpinnerColumn(),
-        TextColumn("[bold blue]{task.description}"),
-        BarColumn(),
-        "[progress.percentage]{task.percentage:>3.0f}%",
-        "•",
-        TimeElapsedColumn(),
-        TimeRemainingColumn(),
-    )
-    progress.add_task("[magenta]Epoch Progress", total=epochs)
-    progress.add_task("[cyan]Batch Progress", total=train_loader_size)
-    return progress
-
-
-def _progress_tasks(progress: Progress) -> tuple[int, int]:
-    return progress.task_ids[0], progress.task_ids[1]
-
-
 def _prepare_training_state(
     config: dict[str, Any],
     model,
@@ -681,7 +597,9 @@ def _prepare_training_state(
     checkpoint_path: Path,
     training_csv_path: Path,
     classes: list[str] | None = None,
+    reporter: WorkflowReporter | None = None,
 ) -> tuple[int, float, list[dict[str, float | int]]]:
+    reporter = reporter or NullWorkflowReporter()
     resume_path = config.get("model_path")
     if not resume_path:
         _write_training_csv(training_csv_path, [])
@@ -714,20 +632,12 @@ def _prepare_training_state(
             config=config,
             classes=classes,
         )
-    print_info(
+    emit(
+        reporter,
+        "info",
         f"Resuming {model_name} from completed epoch {completed_epoch}: {resume_path}"
     )
     return completed_epoch, training_state["best_val_loss"], history
-
-
-def _initial_checkpoint_panel(start_epoch: int, last_checkpoint_path: Path) -> Panel:
-    if start_epoch:
-        return Panel(
-            f"Resumed at epoch {start_epoch} from {last_checkpoint_path}",
-            title="Checkpoint",
-            border_style="cyan",
-        )
-    return Panel("No model saved yet", border_style="dim")
 
 
 def _training_history_row(
@@ -810,6 +720,7 @@ class CalibrateDeepSVDDCheckpoints:
         model_name: str,
         config: dict[str, Any],
         classes: list[str],
+        reporter: WorkflowReporter | None = None,
     ) -> None:
         self.model = model
         self.checkpoint_paths = checkpoint_paths
@@ -818,6 +729,7 @@ class CalibrateDeepSVDDCheckpoints:
         self.model_name = model_name
         self.config = config
         self.classes = classes
+        self.reporter = reporter or NullWorkflowReporter()
 
     def execute(self) -> None:
         calibrated = []
@@ -837,7 +749,9 @@ class CalibrateDeepSVDDCheckpoints:
                 classes=self.classes,
             )
             calibrated.append(f"{checkpoint_path.name}={threshold:.6f}")
-        print_success(
+        emit(
+            self.reporter,
+            "success",
             "Calibrated Deep SVDD rejection thresholds from validation images: "
             + ", ".join(calibrated)
         )
@@ -856,56 +770,36 @@ class CalibrateDeepSVDDCheckpoints:
             ) from exc
 
 
-def _build_epoch_log(*, max_entries: int = 12) -> deque[str]:
-    return deque(maxlen=max_entries)
-
-
-def _append_epoch_log(
-    epoch_log: deque[str],
+def _emit_epoch_result(
+    reporter: WorkflowReporter,
     *,
     epoch: int,
     epochs: int,
-    values: list[tuple[str, float]],
-) -> deque[str]:
-    formatted_values = "  ".join(f"{label}: {value:.6f}" for label, value in values)
-    epoch_log.append(f"Epoch {epoch}/{epochs}  {formatted_values}")
-    return epoch_log
-
-
-def _print_epoch_summary(
-    *,
-    epoch: int,
-    epochs: int,
-    values: list[tuple[str, float]],
-    checkpoint_path: Path,
-    saved_checkpoint: bool,
+    train_loss: float,
+    val_loss: float,
+    metrics: dict[str, float],
     checkpoint_message: str | None = None,
 ) -> None:
+    values = [
+        ("loss", train_loss),
+        ("val_loss", val_loss),
+        ("accuracy", metrics["accuracy"]),
+        ("precision", metrics["precision"]),
+        ("recall", metrics["recall"]),
+        ("f1", metrics["f1"]),
+    ]
     formatted_values = "  ".join(f"{label}: {value:.6f}" for label, value in values)
-    print_info(f"Epoch {epoch}/{epochs}  {formatted_values}")
-    if saved_checkpoint:
-        print_success(checkpoint_message or f"Saved model at {checkpoint_path}")
-
-
-class _nullcontext:
-    def __enter__(self):
-        return None
-
-    def __exit__(self, exc_type, exc, tb):
-        return False
-
-
-def _render_training_view(epoch_log: deque[str], progress: Progress, last_saved_panel: Panel) -> Group:
-    return Group(
-        _render_epoch_log_panel(epoch_log),
-        progress,
-        last_saved_panel,
+    emit(
+        reporter,
+        "progress",
+        f"Epoch {epoch}/{epochs}  {formatted_values}",
+        current=epoch,
+        total=epochs,
+        payload={
+            "event": "training_epoch",
+            "metrics": {"train_loss": train_loss, "val_loss": val_loss, **metrics},
+            "checkpoint_message": checkpoint_message,
+        },
     )
-
-
-def _render_epoch_log_panel(epoch_log: deque[str]) -> Panel:
-    if epoch_log:
-        body = Text("\n".join(epoch_log))
-    else:
-        body = Text("Waiting for completed epochs...", style="dim")
-    return Panel(body, title="Epoch Results", border_style="blue")
+    if checkpoint_message:
+        emit(reporter, "success", checkpoint_message)

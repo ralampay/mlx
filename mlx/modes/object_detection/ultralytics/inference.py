@@ -1,107 +1,48 @@
 from __future__ import annotations
 
-from pathlib import Path
 from typing import Any
 
-from rich.panel import Panel
-
-from mlx.core.exceptions import MLXUserError
-from mlx.core.ui import console, print_info, print_warning
-from mlx.modes.object_detection.ultralytics.adapters import build_detection_adapter
-from mlx.modes.object_detection.ultralytics.utils import (
-    annotate_detections,
-    resolve_imgsz,
-    resolve_model_paths,
+from mlx.modes.object_detection.commands import (
+    CreateObjectDetector,
+    RunObjectDetectionStream,
 )
-
-try:
-    import cv2
-except ImportError:
-    cv2 = None
+from mlx.modes.object_detection.presentation import (
+    RichWorkflowReporter,
+    annotate_detections,
+)
+from mlx.modes.object_detection.requests import (
+    ObjectDetectionRequest,
+    StreamObjectDetectionRequest,
+)
+from mlx.modes.object_detection.streaming import OpenCVFrameSink, OpenCVFrameSource
 
 
 class StreamInferenceRunner:
+    """Backward-compatible adapter onto the provider-neutral stream command."""
+
     def __init__(self, config: dict[str, Any], source: str) -> None:
-        if cv2 is None:
-            raise MLXUserError(
-                "OpenCV is required for object-detection inference. Install opencv-python and try again."
-            )
-        self.config = config
+        self.config = {**config, "provider": "ultralytics", "source": source}
         self.source = source
-        self.device = config.get("device", "cpu")
-        self.imgsz = resolve_imgsz(config)
-        self.resolved_cfg, self.resolved_weights = resolve_model_paths(
-            config,
-            require_yaml=True,
-            require_weights=True,
-        )
-        self.confidence = float(config.get("confidence", 0.25))
-        self.camera_index = int(config.get("camera_index", 0))
 
-        title = (
-            "Ultralytics Object Detection - Camera Inference"
-            if source == "camera"
-            else "Ultralytics Object Detection - Video Inference"
-        )
-        console.print(Panel.fit(title, border_style="cyan"))
+    def execute(self):
+        request = StreamObjectDetectionRequest.from_config(self.config)
+        detector = CreateObjectDetector(
+            ObjectDetectionRequest.from_config(self.config)
+        ).execute()
+        return RunObjectDetectionStream(
+            detector=detector,
+            frame_source=OpenCVFrameSource(
+                source=request.source,
+                camera_index=request.camera_index,
+                file_path=request.file_path,
+            ),
+            frame_sink=OpenCVFrameSink(
+                title=f"MLX Object Detection ({request.source.title()})",
+                delay_ms=1 if request.source == "camera" else 10,
+            ),
+            renderer=annotate_detections,
+            reporter=RichWorkflowReporter(),
+        ).execute()
 
-        if self.resolved_cfg:
-            print_info(f"Model YAML: {self.resolved_cfg}")
-        print_info(f"Loading weights from: {self.resolved_weights}")
-        self.adapter = build_detection_adapter(
-            resolved_cfg=self.resolved_cfg,
-            resolved_weights=self.resolved_weights,
-            device=self.device,
-            imgsz=self.imgsz,
-            confidence=self.confidence,
-        )
 
-    def execute(self) -> None:
-        print_info(
-            f"Using device: {self.device} | Image size: {self.imgsz} | Confidence: {self.confidence}"
-        )
-        print_warning("Press 'q' or 'Esc' to exit.")
-        capture, window_title = self._open_capture()
-
-        try:
-            while True:
-                ok, frame = capture.read()
-                if not ok:
-                    print_warning(
-                        "No more frames to process."
-                        if self.source == "video"
-                        else "Failed to read frame from camera."
-                    )
-                    break
-
-                result = self.adapter.predict(frame)
-                cv2.imshow(window_title, annotate_detections(frame, result))
-                key = cv2.waitKey(1 if self.source == "camera" else 10) & 0xFF
-                if key in (ord("q"), 27):
-                    print_info("Exiting inference.")
-                    break
-        finally:
-            capture.release()
-            cv2.destroyAllWindows()
-
-    def _open_capture(self):
-        if self.source == "camera":
-            capture = cv2.VideoCapture(self.camera_index)
-            if not capture.isOpened():
-                raise RuntimeError(f"Unable to open camera index {self.camera_index}.")
-            return capture, "MLX Object Detection (Camera)"
-
-        if self.source == "video":
-            video_path = self.config.get("file_path")
-            if not video_path:
-                raise MLXUserError("Video inference requires --file-path pointing to the video file.")
-            resolved_video = Path(video_path).expanduser()
-            if not resolved_video.exists():
-                raise MLXUserError(f"Video file not found: {resolved_video}")
-
-            capture = cv2.VideoCapture(str(resolved_video))
-            if not capture.isOpened():
-                raise RuntimeError(f"Unable to open video file: {resolved_video}")
-            return capture, f"MLX Object Detection (Video: {resolved_video.name})"
-
-        raise MLXUserError(f"Unsupported source type: {self.source}")
+__all__ = ["StreamInferenceRunner"]

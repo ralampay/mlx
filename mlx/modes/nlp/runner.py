@@ -4,11 +4,13 @@ from typing import Any
 
 from mlx.core.exceptions import MLXUserError
 from mlx.modes.nlp.embedding import EmbedCsvCommand, EmbedCsvRequest
+from mlx.modes.nlp.presentation import RichEmbeddingReporter
 
 
 ACTION_HANDLERS = {
     "embed": lambda config: EmbedCsvCommand(
-        EmbedCsvRequest.from_config({**config, "present": True})
+        EmbedCsvRequest.from_config({**config, "present": True}),
+        reporter=RichEmbeddingReporter(),
     ).execute(),
 }
 

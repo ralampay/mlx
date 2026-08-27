@@ -3,8 +3,8 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Any, Optional
 
+from mlx.core.commands import NullWorkflowReporter, WorkflowReporter, emit
 from mlx.core.exceptions import MLXUserError
-from mlx.core.ui import print_info, print_success, print_warning
 from mlx.modes.object_detection.artifacts import (
     detect_existing_training_artifacts,
     find_existing_checkpoint,
@@ -18,11 +18,22 @@ from mlx.modes.object_detection.libreyolo.utils import (
     resolve_model_path,
     resolve_model_spec,
 )
+from mlx.modes.object_detection.requests import TrainObjectDetectionRequest
 
 
 class TrainLibreYOLOObjectDetection:
-    def __init__(self, config: dict[str, Any]) -> None:
-        self.config = config
+    def __init__(
+        self,
+        config: dict[str, Any] | TrainObjectDetectionRequest,
+        *,
+        reporter: WorkflowReporter | None = None,
+    ) -> None:
+        self.config = (
+            config.to_config()
+            if isinstance(config, TrainObjectDetectionRequest)
+            else dict(config)
+        )
+        self.reporter = reporter or NullWorkflowReporter()
 
     def execute(self) -> dict[str, Any]:
         if self.config.get("loss_clip") is not None:
@@ -54,9 +65,9 @@ class TrainLibreYOLOObjectDetection:
         initialization_weights = explicit_weights or auto_warm_start
 
         if auto_resume is not None:
-            print_info(f"Continuing LibreYOLO training from checkpoint: {auto_resume}")
+            emit(self.reporter, "info", f"Continuing LibreYOLO training from checkpoint: {auto_resume}")
         elif initialization_weights is not None:
-            print_info(f"Warm-starting LibreYOLO from checkpoint: {initialization_weights}")
+            emit(self.reporter, "info", f"Warm-starting LibreYOLO from checkpoint: {initialization_weights}")
 
         try:
             if auto_resume is not None:
@@ -89,7 +100,7 @@ class TrainLibreYOLOObjectDetection:
                 resume=auto_resume is not None,
                 allow_pretrained=auto_resume is None and initialization_weights is None,
             )
-            print_info("Starting LibreYOLO training loop...")
+            emit(self.reporter, "info", "Starting LibreYOLO training loop...")
             raw_results = model.train(**train_kwargs)
         except (
             AttributeError,
@@ -115,13 +126,19 @@ class TrainLibreYOLOObjectDetection:
             checkpoint_text = str(selected_checkpoint)
             results["model_path"] = checkpoint_text
             results["checkpoint_path"] = checkpoint_text
-            print_success(
+            emit(
+                self.reporter,
+                "success",
                 f"Selected LibreYOLO checkpoint for downstream use: {selected_checkpoint}"
             )
         else:
-            print_warning("LibreYOLO training completed, but MLX could not find a .pt checkpoint.")
+            emit(
+                self.reporter,
+                "warning",
+                "LibreYOLO training completed, but MLX could not find a .pt checkpoint.",
+            )
 
-        print_success("LibreYOLO training complete!")
+        emit(self.reporter, "success", "LibreYOLO training complete!")
         return results
 
     def _build_train_kwargs(
@@ -174,7 +191,9 @@ class TrainLibreYOLOObjectDetection:
             raw_path = results.get(key)
             if raw_path and Path(raw_path).is_file():
                 if key == fallback_key:
-                    print_warning(
+                    emit(
+                        self.reporter,
+                        "warning",
                         f"Preferred LibreYOLO {preferred_key} was unavailable; "
                         f"using {fallback_key}."
                     )
@@ -196,7 +215,9 @@ class TrainLibreYOLOObjectDetection:
             file_name=fallback_name,
         )
         if fallback is not None:
-            print_warning(
+            emit(
+                self.reporter,
+                "warning",
                 f"Preferred checkpoint {preferred_name} was unavailable; using {fallback_name}."
             )
             return fallback
@@ -206,4 +227,9 @@ class TrainLibreYOLOObjectDetection:
 def train_object_detection(config: dict[str, Any]) -> dict[str, Any]:
     """Compatibility function for direct LibreYOLO-provider callers."""
 
-    return TrainLibreYOLOObjectDetection(config).execute()
+    from mlx.modes.object_detection.presentation import RichWorkflowReporter
+
+    return TrainLibreYOLOObjectDetection(
+        config,
+        reporter=RichWorkflowReporter(),
+    ).execute()

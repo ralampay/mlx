@@ -8,6 +8,7 @@ from mlx.core.exceptions import MLXUserError
 from mlx.core.model_listing import ModelParameterSummary
 from mlx.modes.object_detection.models import DetectionAdapter
 from mlx.modes.object_detection.requests import (
+    BenchmarkObjectDetectionRequest,
     ConvertObjectDetectionRequest,
     ListObjectDetectionModelsRequest,
     ObjectDetectionRequest,
@@ -19,6 +20,13 @@ class ObjectDetectionProvider(Protocol):
     name: str
 
     def train(self, request: TrainObjectDetectionRequest, reporter: WorkflowReporter) -> Any:
+        ...
+
+    def benchmark(
+        self,
+        request: BenchmarkObjectDetectionRequest,
+        reporter: WorkflowReporter,
+    ) -> Any:
         ...
 
     def create_detector(self, request: ObjectDetectionRequest) -> DetectionAdapter:

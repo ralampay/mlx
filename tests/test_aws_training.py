@@ -3,13 +3,14 @@ from __future__ import annotations
 import hashlib
 import json
 import zipfile
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 import pytest
 import torch
 
 from mlx.core.commands import CallbackWorkflowReporter
-from mlx.core.exceptions import MLXUserError
+from mlx.core.exceptions import MLXAbort, MLXUserError
 from mlx.modes.object_detection import runner as detection_runner
 from mlx.modes.object_detection.aws.checkpoints import (
     RotatingCheckpointPublisher,
@@ -23,11 +24,13 @@ from mlx.modes.object_detection.aws.config import (
     load_aws_training_config,
 )
 from mlx.modes.object_detection.aws.entrypoint import RunSageMakerObjectDetectionTraining
+from mlx.modes.object_detection.aws.image import PublishSageMakerImage
 from mlx.modes.object_detection.aws.models import (
     AwsInfrastructure,
     AwsTrainingStatus,
 )
 from mlx.modes.object_detection.aws.service import SageMakerTrainingService
+from mlx.modes.object_detection.aws.status import build_training_status
 from mlx.modes.object_detection.requests import TrainObjectDetectionRequest
 from mlx.modes.object_detection.ultralytics.provider import UltralyticsProvider
 
@@ -320,6 +323,97 @@ def test_watch_reports_until_terminal_without_hidden_state() -> None:
     assert [item.status for item in observed] == ["InProgress", "Completed"]
 
 
+def test_watch_translates_keyboard_interrupt_to_intentional_abort() -> None:
+    class FakeService:
+        def status(self, job_name):
+            return _status(job_name, "InProgress")
+
+    observed = []
+
+    def interrupt_wait(_: float) -> None:
+        raise KeyboardInterrupt
+
+    command = WatchAwsObjectDetectionTraining(
+        FakeService(),
+        "job",
+        poll_interval=1,
+        on_status=observed.append,
+        wait=interrupt_wait,
+    )
+
+    with pytest.raises(MLXAbort):
+        command.execute()
+
+    assert [item.status for item in observed] == ["InProgress"]
+
+
+def test_status_translation_is_independent_of_aws_clients() -> None:
+    now = datetime(2026, 8, 27, 12, 0, tzinfo=timezone.utc)
+    description = {
+        "TrainingJobName": "job",
+        "TrainingJobStatus": "InProgress",
+        "CreationTime": now - timedelta(minutes=10),
+        "TrainingStartTime": now - timedelta(minutes=9),
+        "SecondaryStatusTransitions": [{"Status": "Training"}],
+        "EnableManagedSpotTraining": True,
+        "HyperParameters": {
+            "mlx_run_id": "run",
+            "mlx_training": json.dumps({"epochs": 20}),
+        },
+        "CheckpointConfig": {"S3Uri": "s3://checkpoints/run"},
+        "OutputDataConfig": {"S3OutputPath": "s3://outputs/run"},
+    }
+    metrics = {"mlx:epoch": 5.0, "mlx:eta_seconds": 90.0}
+
+    status = build_training_status(
+        description,
+        latest_metric=lambda _, name: metrics.get(name),
+        console_url="https://example.test/job",
+        now=now,
+    )
+
+    assert status.completed_epoch == 5
+    assert status.total_epochs == 20
+    assert status.progress_percent == 25.0
+    assert status.elapsed_seconds == 600
+    assert status.expected_completion_time == now + timedelta(seconds=90)
+
+
+def test_image_publisher_reuses_digest_without_running_docker(tmp_path: Path) -> None:
+    class FakeAwsError(Exception):
+        pass
+
+    class FakeEcr:
+        def describe_images(self, **kwargs):
+            return {"imageDetails": [{"imageDigest": "sha256:existing"}]}
+
+    class FailingDocker:
+        def login(self, **kwargs):
+            raise AssertionError("Docker should not run for an existing source image")
+
+        build = login
+        push = login
+
+    package_root = tmp_path / "package"
+    package_root.mkdir()
+    dockerfile = package_root / "Dockerfile"
+    dockerfile.write_text("FROM scratch\n", encoding="utf-8")
+
+    image_uri = PublishSageMakerImage(
+        ecr=FakeEcr(),
+        repository_name="mlx-training",
+        repository_uri="123.dkr.ecr.us-east-1.amazonaws.com/mlx-training",
+        package_root=package_root,
+        dockerfile=dockerfile,
+        rebuild=False,
+        client_error=FakeAwsError,
+        boto_error=FakeAwsError,
+        command_runner=FailingDocker(),
+    ).execute()
+
+    assert image_uri.endswith("@sha256:existing")
+
+
 def test_entrypoint_rejects_zip_traversal(tmp_path: Path) -> None:
     input_dir = tmp_path / "input"
     input_dir.mkdir()
@@ -377,6 +471,90 @@ def test_submit_payload_uses_spot_and_shared_run_prefix() -> None:
         "/mlx-od/runs/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa/recovery"
     )
     assert result.run_id == "a" * 32
+
+    legacy_payload = config.training.to_config()
+    for key in (
+        "validate_after_training",
+        "validation_split",
+        "validation_confidence",
+        "validation_iou",
+        "validation_max_detections",
+    ):
+        legacy_payload.pop(key)
+    service.submit(
+        infrastructure,
+        run_id="b" * 32,
+        training_payload=legacy_payload,
+    )
+
+    assert json.loads(service.sagemaker.request["HyperParameters"]["mlx_training"]) == (
+        legacy_payload
+    )
+
+
+def test_resume_preserves_original_training_payload_for_immutable_image() -> None:
+    original_payload = TrainObjectDetectionRequest(
+        provider="libreyolo",
+        model="yolo9-s-drax-b5",
+        epochs=100,
+    ).to_config()
+    for key in (
+        "validate_after_training",
+        "validation_split",
+        "validation_confidence",
+        "validation_iou",
+        "validation_max_detections",
+    ):
+        original_payload.pop(key)
+
+    config = AwsTrainingConfig(
+        dataset_s3_uri="s3://datasets/data.zip",
+        checkpoint_s3_uri="s3://shared/checkpoints",
+        instance_type="ml.g4dn.xlarge",
+        training=TrainObjectDetectionRequest(
+            provider="libreyolo",
+            model="yolo9-s-drax-b5",
+            epochs=120,
+        ),
+    )
+    service = object.__new__(SageMakerTrainingService)
+    service.config = config
+    service.region = "us-east-1"
+    service._describe = lambda _: {
+        "TrainingJobStatus": "Stopped",
+        "TrainingJobArn": "arn:aws:sagemaker:us-east-1:123:training-job/old-job",
+        "HyperParameters": {
+            "mlx_run_id": "run-id",
+            "mlx_run_spec_s3_uri": "s3://shared/checkpoints/run-spec.json",
+        },
+    }
+    service._ensure_no_active_attempt = lambda *args, **kwargs: None
+    service._get_json = lambda _: {
+        "dataset_s3_uri": config.dataset_s3_uri,
+        "checkpoint_base_s3_uri": config.checkpoint_s3_uri,
+        "run_base_s3_uri": "s3://shared/checkpoints/mlx-od/runs/run-id",
+        "image_uri": "123.dkr.ecr.us-east-1.amazonaws.com/mlx@sha256:old",
+        "role_arn": "arn:aws:iam::123:role/mlx",
+        "training": original_payload,
+    }
+    service._latest_recovery_epoch = lambda *args: 62
+    submitted = {}
+
+    def capture_submit(infrastructure, **kwargs):
+        submitted.update(kwargs)
+        return "submitted"
+
+    service.submit = capture_submit
+
+    result = service.resume("old-job")
+
+    assert result == "submitted"
+    assert submitted["training_payload"] == {**original_payload, "epochs": 120}
+    assert "validate_after_training" not in submitted["training_payload"]
+    assert submitted["training"].epochs == 120
+    assert RunSageMakerObjectDetectionTraining._compatibility_fingerprint(
+        submitted["training_payload"]
+    ) == RunSageMakerObjectDetectionTraining._compatibility_fingerprint(original_payload)
 
 
 def test_generated_execution_role_includes_vpc_network_permissions() -> None:

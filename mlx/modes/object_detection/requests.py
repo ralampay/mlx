@@ -42,6 +42,25 @@ class TrainObjectDetectionRequest(ObjectDetectionRequest):
     random_seed: Optional[int] = None
     plots: bool = True
     save_period: int = -1
+    validate_after_training: bool = False
+    validation_split: str = "val"
+    validation_confidence: float = 0.001
+    validation_iou: float = 0.6
+    validation_max_detections: int = 300
+
+
+@dataclass(frozen=True)
+class BenchmarkObjectDetectionRequest(ObjectDetectionRequest):
+    confidence: float = 0.001
+    dataset_path: str = "./tmp/dataset"
+    output_path: Optional[str] = None
+    batch_size: int = 16
+    split: str = "test"
+    iou: float = 0.6
+    max_detections: int = 300
+    workers: int = 4
+    save_predictions: bool = True
+    plots: bool = True
 
 
 @dataclass(frozen=True)

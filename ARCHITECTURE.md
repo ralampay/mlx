@@ -43,21 +43,28 @@ request; dictionary entry points exist only for CLI and compatibility use.
 
 ```text
 mlx/
+├── cli.py                        CLI parser and top-level error/presentation boundary
+├── cli_config.py                 pure parsed-option normalization
+├── cli_routing.py                lazy mode registry and runner resolution
 ├── core/                         shared commands, requests, errors, UI, seeds, model summaries
 └── modes/
     ├── image_classification/     classification data, models, OOD, training, inference, CAM
     ├── segmentation/             paired-mask data, U-Net models, metrics, research artifacts
+    │   ├── streaming.py          injected frame source/sink contracts and OpenCV adapters
+    │   ├── visualization.py      pure mask coloring, blending, and view composition
+    │   └── models/backbone_factory.py  isolated classifier-backbone adapter
     ├── object_detection/
     │   ├── models.py             provider-neutral detection values and detector protocol
     │   ├── providers.py          lazy provider registry and provider protocol
-    │   ├── commands.py           neutral train, create, convert, list, and stream commands
+    │   ├── commands.py           neutral train, benchmark, create, convert, list, stream commands
+    │   ├── evaluation.py         normalized benchmark metrics and research-artifact contract
     │   ├── artifacts.py          shared checkpoint discovery and export-path rules
     │   ├── streaming.py          frame ports, optional metadata capability, OpenCV adapters
     │   ├── aws/                  SageMaker Spot submission, lifecycle, and recovery boundary
     │   ├── tracking/             tracking, MOT evaluation, replay export, registry, algorithms
     │   ├── libreyolo/            LibreYOLO implementation using the Ralampay fork
     │   └── ultralytics/          Ultralytics implementation and compatibility exports
-    └── nlp/                      GGUF-backed CSV embedding workflows
+    └── nlp/                      GGUF-backed CSV embedding command and Rich reporter
 ```
 
 The primary workflow commands are:
@@ -66,7 +73,7 @@ The primary workflow commands are:
 | --- | --- |
 | Image classification | `TrainImageClassificationModel`, `SmokeTestImageClassificationModel`, `BenchmarkImageClassification`, `InferImageClassification`, `GenerateImageClassificationCams`, `BuildImageClassificationDataset`, `ListImageClassificationModels` |
 | Segmentation | `TrainSegmentationModel`, `SmokeTestSegmentationModel`, `BenchmarkSegmentation`, `InferSegmentationImage`, `RunSegmentationStreamInference`, `BuildSegmentationDataset`, `ListSegmentationModels` |
-| Object detection | `TrainObjectDetectionModel`, `CreateObjectDetector`, `ConvertObjectDetectionModel`, `ListObjectDetectionModels`, `RunObjectDetectionStream`, AWS submit/status/stop/resume commands |
+| Object detection | `TrainObjectDetectionModel`, `BenchmarkObjectDetectionModel`, `CreateObjectDetector`, `ConvertObjectDetectionModel`, `ListObjectDetectionModels`, `RunObjectDetectionStream`, AWS submit/status/stop/resume commands |
 | Tracking | `CreateTrackingAlgorithm`, `RunObjectDetectionTrackingCommand`, `RunTrackByDetectionCommand`, `RunTrackingVideo`, `ExportMOTFromClassAwareTracking`, `BenchmarkMOTTracking`, `ExportTrackingReplay` |
 | NLP | `EmbedCsvCommand` (`EmbedCsv` is the legacy path-returning API) |
 
@@ -85,12 +92,26 @@ provider to be installed.
 All providers normalize predictions to `DetectionResult` containing `Detection` values with
 floating-point `xyxy` boxes. Tracking,
 annotation, streaming, and downstream callers depend only on that contract. The provider protocol
-supports four capabilities:
+supports five capabilities:
 
 1. train from `TrainObjectDetectionRequest`;
-2. create a `DetectionAdapter` from `ObjectDetectionRequest`;
-3. export from `ConvertObjectDetectionRequest`;
-4. list models from `ListObjectDetectionModelsRequest`.
+2. benchmark from `BenchmarkObjectDetectionRequest`;
+3. create a `DetectionAdapter` from `ObjectDetectionRequest`;
+4. export from `ConvertObjectDetectionRequest`;
+5. list models from `ListObjectDetectionModelsRequest`.
+
+`BenchmarkObjectDetectionModel` normalizes both provider validators to `precision`, `recall`,
+`f1`, `map_50`, and `map_50_95`. Provider adapters retain responsibility for model loading,
+dataset integration, prediction JSON, native plots, and exception translation. The neutral
+artifact writer owns `metrics.json`, `metrics.csv`, `native_metrics.json`, and
+`run_metadata.json`, including model hashing and evaluator provenance. This gives standalone
+benchmarks and optional post-training validation the same result schema without leaking either
+provider API into the command.
+
+`TrainObjectDetectionModel` composes the same benchmark capability when
+`validate_after_training` is enabled. It benchmarks the selected best/last checkpoint and returns
+an `ObjectDetectionTrainingResult`; ordinary training preserves its former provider-native return
+value. Validation is opt-in because it performs an additional full dataset pass.
 
 The `track` CLI mode routes to the nested tracking runner because tracking-by-detection remains
 owned by object detection. `RunTrackingVideo` composes the selected provider's `DetectionAdapter`,
@@ -171,7 +192,9 @@ the default. SageMaker restores `/opt/ml/checkpoints` after an interruption; the
 validates two alternating recovery slots by epoch and SHA-256 before reconstructing the
 provider's `last.pt`. Manual resume creates a new SageMaker job attempt for the same logical run,
 reuses the original immutable image reference, and permits only capacity/runtime changes and a
-higher total epoch target. Provider/model/dataset changes are rejected at that boundary.
+higher total epoch target. It also preserves the original serialized training payload, changing
+only the epoch target, so a newer local CLI cannot introduce default fields that are unknown to
+the immutable training image. Provider/model/dataset changes are rejected at that boundary.
 
 Users own the dataset ZIP and shared checkpoint S3 bucket or prefix. MLX never creates, deletes,
 empties, or attaches lifecycle policies to those buckets. Logical runs and attempts receive
@@ -179,15 +202,33 @@ separate prefixes under the configured checkpoint base. MLX may create and reuse
 repository and narrowly scoped SageMaker execution role when the caller does not provide them.
 Stopping compute preserves checkpoints and returns a resumable job identity.
 
+The AWS package keeps replaceable infrastructure at narrow boundaries. `clients.py` creates the
+Boto3 client bundle at the composition edge; callers may inject the same bundle shape in tests or
+other runtimes. `image.py` owns source hashing, Docker command execution, and immutable ECR image
+publication. `status.py` performs the side-effect-free translation from a SageMaker description
+and metric reader into `AwsTrainingStatus`. `service.py` remains the compatibility facade for
+storage, IAM, submission, resume, stop, and monitoring coordination.
+
 Recovery is intentionally a completed-epoch guarantee. Provider `last.pt` files include model,
 epoch, optimizer, scaler, EMA, and available scheduler/RNG state; a project-owned publisher only
 announces CloudWatch progress after copying and validating a complete checkpoint into the
 inactive recovery slot. If the newest slot is corrupt, the prior slot is used. Work from an
 incomplete interrupted epoch may be repeated.
 
+When `training.validate_after_training` is enabled, the training container runs the neutral
+benchmark against `validation_split` after selecting the checkpoint. SageMaker stages the common
+research artifacts and provider-native plots/predictions under `benchmark/` in `model.tar.gz`, in
+addition to the selected checkpoint and training summary. CloudWatch epoch/progress/ETA metrics
+remain operational signals rather than model-quality metrics.
+
 ## Presentation, Errors, and Compatibility
 
-Commands expose structured values and provider-neutral protocols. Detection streaming and
+Commands expose structured values and provider-neutral protocols. Long-running training,
+benchmark, dataset-build, conversion, CAM, and embedding commands report structured
+`WorkflowEvent` values; Rich tables, progress bars, prompts, and panels belong to mode-owned
+`presentation.py` adapters. Compatibility functions may attach those adapters, while direct
+command construction defaults to a no-op reporter and remains suitable for Python and tests.
+Detection streaming and
 tracking video execution support headless use through injected presentation boundaries:
 `RunObjectDetectionStream` accepts injected detector, frame source, frame sink, renderer, and
 reporter objects. `RunTrackingVideo` accepts an optional paired frame sink and tracking renderer;
@@ -199,6 +240,10 @@ finalizes partial MOT output but skips whole-video benchmarking. The CLI supplie
 adapters. Other modes keep their output
 formatters in `presentation.py`; ongoing changes must move new terminal/window behavior toward
 the same injected-adapter boundary rather than adding UI work to model, data, or metric modules.
+Segmentation's reusable visualization transforms live in `visualization.py`; only window display
+and prompts remain in presentation. Its encoder consumes a `ClassificationBackboneFactory`, with
+the existing image-classification implementation isolated in the default compatibility adapter
+instead of being imported by the encoder itself.
 
 Invalid CLI input, absent files, unsupported actions/providers, missing optional libraries, bad
 dataset layouts, and camera/video failures raise `MLXUserError`. Model-internal invariant failures

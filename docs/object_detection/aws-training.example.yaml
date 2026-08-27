@@ -17,4 +17,7 @@ training:
   model: yolo26
   epochs: 100
   batch_size: 16
+  # Optional reproducible validation artifacts in SageMaker model.tar.gz.
+  # validate_after_training: true
+  # validation_split: val
   # Omit device to choose GPU 0 when SageMaker exposes a GPU.

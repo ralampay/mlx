@@ -5,67 +5,89 @@ from typing import Any
 
 import torch
 
+from mlx.core.commands import NullWorkflowReporter, WorkflowReporter, emit
 from mlx.core.exceptions import MLXUserError
-from mlx.core.ui import print_warning
 from mlx.modes.image_classification.data import iter_dataset_images, load_image_tensor
-from mlx.modes.image_classification.presentation import (
-    display_classification_predictions,
-    display_similarity_matches,
-)
 from mlx.modes.image_classification.utils import load_checkpoint_bundle
 from mlx.modes.image_classification.models.joint_svdd import JointDeepSVDDClassifier
 from mlx.modes.image_classification.requests import ImageClassificationRequest
 
 
 class InferImageClassification:
-    def __init__(self, request: ImageClassificationRequest) -> None:
+    def __init__(
+        self,
+        request: ImageClassificationRequest,
+        *,
+        reporter: WorkflowReporter | None = None,
+    ) -> None:
         self.request = request
+        self.reporter = reporter or NullWorkflowReporter()
 
     def execute(self) -> dict[str, Any]:
-        return _run_inference(self.request.to_config())
+        return _run_inference(self.request.to_config(), reporter=self.reporter)
 
 
 def infer_image_classification(config: dict[str, Any]) -> dict[str, Any]:
     compatibility_config = {"display": True, **config}
-    return InferImageClassification(
+    result = InferImageClassification(
         ImageClassificationRequest.from_config(compatibility_config)
     ).execute()
+    if compatibility_config.get("display", True):
+        _display_inference_result(result)
+    return result
 
 
-def _run_inference(config: dict[str, Any]) -> dict[str, Any]:
+def _run_inference(
+    config: dict[str, Any],
+    *,
+    reporter: WorkflowReporter | None = None,
+) -> dict[str, Any]:
+    reporter = reporter or NullWorkflowReporter()
     model, metadata = load_checkpoint_bundle(config)
     device = config.get("device", "cpu")
     model = model.to(device)
     model.eval()
 
     if metadata["family"] == "one-shot":
-        result = _infer_one_shot(model, metadata, config, device)
-        if config.get("display", False):
-            display_similarity_matches(result)
-        return result
-    result = _infer_standard(model, metadata, config, device)
-    if config.get("display", False):
-        display_classification_predictions(result)
-    return result
+        return _infer_one_shot(model, metadata, config, device, reporter=reporter)
+    return _infer_standard(model, metadata, config, device)
 
 
-def _infer_one_shot(model, metadata: dict[str, Any], config: dict[str, Any], device: str) -> dict[str, Any]:
+def _infer_one_shot(
+    model,
+    metadata: dict[str, Any],
+    config: dict[str, Any],
+    device: str,
+    *,
+    reporter: WorkflowReporter,
+) -> dict[str, Any]:
     return RankOneShotReferences(
         model=model,
         metadata=metadata,
         input_image=Path(config["input_img"]),
         dataset_path=Path(config["dataset_path"]),
         device=device,
+        reporter=reporter,
     ).execute()
 
 
 class RankOneShotReferences:
-    def __init__(self, *, model, metadata, input_image: Path, dataset_path: Path, device: str) -> None:
+    def __init__(
+        self,
+        *,
+        model,
+        metadata,
+        input_image: Path,
+        dataset_path: Path,
+        device: str,
+        reporter: WorkflowReporter | None = None,
+    ) -> None:
         self.model = model
         self.metadata = metadata
         self.input_image = input_image
         self.dataset_path = dataset_path
         self.device = device
+        self.reporter = reporter or NullWorkflowReporter()
 
     def execute(self) -> dict[str, Any]:
         if not self.dataset_path.exists():
@@ -78,7 +100,11 @@ class RankOneShotReferences:
                 try:
                     reference = self._load_tensor(reference_path)
                 except MLXUserError as exc:
-                    print_warning(f"Skipping {reference_path}: {exc}")
+                    emit(
+                        self.reporter,
+                        "warning",
+                        f"Skipping {reference_path}: {exc}",
+                    )
                     continue
 
                 similarity = float(self.model(query, reference).reshape(-1)[0].item())
@@ -107,6 +133,31 @@ class RankOneShotReferences:
             colored=self.metadata["colored"],
         )
         return tensor.unsqueeze(0).to(self.device)
+
+
+def _display_inference_result(result: dict[str, Any]) -> None:
+    if "top_matches" in result:
+        display_similarity_matches(result)
+    else:
+        display_classification_predictions(result)
+
+
+def display_similarity_matches(result: dict[str, Any]) -> None:
+    """Compatibility presentation entrypoint retained outside command execution."""
+
+    from mlx.modes.image_classification.presentation import display_similarity_matches as display
+
+    display(result)
+
+
+def display_classification_predictions(result: dict[str, Any]) -> None:
+    """Compatibility presentation entrypoint retained outside command execution."""
+
+    from mlx.modes.image_classification.presentation import (
+        display_classification_predictions as display,
+    )
+
+    display(result)
 
 
 def _infer_standard(model, metadata: dict[str, Any], config: dict[str, Any], device: str) -> dict[str, Any]:

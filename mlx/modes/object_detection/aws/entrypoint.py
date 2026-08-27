@@ -235,6 +235,14 @@ class RunSageMakerObjectDetectionTraining:
             if checkpoints:
                 selected = max(checkpoints, key=lambda path: path.stat().st_mtime_ns)
                 shutil.copy2(selected, self.model_dir / selected.name)
+        benchmark_result = getattr(result, "benchmark_result", None)
+        benchmark_output = getattr(benchmark_result, "output_dir", None)
+        if benchmark_output and Path(benchmark_output).is_dir():
+            shutil.copytree(
+                benchmark_output,
+                self.model_dir / "benchmark",
+                dirs_exist_ok=True,
+            )
         (self.model_dir / "training-summary.json").write_text(
             json.dumps(dict(training), indent=2, sort_keys=True),
             encoding="utf-8",

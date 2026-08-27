@@ -1,11 +1,18 @@
 from mlx.modes.object_detection.commands import (
+    BenchmarkObjectDetectionModel,
     ConvertObjectDetectionModel,
     CreateObjectDetector,
     ListObjectDetectionModels,
     RunObjectDetectionStream,
     TrainObjectDetectionModel,
 )
-from mlx.modes.object_detection.models import Detection, DetectionAdapter, DetectionResult
+from mlx.modes.object_detection.models import (
+    Detection,
+    DetectionAdapter,
+    DetectionResult,
+    ObjectDetectionBenchmarkResult,
+)
+from mlx.modes.object_detection.requests import BenchmarkObjectDetectionRequest
 from mlx.modes.object_detection.tracking import (
     BoundingBox,
     ClassAwareTrackingRecord,
@@ -27,6 +34,8 @@ from mlx.modes.object_detection.tracking import (
 
 __all__ = [
     "BoundingBox",
+    "BenchmarkObjectDetectionModel",
+    "BenchmarkObjectDetectionRequest",
     "ClassAwareTrackingRecord",
     "ConvertObjectDetectionModel",
     "CreateObjectDetector",
@@ -36,6 +45,7 @@ __all__ = [
     "ExportTrackingReplay",
     "ExportMOTFromClassAwareTracking",
     "ListObjectDetectionModels",
+    "ObjectDetectionBenchmarkResult",
     "RunObjectDetectionStream",
     "RunObjectDetectionTrackingCommand",
     "RunTrackByDetectionCommand",

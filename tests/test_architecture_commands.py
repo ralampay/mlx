@@ -11,6 +11,7 @@ from mlx.core.exceptions import MLXUserError
 from mlx.core.model_listing import ModelParameterSummary
 from mlx.modes.image_classification.requests import ImageClassificationRequest
 from mlx.modes.object_detection.commands import (
+    BenchmarkObjectDetectionModel,
     ConvertObjectDetectionModel,
     CreateObjectDetector,
     ListObjectDetectionModels,
@@ -19,6 +20,7 @@ from mlx.modes.object_detection.commands import (
 )
 from mlx.modes.object_detection.models import Detection, DetectionResult
 from mlx.modes.object_detection.requests import (
+    BenchmarkObjectDetectionRequest,
     ConvertObjectDetectionRequest,
     ListObjectDetectionModelsRequest,
     ObjectDetectionRequest,
@@ -38,6 +40,10 @@ class FakeProvider:
     def train(self, request, reporter):
         self.calls.append(("train", request))
         return "trained"
+
+    def benchmark(self, request, reporter):
+        self.calls.append(("benchmark", request))
+        return "benchmarked"
 
     def create_detector(self, request):
         self.calls.append(("create", request))
@@ -118,6 +124,9 @@ def test_detection_commands_delegate_to_injected_provider() -> None:
     assert TrainObjectDetectionModel(
         TrainObjectDetectionRequest(provider="fake"), provider=provider
     ).execute() == "trained"
+    assert BenchmarkObjectDetectionModel(
+        BenchmarkObjectDetectionRequest(provider="fake"), provider=provider
+    ).execute() == "benchmarked"
     assert isinstance(
         CreateObjectDetector(ObjectDetectionRequest(provider="fake"), provider=provider).execute(),
         FakeDetector,
@@ -128,7 +137,13 @@ def test_detection_commands_delegate_to_injected_provider() -> None:
     assert ListObjectDetectionModels(
         ListObjectDetectionModelsRequest(provider="fake"), provider=provider
     ).execute() == (ModelParameterSummary("fake-model", 10),)
-    assert [name for name, _ in provider.calls] == ["train", "create", "convert", "list"]
+    assert [name for name, _ in provider.calls] == [
+        "train",
+        "benchmark",
+        "create",
+        "convert",
+        "list",
+    ]
 
 
 def test_unknown_detection_provider_is_user_facing() -> None:
@@ -161,6 +176,14 @@ def test_stream_command_is_headless_and_closes_injected_ports() -> None:
 
 def test_legacy_ultralytics_detection_type_is_a_neutral_reexport() -> None:
     assert LegacyDetection is Detection
+
+
+def test_benchmark_command_is_in_public_object_detection_api() -> None:
+    from mlx.modes.object_detection import (
+        BenchmarkObjectDetectionModel as PublicBenchmarkCommand,
+    )
+
+    assert PublicBenchmarkCommand is BenchmarkObjectDetectionModel
 
 
 def test_architecture_documentation_is_canonical() -> None:

@@ -4,12 +4,9 @@ import csv
 from collections.abc import Iterable
 from numbers import Real
 from pathlib import Path
-from typing import Any, Callable, Optional, Union
+from typing import Any, Callable, Optional
 
-from rich.panel import Panel
-from rich.table import Table
-
-from mlx.core.ui import console, print_info, print_success, print_warning
+from mlx.core.commands import NullWorkflowReporter, WorkflowReporter, emit
 from mlx.modes.object_detection.artifacts import (
     detect_existing_training_artifacts,
     find_existing_checkpoint,
@@ -21,33 +18,51 @@ from mlx.modes.object_detection.ultralytics.utils import (
     resolve_imgsz,
     resolve_model_paths,
 )
+from mlx.modes.object_detection.requests import TrainObjectDetectionRequest
 
 
 class TrainUltralyticsObjectDetection:
     def __init__(
         self,
-        config: dict[str, Any],
+        config: dict[str, Any] | TrainObjectDetectionRequest,
         *,
         checkpoint_observer: Optional[Callable[[Path], None]] = None,
+        reporter: WorkflowReporter | None = None,
     ) -> None:
-        self.config = config
+        self.config = (
+            config.to_config()
+            if isinstance(config, TrainObjectDetectionRequest)
+            else dict(config)
+        )
         self.checkpoint_observer = checkpoint_observer
+        self.reporter = reporter or NullWorkflowReporter()
 
     def execute(self):
-        return _run_training(self.config, checkpoint_observer=self.checkpoint_observer)
+        return _run_training(
+            self.config,
+            checkpoint_observer=self.checkpoint_observer,
+            reporter=self.reporter,
+        )
 
 
 def train_object_detection(config: dict[str, Any]):
     """Compatibility wrapper around the Ultralytics training command."""
 
-    return TrainUltralyticsObjectDetection(config).execute()
+    from mlx.modes.object_detection.presentation import RichWorkflowReporter
+
+    return TrainUltralyticsObjectDetection(
+        config,
+        reporter=RichWorkflowReporter(),
+    ).execute()
 
 
 def _run_training(
     config: dict[str, Any],
     *,
     checkpoint_observer: Optional[Callable[[Path], None]] = None,
+    reporter: WorkflowReporter | None = None,
 ):
+    reporter = reporter or NullWorkflowReporter()
     resolved_cfg, resolved_weights = resolve_model_paths(
         config,
         require_yaml=True,
@@ -62,7 +77,9 @@ def _run_training(
     imgsz = requested_imgsz
     if isinstance(requested_imgsz, tuple):
         imgsz = max(requested_imgsz)
-        print_warning(
+        emit(
+            reporter,
+            "warning",
             "Ultralytics training currently uses square image sizes. "
             f"Requested imgsz={requested_imgsz} will fall back to imgsz={imgsz}."
         )
@@ -78,32 +95,48 @@ def _run_training(
     )
     effective_weights = resolved_weights or auto_warm_start_weights
 
-    console.print(Panel.fit("Ultralytics Object Detection - Training", border_style="cyan"))
-    console.print(_training_summary_table(
-        resolved_cfg=resolved_cfg,
-        resolved_weights=effective_weights,
-        resume_checkpoint=auto_resume_checkpoint,
-        dataset_source=resolved_dataset.source,
-        dataset_root=resolved_dataset.root_dir,
-        epochs=epochs,
-        batch_size=batch_size,
-        device=device,
-        imgsz=imgsz,
-        project_dir=project_dir,
-        run_name=run_name,
-        use_best=use_best,
-        config=config,
-    ))
+    emit(
+        reporter,
+        "info",
+        "Ultralytics object-detection training configured.",
+        payload={
+            "event": "training_summary",
+            "values": {
+                "Training Mode": "continue existing run" if auto_resume_checkpoint else "new run",
+                "Init Weights": effective_weights or "random init",
+                "Resume From": auto_resume_checkpoint or "disabled",
+                "Model YAML": resolved_cfg or "not set",
+                "Dataset": resolved_dataset.source,
+                "Dataset Root": resolved_dataset.root_dir or "managed by dataset YAML",
+                "Epochs": epochs,
+                "Batch Size": batch_size,
+                "Device": device,
+                "Image Size": imgsz,
+                "Project": project_dir,
+                "Run Name": run_name,
+                "Use Best Checkpoint": use_best,
+                "Pretrained": bool(config.get("pretrained", False)),
+                "lr0": config.get("lr0") if config.get("lr0") is not None else "default",
+                "Optimizer": config.get("optimizer", "auto"),
+                "nbs": config.get("nbs", 64),
+                "Warmup Epochs": config.get("warmup_epochs", 3.0),
+                "AMP": bool(config.get("amp", True)),
+                "Loss Clip": config.get("loss_clip") if config.get("loss_clip") is not None else "disabled",
+            },
+        },
+    )
 
     if auto_resume_checkpoint is not None:
-        print_info(
+        emit(
+            reporter,
+            "info",
             "Continuing training from existing output directory "
             f"using checkpoint: {auto_resume_checkpoint}"
         )
     elif auto_warm_start_weights is not None:
-        print_info(f"Warm-starting from checkpoint found in output directory: {auto_warm_start_weights}")
+        emit(reporter, "info", f"Warm-starting from checkpoint found in output directory: {auto_warm_start_weights}")
 
-    print_info("Loading Ultralytics model...")
+    emit(reporter, "info", "Loading Ultralytics model...")
     model = initialize_model(resolved_cfg, effective_weights, prefer_cfg=True)
     overrides = getattr(model, "overrides", {})
     overrides["pretrained"] = bool(config.get("pretrained", False))
@@ -145,76 +178,28 @@ def _run_training(
     if config.get("random_seed") is not None:
         train_kwargs["seed"] = int(config["random_seed"])
 
-    print_info("Starting training loop...")
+    emit(reporter, "info", "Starting training loop...")
     results = model.train(**train_kwargs)
-    _print_training_metrics(results)
-    _export_training_graphs(results, project_dir=project_dir, run_name=run_name)
+    _report_training_metrics(results, reporter=reporter)
+    _export_training_graphs(results, project_dir=project_dir, run_name=run_name, reporter=reporter)
     selected_checkpoint = _select_training_checkpoint(
         results,
         project_dir=project_dir,
         run_name=run_name,
         use_best=use_best,
+        reporter=reporter,
     )
     if selected_checkpoint is not None:
-        config["model_path"] = str(selected_checkpoint)
         model.ckpt_path = str(selected_checkpoint)
         try:
             setattr(results, "model_path", selected_checkpoint)
             setattr(results, "checkpoint_path", selected_checkpoint)
-        except Exception:
+        except (AttributeError, TypeError):
             pass
         checkpoint_label = "best" if use_best else "last"
-        print_success(f"Selected {checkpoint_label} checkpoint for downstream use: {selected_checkpoint}")
-    print_success("Training complete!")
+        emit(reporter, "success", f"Selected {checkpoint_label} checkpoint for downstream use: {selected_checkpoint}")
+    emit(reporter, "success", "Training complete!")
     return results
-
-
-def _training_summary_table(
-    *,
-    resolved_cfg,
-    resolved_weights,
-    resume_checkpoint: Optional[Path],
-    dataset_source: str,
-    dataset_root: Optional[Path],
-    epochs: int,
-    batch_size: int,
-    device: str,
-    imgsz: Union[int, tuple[int, int]],
-    project_dir: Path,
-    run_name: str,
-    use_best: bool,
-    config: dict[str, Any],
-) -> Table:
-    summary = Table(title="Training Configuration", show_lines=True)
-    summary.add_column("Key", justify="right", style="cyan", no_wrap=True)
-    summary.add_column("Value", style="magenta")
-    summary.add_row(
-        "Training Mode",
-        "continue existing run" if resume_checkpoint else "new run",
-    )
-    summary.add_row("Init Weights", str(resolved_weights) if resolved_weights else "random init")
-    summary.add_row("Resume From", str(resume_checkpoint) if resume_checkpoint else "disabled")
-    summary.add_row("Model YAML", str(resolved_cfg) if resolved_cfg else "not set")
-    summary.add_row("Dataset", dataset_source)
-    summary.add_row("Dataset Root", str(dataset_root) if dataset_root else "managed by dataset YAML")
-    summary.add_row("Epochs", str(epochs))
-    summary.add_row("Batch Size", str(batch_size))
-    summary.add_row("Device", str(device))
-    summary.add_row("Image Size", str(imgsz))
-    summary.add_row("Project", str(project_dir))
-    summary.add_row("Run Name", run_name)
-    summary.add_row("Use Best Checkpoint", str(use_best))
-    summary.add_row("Pretrained", str(bool(config.get("pretrained", False))))
-    summary.add_row("lr0", str(config.get("lr0")) if config.get("lr0") is not None else "default")
-    summary.add_row("Optimizer", config.get("optimizer", "auto"))
-    summary.add_row("nbs", str(config.get("nbs", 64)))
-    summary.add_row("Warmup Epochs", str(config.get("warmup_epochs", 3.0)))
-    summary.add_row("AMP", str(bool(config.get("amp", True))))
-    summary.add_row(
-        "Loss Clip",
-        str(config.get("loss_clip")) if config.get("loss_clip") is not None else "disabled",
-    )
-    return summary
 
 
 def _select_training_checkpoint(
@@ -223,7 +208,9 @@ def _select_training_checkpoint(
     project_dir: Path,
     run_name: str,
     use_best: bool,
+    reporter: WorkflowReporter | None = None,
 ) -> Optional[Path]:
+    reporter = reporter or NullWorkflowReporter()
     output_dir = _resolve_training_output_dir(results, project_dir=project_dir, run_name=run_name)
     preferred_name = "best.pt" if use_best else "last.pt"
     fallback_name = "last.pt" if use_best else "best.pt"
@@ -242,29 +229,44 @@ def _select_training_checkpoint(
         file_name=fallback_name,
     )
     if fallback is not None:
-        print_warning(
+        emit(
+            reporter,
+            "warning",
             f"Preferred checkpoint {preferred_name} was not found; using {fallback_name} instead."
         )
         return fallback
 
     latest = find_latest_checkpoint(output_dir, pattern="*.pt")
     if latest is not None:
-        print_warning(f"Preferred checkpoint {preferred_name} was not found; using newest checkpoint.")
+        emit(
+            reporter,
+            "warning",
+            f"Preferred checkpoint {preferred_name} was not found; using newest checkpoint.",
+        )
         return latest
 
-    print_warning("Training finished, but no .pt checkpoint was found in the run directory.")
+    emit(
+        reporter,
+        "warning",
+        "Training finished, but no .pt checkpoint was found in the run directory.",
+    )
     return None
 
 
-def _print_training_metrics(results: Any) -> None:
+def _report_training_metrics(
+    results: Any,
+    *,
+    reporter: WorkflowReporter | None = None,
+) -> None:
+    reporter = reporter or NullWorkflowReporter()
     metrics = _collect_training_metrics(results)
     if not metrics:
-        print_warning("Training finished, but no validation metrics were exposed by Ultralytics.")
+        emit(
+            reporter,
+            "warning",
+            "Training finished, but no validation metrics were exposed by Ultralytics.",
+        )
         return
-
-    table = Table(title="Final Validation Metrics", show_lines=True)
-    table.add_column("Metric", style="cyan", no_wrap=True)
-    table.add_column("Value", justify="right", style="magenta")
 
     prioritized_metrics = [
         ("metrics/precision(B)", "Precision"),
@@ -285,47 +287,72 @@ def _print_training_metrics(results: Any) -> None:
     for key, label in prioritized_metrics:
         if key not in metrics:
             continue
-        table.add_row(label, _format_metric_value(metrics[key]))
         rendered_keys.add(key)
 
     auc_keys = _find_metric_keys(metrics, ("auc", "roc"))
     for key in auc_keys:
         if key in rendered_keys:
             continue
-        table.add_row(_humanize_metric_label(key), _format_metric_value(metrics[key]))
         rendered_keys.add(key)
 
     remaining_keys = sorted(
         key for key in metrics if key not in rendered_keys and _is_scalar_metric(metrics[key])
     )
-    for key in remaining_keys:
-        table.add_row(_humanize_metric_label(key), _format_metric_value(metrics[key]))
-
-    console.print(table)
+    ordered_keys = [key for key, _ in prioritized_metrics if key in metrics]
+    ordered_keys.extend(key for key in auc_keys if key not in ordered_keys)
+    ordered_keys.extend(remaining_keys)
+    labels = dict(prioritized_metrics)
+    rows = [
+        (labels.get(key, _humanize_metric_label(key)), _format_metric_value(metrics[key]))
+        for key in ordered_keys
+    ]
+    emit(
+        reporter,
+        "info",
+        "Final Ultralytics validation metrics are available.",
+        payload={"event": "training_metrics", "rows": rows},
+    )
     if not auc_keys:
-        print_info(
+        emit(
+            reporter,
+            "info",
             "ROC/AUC is not typically reported for object detection training. "
             "Ultralytics detection validation is primarily driven by IoU-based precision, recall, and AP."
         )
 
 
-def _export_training_graphs(results: Any, *, project_dir: Path, run_name: str) -> None:
+def _export_training_graphs(
+    results: Any,
+    *,
+    project_dir: Path,
+    run_name: str,
+    reporter: WorkflowReporter | None = None,
+) -> None:
+    reporter = reporter or NullWorkflowReporter()
     output_dir = _resolve_training_output_dir(results, project_dir=project_dir, run_name=run_name)
     output_dir.mkdir(parents=True, exist_ok=True)
 
     plotted_files: list[Path] = []
-    plotted_files.extend(_write_results_csv_graphs(output_dir))
+    plotted_files.extend(_write_results_csv_graphs(output_dir, reporter=reporter))
 
-    per_class_outputs = _write_per_class_map_artifacts(output_dir, results)
+    per_class_outputs = _write_per_class_map_artifacts(
+        output_dir,
+        results,
+        reporter=reporter,
+    )
     plotted_files.extend(per_class_outputs)
 
     if plotted_files:
-        print_info(
+        emit(
+            reporter,
+            "info",
             "Saved training graphs to "
             f"{output_dir}: {', '.join(path.name for path in plotted_files)}"
         )
     else:
-        print_warning(
+        emit(
+            reporter,
+            "warning",
             "Training completed, but MLX could not generate additional graphs from the run artifacts."
         )
 
@@ -394,19 +421,32 @@ def _resolve_training_output_dir(results: Any, *, project_dir: Path, run_name: s
     return (project_dir / run_name).resolve()
 
 
-def _write_results_csv_graphs(output_dir: Path) -> list[Path]:
+def _write_results_csv_graphs(
+    output_dir: Path,
+    *,
+    reporter: WorkflowReporter | None = None,
+) -> list[Path]:
+    reporter = reporter or NullWorkflowReporter()
     results_csv = output_dir / "results.csv"
     if not results_csv.exists():
-        print_warning(f"Graph export skipped because {results_csv.name} was not found in {output_dir}.")
+        emit(
+            reporter,
+            "warning",
+            f"Graph export skipped because {results_csv.name} was not found in {output_dir}.",
+        )
         return []
 
-    plt = _load_pyplot()
+    plt = _load_pyplot(reporter=reporter)
     if plt is None:
         return []
 
     rows = _read_results_csv(results_csv)
     if not rows:
-        print_warning(f"Graph export skipped because {results_csv.name} did not contain any rows.")
+        emit(
+            reporter,
+            "warning",
+            f"Graph export skipped because {results_csv.name} did not contain any rows.",
+        )
         return []
 
     x_values = _epoch_axis(rows)
@@ -470,7 +510,12 @@ def _write_results_csv_graphs(output_dir: Path) -> list[Path]:
     return written
 
 
-def _write_per_class_map_artifacts(output_dir: Path, results: Any) -> list[Path]:
+def _write_per_class_map_artifacts(
+    output_dir: Path,
+    results: Any,
+    *,
+    reporter: WorkflowReporter | None = None,
+) -> list[Path]:
     map50_values, map50_95_values, labels = _collect_per_class_map_metrics(results)
     if not map50_values and not map50_95_values:
         return []
@@ -509,7 +554,7 @@ def _write_per_class_map_artifacts(output_dir: Path, results: Any) -> list[Path]
         )
         written.append(map50_95_csv_path)
 
-    plt = _load_pyplot()
+    plt = _load_pyplot(reporter=reporter)
     if plt is None:
         return written
 
@@ -750,11 +795,14 @@ def _plot_training_series(
     return True
 
 
-def _load_pyplot():
+def _load_pyplot(*, reporter: WorkflowReporter | None = None):
+    reporter = reporter or NullWorkflowReporter()
     try:
         import matplotlib.pyplot as plt
     except ImportError:
-        print_warning(
+        emit(
+            reporter,
+            "warning",
             "matplotlib is not installed, so MLX could not generate training graphs in the run directory."
         )
         return None

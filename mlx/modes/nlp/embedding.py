@@ -4,21 +4,11 @@ import json
 from dataclasses import dataclass
 from numbers import Real
 from pathlib import Path
-from typing import Any, Optional
+from typing import Any, Callable, Optional, Protocol
 
-from rich.panel import Panel
-from rich.progress import (
-    BarColumn,
-    MofNCompleteColumn,
-    Progress,
-    TaskProgressColumn,
-    TextColumn,
-    TimeRemainingColumn,
-)
-
+from mlx.core.commands import NullWorkflowReporter, WorkflowReporter, emit
 from mlx.core.exceptions import MLXUserError
 from mlx.core.requests import ConfigRequest
-from mlx.core.ui import console
 
 try:
     import pandas as pd
@@ -45,49 +35,93 @@ class EmbedCsvResult:
     output_path: Path
 
 
+class EmbeddingModel(Protocol):
+    def embed(self, content: str) -> Any:
+        ...
+
+
+def _load_embedding_model(model_path: Path) -> EmbeddingModel:
+    if Llama is None:
+        raise MLXUserError(
+            "NLP embed requires llama-cpp-python. Install the project dependencies and try again."
+        )
+    try:
+        return Llama(model_path=str(model_path), embedding=True)
+    except Exception as exc:
+        raise MLXUserError(
+            f"Unable to load embedding model '{model_path}': {exc}. "
+            "Check that it is a compatible GGUF embedding model."
+        ) from exc
+
+
 class EmbedCsvCommand:
-    def __init__(self, request: EmbedCsvRequest) -> None:
-        self.request = request
-
-    def execute(self) -> EmbedCsvResult:
-        output_path = EmbedCsv(
-            model_file=self.request.model_file,
-            input_file=self.request.input_file,
-            output_file=self.request.output_file,
-            column_name=self.request.column_name,
-            present=self.request.present,
-        ).execute()
-        return EmbedCsvResult(output_path=output_path)
-
-
-class EmbedCsv:
     def __init__(
         self,
-        model_file: Optional[str],
-        input_file: Optional[str],
-        output_file: Optional[str] = None,
-        column_name: str = "content",
-        present: bool = True,
+        request: EmbedCsvRequest,
+        *,
+        reporter: WorkflowReporter | None = None,
+        model_factory: Callable[[Path], EmbeddingModel] | None = None,
     ) -> None:
-        self.model_file = model_file
-        self.input_file = input_file
-        self.output_file = output_file
-        self.column_name = column_name
-        self.present = present
+        self.request = request
+        self.reporter = reporter or NullWorkflowReporter()
+        self.model_factory = model_factory or _load_embedding_model
 
-    def execute(self) -> Path:
+    def execute(self) -> EmbedCsvResult:
+        return _EmbeddingWorkflow(
+            self.request,
+            reporter=self.reporter,
+            model_factory=self.model_factory,
+        ).execute()
+
+
+class _EmbeddingWorkflow:
+    def __init__(
+        self,
+        request: EmbedCsvRequest,
+        *,
+        reporter: WorkflowReporter,
+        model_factory: Callable[[Path], EmbeddingModel],
+    ) -> None:
+        self.model_file = request.model_file
+        self.input_file = request.input_file
+        self.output_file = request.output_file
+        self.column_name = request.column_name
+        self.reporter = reporter
+        self.model_factory = model_factory
+
+    def execute(self) -> EmbedCsvResult:
         model_path, input_path, output_path = self._validate_paths()
         dataframe = self._read_input(input_path)
         contents = self._validate_contents(dataframe)
-
-        if self.present:
-            console.print(f"[cyan]Rows to embed:[/cyan] {len(contents)}")
-        model = self._load_model(model_path)
-        embeddings = self._create_embeddings(model, contents)
-        self._write_output(output_path, contents, embeddings)
-        if self.present:
-            self._print_result(output_path, len(contents), len(embeddings[0]))
-        return output_path
+        emit(
+            self.reporter,
+            "info",
+            f"Rows to embed: {len(contents)}",
+            payload={"event": "embedding_started", "rows": len(contents)},
+        )
+        try:
+            model = self.model_factory(model_path)
+            embeddings = self._create_embeddings(model, contents)
+            self._write_output(output_path, contents, embeddings)
+            emit(
+                self.reporter,
+                "success",
+                f"Embedding export complete: {output_path.resolve()}",
+                payload={
+                    "event": "embedding_completed",
+                    "output_path": output_path,
+                    "rows": len(contents),
+                    "dimensions": len(embeddings[0]),
+                },
+            )
+            return EmbedCsvResult(output_path=output_path)
+        finally:
+            emit(
+                self.reporter,
+                "progress",
+                "Embedding workflow finished.",
+                payload={"event": "embedding_finished"},
+            )
 
     def _validate_paths(self) -> tuple[Path, Path, Path]:
         if not self.model_file:
@@ -152,48 +186,39 @@ class EmbedCsv:
             )
         return contents
 
-    def _load_model(self, model_path: Path):
-        if Llama is None:
-            raise MLXUserError(
-                "NLP embed requires llama-cpp-python. Install the project dependencies and try again."
-            )
-        try:
-            return Llama(model_path=str(model_path), embedding=True)
-        except Exception as exc:
-            raise MLXUserError(
-                f"Unable to load embedding model '{model_path}': {exc}. Check that it is a compatible GGUF embedding model."
-            ) from exc
-
-    def _create_embeddings(self, model: Any, contents: list[str]) -> list[list[float]]:
+    def _create_embeddings(
+        self,
+        model: EmbeddingModel,
+        contents: list[str],
+    ) -> list[list[float]]:
         embeddings: list[list[float]] = []
         expected_size: Optional[int] = None
-        progress = Progress(
-            TextColumn("[cyan]{task.description}"),
-            BarColumn(),
-            MofNCompleteColumn(),
-            TaskProgressColumn(),
-            TimeRemainingColumn(),
-            console=console,
-            disable=not self.present,
-        )
-        with progress:
-            task_id = progress.add_task("Embedding", total=len(contents))
-            for csv_row, content in enumerate(contents, start=2):
-                try:
-                    result = model.embed(content)
-                except Exception as exc:
-                    raise MLXUserError(
-                        f"Embedding failed at CSV row {csv_row}: {exc}. Check the text length and model compatibility."
-                    ) from exc
-                vector = self._validate_embedding(result, csv_row)
-                if expected_size is None:
-                    expected_size = len(vector)
-                elif len(vector) != expected_size:
-                    raise MLXUserError(
-                        f"Embedding dimension changed at CSV row {csv_row}: expected {expected_size}, got {len(vector)}."
-                    )
-                embeddings.append(vector)
-                progress.advance(task_id)
+        for index, (csv_row, content) in enumerate(
+            zip(range(2, len(contents) + 2), contents, strict=True),
+            start=1,
+        ):
+            try:
+                result = model.embed(content)
+            except Exception as exc:
+                raise MLXUserError(
+                    f"Embedding failed at CSV row {csv_row}: {exc}. Check the text length and model compatibility."
+                ) from exc
+            vector = self._validate_embedding(result, csv_row)
+            if expected_size is None:
+                expected_size = len(vector)
+            elif len(vector) != expected_size:
+                raise MLXUserError(
+                    f"Embedding dimension changed at CSV row {csv_row}: expected {expected_size}, got {len(vector)}."
+                )
+            embeddings.append(vector)
+            emit(
+                self.reporter,
+                "progress",
+                f"Embedded row {index} of {len(contents)}.",
+                current=index,
+                total=len(contents),
+                payload={"event": "embedding_progress"},
+            )
         return embeddings
 
     @staticmethod
@@ -229,14 +254,30 @@ class EmbedCsv:
                 f"Unable to write output CSV '{output_path}': {exc}. Check the destination permissions."
             ) from exc
 
-    @staticmethod
-    def _print_result(output_path: Path, row_count: int, dimensions: int) -> None:
-        console.print(
-            Panel.fit(
-                f"[bold green]Embedding export complete[/bold green]\n"
-                f"[cyan]File:[/cyan] {output_path.resolve()}\n"
-                f"[cyan]Rows:[/cyan] {row_count}\n"
-                f"[cyan]Dimensions:[/cyan] {dimensions}",
-                border_style="green",
-            )
+
+class EmbedCsv:
+    """Compatibility path-returning API for CSV embedding callers."""
+
+    def __init__(
+        self,
+        model_file: Optional[str],
+        input_file: Optional[str],
+        output_file: Optional[str] = None,
+        column_name: str = "content",
+        present: bool = True,
+    ) -> None:
+        self.request = EmbedCsvRequest(
+            model_file=model_file,
+            input_file=input_file,
+            output_file=output_file,
+            column_name=column_name,
+            present=present,
         )
+
+    def execute(self) -> Path:
+        reporter: WorkflowReporter | None = None
+        if self.request.present:
+            from mlx.modes.nlp.presentation import RichEmbeddingReporter
+
+            reporter = RichEmbeddingReporter()
+        return EmbedCsvCommand(self.request, reporter=reporter).execute().output_path

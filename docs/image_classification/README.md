@@ -73,6 +73,19 @@ Training expects a dataset root with at least:
 
 For one-shot training and evaluation, each label directory must contain at least two images so positive pairs can be generated.
 
+The same layout can be supplied as an S3 ZIP for local training:
+
+```bash
+python -m mlx --mode image_classification --action train --model resnet18 \
+  --dataset-s3-uri s3://my-datasets/animals.zip \
+  --output ./artifacts/resnet18 --profile mlx-training
+```
+
+The ZIP may use one wrapper directory and must contain exactly one root with `train/` and `val/`.
+Install `.[aws]` for Boto3, use `--dataset-cache-dir` to override the persistent
+`~/.cache/mlx/datasets` cache, and do not combine the S3 option with `--dataset`. The output
+directory includes `dataset_source.json` with non-secret object and cache provenance.
+
 This same split layout is used by both model families:
 
 - Standard classifiers use `train/` and `val/` as supervised class datasets.

@@ -86,6 +86,19 @@ def test_config_rejects_non_training_fields(tmp_path: Path) -> None:
         load_aws_training_config(str(path), {"_explicit_options": set()})
 
 
+def test_cli_dataset_s3_uri_overrides_classification_yaml(tmp_path: Path) -> None:
+    path = tmp_path / "aws.yaml"
+    _config(path)
+    loaded = load_aws_training_config(
+        str(path),
+        {
+            "dataset_s3_uri": "s3://portable/classification.zip",
+            "_explicit_options": {"dataset_s3_uri"},
+        },
+    )
+    assert loaded.dataset_s3_uri == "s3://portable/classification.zip"
+
+
 def test_local_classification_does_not_load_aws_config(monkeypatch) -> None:
     from mlx.modes.image_classification import runner
 

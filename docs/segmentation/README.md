@@ -193,6 +193,20 @@ Important arguments:
 - `--epochs`, `--batch-size`, `--device`, `--lr`: training controls
 - `--width`, `--height`: input dimensions used to build `input_size`
 
+Local training also accepts a ZIP from S3:
+
+```bash
+python -m mlx --mode segmentation --action train --model unet-resnet18 \
+  --dataset-s3-uri s3://my-datasets/segmentation.zip \
+  --output ./artifacts/segmentation --profile mlx-training
+```
+
+The archive root (or its one wrapper directory) must contain `train/images`, `train/masks`,
+`val/images`, and `val/masks`. Install `.[aws]` for Boto3. MLX safely extracts the ZIP into its
+persistent cache, passes the resolved local root to the existing loader, and records
+`dataset_source.json` with the training artifacts. `--dataset` and `--dataset-s3-uri` are mutually
+exclusive; change the cache with `--dataset-cache-dir` when needed.
+
 List every comparison model and its total parameter count for the selected
 class count:
 

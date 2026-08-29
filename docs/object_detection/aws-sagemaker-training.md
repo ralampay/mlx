@@ -76,6 +76,17 @@ python -m mlx --mode object-detection --platform aws --action train \
     --config ./aws-training.yaml --profile mlx-training
 ```
 
+For a new training submission, the dataset object can also be overridden without editing YAML:
+
+```bash
+python -m mlx --mode object-detection --platform aws --action train \
+    --config ./aws-training.yaml \
+    --dataset-s3-uri s3://portable-datasets/detection.zip
+```
+
+The CLI value must be a ZIP object and takes precedence over `aws.dataset_s3_uri`. Resume still
+compares against the original run specification and rejects a different dataset URI.
+
 The same profile option is accepted by `status`, `stop`, and `resume`. MLX passes the selected
 name to `boto3.Session`; credentials remain in the standard AWS files and are never copied into a
 training job, Docker image, run manifest, or checkpoint.

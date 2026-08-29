@@ -131,6 +131,15 @@ def load_aws_training_config(config_path: str, cli_config: Mapping[str, Any]) ->
         aws["instance_type"] = cli_config.get("instance_type")
     if "profile" in explicit:
         aws["profile"] = cli_config.get("profile")
+    if "dataset_s3_uri" in explicit:
+        action = str(cli_config.get("action") or "train")
+        if action not in {"train", "resume"}:
+            raise MLXUserError(
+                "--dataset-s3-uri is supported only for AWS train or resume actions."
+            )
+        if "dataset_path" in explicit:
+            raise MLXUserError("Use either --dataset or --dataset-s3-uri, not both.")
+        aws["dataset_s3_uri"] = cli_config.get("dataset_s3_uri")
     training.setdefault("device", "auto")
     if not training.get("model"):
         raise MLXUserError("AWS image-classification training requires 'training.model'.")

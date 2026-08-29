@@ -125,6 +125,45 @@ def test_explicit_cli_profile_overrides_yaml_profile(tmp_path: Path) -> None:
     assert cli_config.profile == "cli-profile"
 
 
+def test_explicit_cli_dataset_s3_uri_overrides_yaml_for_new_run(tmp_path: Path) -> None:
+    path = tmp_path / "aws.yaml"
+    _write_config(path)
+
+    config = load_aws_training_config(
+        str(path),
+        {
+            "dataset_s3_uri": "s3://portable/override.zip",
+            "_explicit_options": {"dataset_s3_uri"},
+        },
+    )
+
+    assert config.dataset_s3_uri == "s3://portable/override.zip"
+
+
+def test_aws_dataset_cli_override_rejects_explicit_local_dataset(tmp_path: Path) -> None:
+    path = tmp_path / "aws.yaml"
+    _write_config(path)
+    with pytest.raises(MLXUserError, match="either --dataset"):
+        load_aws_training_config(
+            str(path),
+            {
+                "dataset_path": "./local",
+                "dataset_s3_uri": "s3://portable/override.zip",
+                "_explicit_options": {"dataset_path", "dataset_s3_uri"},
+            },
+        )
+
+    with pytest.raises(MLXUserError, match="AWS train or resume"):
+        load_aws_training_config(
+            str(path),
+            {
+                "action": "status",
+                "dataset_s3_uri": "s3://portable/override.zip",
+                "_explicit_options": {"dataset_s3_uri"},
+            },
+        )
+
+
 def test_invalid_spot_wait_is_user_facing(tmp_path: Path) -> None:
     path = tmp_path / "aws.yaml"
     path.write_text(

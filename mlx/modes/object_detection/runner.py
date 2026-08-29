@@ -1,7 +1,13 @@
 from __future__ import annotations
 
+from pathlib import Path
 from typing import Any
 
+from mlx.core.datasets import (
+    TrainWithDatasetSource,
+    resolve_object_detection_dataset_root,
+    validate_dataset_source_options,
+)
 from mlx.core.exceptions import MLXUserError
 from mlx.core.ui import print_model_parameter_table
 from mlx.modes.object_detection.commands import (
@@ -38,14 +44,23 @@ def run_object_detection(config: dict[str, Any]) -> Any:
     reporter = RichWorkflowReporter()
 
     if action == "train":
-        result = TrainObjectDetectionModel(
-            TrainObjectDetectionRequest.from_config(config),
+        validate_dataset_source_options(config, action=action)
+        request = TrainObjectDetectionRequest.from_config(config)
+        result = TrainWithDatasetSource(
+            request,
+            trainer_factory=lambda resolved: TrainObjectDetectionModel(
+                resolved, reporter=reporter
+            ),
+            root_resolver=resolve_object_detection_dataset_root,
+            artifact_dir_resolver=lambda resolved: Path(str(resolved.output_path)),
+            profile=config.get("profile"),
             reporter=reporter,
         ).execute()
         benchmark_result = getattr(result, "benchmark_result", None)
         if benchmark_result is not None:
             print_benchmark_result(benchmark_result)
         return result
+    validate_dataset_source_options(config, action=action)
     if action == "benchmark":
         benchmark_config = dict(config)
         explicit = set(config.get("_explicit_options") or ())

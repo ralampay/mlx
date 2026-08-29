@@ -108,6 +108,19 @@ def test_cli_routes_detection_through_neutral_runner_and_parses_provider() -> No
     assert namespace.profile == "mlx-training"
 
 
+def test_cli_parses_s3_dataset_staging_options() -> None:
+    namespace = build_parser().parse_args(
+        [
+            "--dataset-s3-uri",
+            "s3://datasets/training.zip",
+            "--dataset-cache-dir",
+            "/tmp/mlx-cache",
+        ]
+    )
+    assert namespace.dataset_s3_uri == "s3://datasets/training.zip"
+    assert namespace.dataset_cache_dir == "/tmp/mlx-cache"
+
+
 def test_typed_request_round_trips_legacy_extra_values() -> None:
     request = ImageClassificationRequest.from_config(
         {"model": "resnet18", "epochs": 3, "plugin_option": "kept"}

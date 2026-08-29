@@ -12,6 +12,8 @@ class ImageClassificationRequest(ConfigRequest):
     model: Optional[str] = None
     model_path: Optional[str] = None
     dataset_path: str = ""
+    dataset_s3_uri: Optional[str] = None
+    dataset_cache_dir: str = "~/.cache/mlx/datasets"
     output_path: Optional[str] = None
     input_img: str = "/tmp/image.jpg"
     device: str = "cpu"

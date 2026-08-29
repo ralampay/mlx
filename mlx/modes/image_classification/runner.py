@@ -1,7 +1,13 @@
 from __future__ import annotations
 
+from pathlib import Path
 from typing import Any
 
+from mlx.core.datasets import (
+    TrainWithDatasetSource,
+    classification_dataset_root,
+    validate_dataset_source_options,
+)
 from mlx.core.exceptions import MLXUserError
 from mlx.core.ui import print_model_parameter_table
 from mlx.modes.image_classification.cam import GenerateImageClassificationCams
@@ -82,6 +88,21 @@ def _generate_cams(config: dict[str, Any]):
     return results
 
 
+def _train(config: dict[str, Any]):
+    request = ImageClassificationRequest.from_config(config)
+    reporter = RichImageClassificationReporter()
+    return TrainWithDatasetSource(
+        request,
+        trainer_factory=lambda resolved: TrainImageClassificationModel(
+            resolved, reporter=reporter
+        ),
+        root_resolver=classification_dataset_root,
+        artifact_dir_resolver=lambda resolved: Path(str(resolved.output_path)),
+        profile=config.get("profile"),
+        reporter=reporter,
+    ).execute()
+
+
 ACTION_HANDLERS = {
     "benchmark": lambda config: BenchmarkImageClassification(
         ImageClassificationRequest.from_config(config),
@@ -99,10 +120,7 @@ ACTION_HANDLERS = {
         ImageClassificationRequest.from_config(config),
         reporter=RichImageClassificationReporter(),
     ).execute(),
-    "train": lambda config: TrainImageClassificationModel(
-        ImageClassificationRequest.from_config(config),
-        reporter=RichImageClassificationReporter(),
-    ).execute(),
+    "train": _train,
 }
 
 
@@ -114,6 +132,7 @@ def run_image_classification(mode_config: dict[str, Any]) -> Any:
 
     config = {**DEFAULT_CONFIG, **mode_config}
     action = config["action"]
+    validate_dataset_source_options(config, action=action)
     if action == "ls-models":
         return ACTION_HANDLERS[action](config)
 

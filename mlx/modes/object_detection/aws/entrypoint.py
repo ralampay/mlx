@@ -6,11 +6,11 @@ import os
 import shutil
 import signal
 import sys
-import zipfile
 from pathlib import Path
 from typing import Any, Mapping, Optional
 
 from mlx.core.commands import CallbackWorkflowReporter, WorkflowEvent
+from mlx.core.datasets import extract_zip_safely, resolve_object_detection_dataset_root
 from mlx.core.exceptions import MLXUserError
 from mlx.modes.object_detection.aws.checkpoints import (
     RotatingCheckpointPublisher,
@@ -169,35 +169,12 @@ class RunSageMakerObjectDetectionTraining:
         if self.dataset_dir.exists():
             shutil.rmtree(self.dataset_dir)
         self.dataset_dir.mkdir(parents=True)
-        try:
-            with zipfile.ZipFile(archive) as source:
-                total_size = sum(member.file_size for member in source.infolist())
-                if max_uncompressed_bytes is not None and total_size > max_uncompressed_bytes:
-                    raise MLXUserError(
-                        "The extracted dataset would exceed the safe portion of the configured "
-                        "SageMaker volume. Increase aws.volume_size_gb."
-                    )
-                for member in source.infolist():
-                    member_path = Path(member.filename)
-                    if member_path.is_absolute() or ".." in member_path.parts:
-                        raise MLXUserError(
-                            f"Dataset ZIP contains an unsafe path: {member.filename}"
-                        )
-                    mode = member.external_attr >> 16
-                    if mode & 0o170000 == 0o120000:
-                        raise MLXUserError(
-                            f"Dataset ZIP contains a symbolic link: {member.filename}"
-                        )
-                source.extractall(self.dataset_dir)
-        except zipfile.BadZipFile as exc:
-            raise MLXUserError(f"Dataset ZIP is invalid: {archive}") from exc
-        data_files = sorted(self.dataset_dir.rglob("data.yaml"))
-        if len(data_files) != 1:
-            raise MLXUserError(
-                "The extracted dataset must contain exactly one data.yaml; "
-                f"found {len(data_files)}."
-            )
-        return data_files[0].parent
+        extract_zip_safely(
+            archive,
+            self.dataset_dir,
+            max_uncompressed_bytes=max_uncompressed_bytes,
+        )
+        return resolve_object_detection_dataset_root(self.dataset_dir)
 
     @staticmethod
     def _resolve_device(value: str) -> str:

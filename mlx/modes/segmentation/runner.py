@@ -1,7 +1,13 @@
 from __future__ import annotations
 
+from pathlib import Path
 from typing import Any
 
+from mlx.core.datasets import (
+    TrainWithDatasetSource,
+    segmentation_dataset_root,
+    validate_dataset_source_options,
+)
 from mlx.core.exceptions import MLXUserError
 from mlx.core.ui import print_model_parameter_table
 from mlx.modes.segmentation.data import BuildSegmentationDataset
@@ -26,6 +32,7 @@ from mlx.modes.segmentation.train import (
     SmokeTestSegmentationModel,
     TrainSegmentationModel,
 )
+from mlx.modes.segmentation.utils import resolve_model_name, resolve_train_output_paths
 from mlx.modes.segmentation.streaming import (
     OpenCVSegmentationFrameSink,
     OpenCVSegmentationFrameSource,
@@ -86,6 +93,23 @@ def _run_stream(config: dict[str, Any], *, source: str):
     ).execute()
 
 
+def _train(config: dict[str, Any]):
+    request = SegmentationRequest.from_config(config)
+    reporter = RichSegmentationReporter()
+    return TrainWithDatasetSource(
+        request,
+        trainer_factory=lambda resolved: TrainSegmentationModel(
+            resolved, reporter=reporter
+        ),
+        root_resolver=segmentation_dataset_root,
+        artifact_dir_resolver=lambda resolved: resolve_train_output_paths(
+            resolved.to_config(), model_name=resolve_model_name(resolved.to_config())
+        )["output_dir"],
+        profile=config.get("profile"),
+        reporter=reporter,
+    ).execute()
+
+
 ACTION_HANDLERS = {
     "benchmark": lambda config: BenchmarkSegmentation(
         SegmentationRequest.from_config(config),
@@ -104,15 +128,13 @@ ACTION_HANDLERS = {
         SegmentationRequest.from_config(config),
         reporter=RichSegmentationReporter(),
     ).execute(),
-    "train": lambda config: TrainSegmentationModel(
-        SegmentationRequest.from_config(config),
-        reporter=RichSegmentationReporter(),
-    ).execute(),
+    "train": _train,
 }
 
 
 def run_segmentation(mode_config: dict[str, Any]) -> Any:
     config = {**DEFAULT_CONFIG, **mode_config}
+    validate_dataset_source_options(config, action=config["action"])
     if config["action"] == "ls-models":
         return ACTION_HANDLERS["ls-models"](config)
 

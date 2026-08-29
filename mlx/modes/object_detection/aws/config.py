@@ -32,6 +32,8 @@ _AWS_KEYS = {
 _VPC_KEYS = {"subnet_ids", "security_group_ids"}
 _TRAINING_KEYS = set(TrainObjectDetectionRequest.__dataclass_fields__) - {
     "dataset_path",
+    "dataset_s3_uri",
+    "dataset_cache_dir",
     "output_path",
     "model_path",
 }
@@ -166,6 +168,15 @@ def load_aws_training_config(
         aws = {**aws, "instance_type": cli_config.get("instance_type")}
     if "profile" in explicit:
         aws = {**aws, "profile": cli_config.get("profile")}
+    if "dataset_s3_uri" in explicit:
+        action = str(cli_config.get("action") or "train")
+        if action not in {"train", "resume"}:
+            raise MLXUserError(
+                "--dataset-s3-uri is supported only for AWS train or resume actions."
+            )
+        if "dataset_path" in explicit:
+            raise MLXUserError("Use either --dataset or --dataset-s3-uri, not both.")
+        aws = {**aws, "dataset_s3_uri": cli_config.get("dataset_s3_uri")}
 
     training.setdefault("provider", "ultralytics")
     training.setdefault("device", "auto")

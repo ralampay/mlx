@@ -69,6 +69,12 @@ def build_parser() -> RichArgumentParser:
     )
     parser.add_argument("--batch-size", type=int, default=1, dest="batch_size")
     parser.add_argument("--dataset", "--dataset-path", default="./tmp/dataset", dest="dataset_path")
+    parser.add_argument("--dataset-s3-uri", default=None, dest="dataset_s3_uri")
+    parser.add_argument(
+        "--dataset-cache-dir",
+        default="~/.cache/mlx/datasets",
+        dest="dataset_cache_dir",
+    )
     parser.add_argument("--epochs", type=int, default=100)
     parser.add_argument("--num-pairs", type=int, default=100, dest="num_pairs")
     parser.add_argument("--output", default=None, dest="output_path")
@@ -305,6 +311,8 @@ def _render_help() -> None:
     options.add_row("--model", "None", "Provider-specific model identifier, YAML path, or architecture name.")
     options.add_row("--action", "mode-specific", "Sub-action such as train, ls-models, infer-video, convert, benchmark, or build-dataset.")
     options.add_row("--dataset", "./tmp/dataset", "Dataset source for training: local YOLO root, dataset YAML, or alias like coco8/coco128.")
+    options.add_row("--dataset-s3-uri", "None", "Training-only S3 URI of a ZIP dataset. Local training caches and extracts it before training; AWS training uses the managed input channel.")
+    options.add_row("--dataset-cache-dir", "~/.cache/mlx/datasets", "Persistent content cache for locally staged S3 dataset ZIPs.")
     options.add_row("--output", "None", "Output directory written by training, benchmarks, or tracking. Detection uses it as the provider project directory, or as the ONNX export destination for convert.")
     options.add_row("--train-count", "None", "Images per label assigned to the train split when building classification datasets.")
     options.add_row("--val-count", "None", "Images per label assigned to the val split when building classification datasets.")

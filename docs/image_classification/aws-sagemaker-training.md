@@ -35,6 +35,9 @@ python -m mlx --mode image-classification --platform aws --action train \
 
 An explicit `--profile`, `--instance-type`, or training option overrides YAML only when present on
 the command line. Credentials are never copied into the image, job hyperparameters, or manifests.
+For a new submission, `--dataset-s3-uri s3://bucket/portable.zip` likewise overrides
+`aws.dataset_s3_uri`; resume continues to require the dataset URI stored in the original run
+specification.
 
 ## Lifecycle and artifacts
 

@@ -6,11 +6,11 @@ import os
 import shutil
 import signal
 import sys
-import zipfile
 from pathlib import Path
 from typing import Any, Mapping, Optional
 
 from mlx.core.commands import CallbackWorkflowReporter, WorkflowEvent
+from mlx.core.datasets import classification_dataset_root, extract_zip_safely
 from mlx.core.exceptions import MLXUserError
 from mlx.core.random import apply_global_seed
 from mlx.modes.image_classification.aws.checkpoints import (
@@ -167,41 +167,12 @@ class RunSageMakerImageClassificationTraining:
         if self.dataset_dir.exists():
             shutil.rmtree(self.dataset_dir)
         self.dataset_dir.mkdir(parents=True)
-        try:
-            with zipfile.ZipFile(archives[0]) as source:
-                if sum(item.file_size for item in source.infolist()) > max_uncompressed_bytes:
-                    raise MLXUserError(
-                        "The extracted dataset would exceed the safe portion of the "
-                        "configured SageMaker volume. Increase aws.volume_size_gb."
-                    )
-                for item in source.infolist():
-                    path = Path(item.filename)
-                    if path.is_absolute() or ".." in path.parts:
-                        raise MLXUserError(
-                            f"Dataset ZIP contains an unsafe path: {item.filename}"
-                        )
-                    if item.external_attr >> 16 & 0o170000 == 0o120000:
-                        raise MLXUserError(
-                            f"Dataset ZIP contains a symbolic link: {item.filename}"
-                        )
-                source.extractall(self.dataset_dir)
-        except zipfile.BadZipFile as exc:
-            raise MLXUserError(f"Dataset ZIP is invalid: {archives[0]}") from exc
-        possible_roots = (
+        extract_zip_safely(
+            archives[0],
             self.dataset_dir,
-            *[path for path in self.dataset_dir.iterdir() if path.is_dir()],
+            max_uncompressed_bytes=max_uncompressed_bytes,
         )
-        candidates = [
-            path
-            for path in possible_roots
-            if (path / "train").is_dir() and (path / "val").is_dir()
-        ]
-        if len(candidates) != 1:
-            raise MLXUserError(
-                "The extracted classification dataset must contain exactly one root "
-                "with train/ and val/ directories."
-            )
-        return candidates[0]
+        return classification_dataset_root(self.dataset_dir)
 
     @staticmethod
     def _resolve_device(value: str) -> str:

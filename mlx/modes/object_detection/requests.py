@@ -27,6 +27,8 @@ class ObjectDetectionRequest:
 @dataclass(frozen=True)
 class TrainObjectDetectionRequest(ObjectDetectionRequest):
     dataset_path: str = "./tmp/dataset"
+    dataset_s3_uri: Optional[str] = None
+    dataset_cache_dir: str = "~/.cache/mlx/datasets"
     output_path: Optional[str] = None
     epochs: int = 100
     batch_size: int = 16

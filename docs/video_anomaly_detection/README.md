@@ -124,6 +124,21 @@ Compressed video files are intentionally not a training-dataset input in this fi
 Extract them into source directories. Direct video decoding is supported by `infer-video`, and the
 dataset interface remains separable for a future video-file adapter.
 
+The prepared frame-sequence layout may be stored as a ZIP in S3 and staged for local training:
+
+```bash
+python -m mlx --mode video_anomaly_detection --action train \
+  --model resnet18 --dataset-s3-uri s3://my-datasets/avenue-prepared.zip \
+  --output ./artifacts/avenue --clip-length 16 --profile mlx-training
+```
+
+The ZIP must contain exactly one root (optionally below a wrapper directory) with
+`train/normal` and `val/normal`; test data may be included. The normal-only validation and
+training safeguards are applied after staging exactly as they are for local paths. Install
+`.[aws]` for Boto3. MLX safely extracts and caches the object under
+`~/.cache/mlx/datasets`, configurable with `--dataset-cache-dir`, and writes
+`dataset_source.json` with the training artifacts. Do not also pass `--dataset`.
+
 ## UCSD Ped2 preparation example
 
 Ped2 training clips contain normal behavior only. Map each training sequence to

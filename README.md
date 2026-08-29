@@ -111,6 +111,34 @@ reference:
 python -m mlx --help
 ```
 
+### Training from an S3 dataset ZIP
+
+All train-capable modes—object detection, image classification, segmentation, and video anomaly
+detection—can stage a dataset ZIP directly from S3 for local training:
+
+```bash
+python -m mlx --mode video_anomaly_detection --action train \
+  --dataset-s3-uri s3://my-datasets/avenue-prepared.zip \
+  --output ./artifacts/avenue --model resnet18 --profile mlx-training
+```
+
+Install the integration with `python -m pip install ".[aws]"`. The ZIP may contain the dataset
+at its root or inside one wrapper directory, but its extracted contents must follow the selected
+mode's documented dataset contract. MLX downloads with Boto3's normal credential chain, safely
+extracts the archive, and reuses a content-identity cache under `~/.cache/mlx/datasets`. Override
+that location with `--dataset-cache-dir`. A changed S3 VersionId or ETag creates a new cache entry.
+The selected AWS identity needs `s3:GetObject`; MLX also uses `s3:HeadObject` semantics to inspect
+the object before download (authorized through `s3:GetObject` in IAM policies).
+
+`--dataset-s3-uri` is training-only and cannot be combined with an explicitly supplied
+`--dataset`. Local S3 training requires `--output` and writes `dataset_source.json` beside the
+training artifacts with the URI, object identity, size, SHA-256, cache identity, and resolved
+archive root. It never records credentials or the selected profile. Cache eviction is manual.
+
+For SageMaker object-detection or image-classification training, the existing YAML
+`aws.dataset_s3_uri` remains supported. An explicit `--dataset-s3-uri` overrides it for a new
+training submission; resumed runs must retain their original dataset URI.
+
 ## Object detection and tracking
 
 ### Object detection

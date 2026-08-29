@@ -155,6 +155,19 @@ Both providers accept any of these dataset sources:
 - a direct dataset YAML path
 - a provider-supplied dataset alias such as `coco8` or `coco128`
 
+For local training, the dataset may instead be a ZIP object in S3:
+
+```bash
+python -m mlx --mode object_detection --action train --model yolo26 \
+  --dataset-s3-uri s3://my-datasets/detection.zip \
+  --output ./runs/s3-detection --profile mlx-training
+```
+
+The extracted archive must contain exactly one `data.yaml`, either at its root or below a wrapper
+directory. Install `.[aws]` for Boto3 support. MLX safely extracts and caches the object under
+`~/.cache/mlx/datasets` (configurable with `--dataset-cache-dir`) and writes
+`dataset_source.json` under `--output`. Do not combine `--dataset` and `--dataset-s3-uri`.
+
 For this repository, `coco8` is the best default example dataset. It is small, is
 available through both providers, and is fast enough for smoke-testing `yolo26`,
 both DraxNet YOLO26 variants, and `yolo9-t`.

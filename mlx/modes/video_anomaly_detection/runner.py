@@ -2,6 +2,11 @@ from __future__ import annotations
 
 from typing import Any
 
+from mlx.core.datasets import (
+    TrainWithDatasetSource,
+    validate_dataset_source_options,
+    video_anomaly_dataset_root,
+)
 from mlx.core.exceptions import MLXUserError
 from mlx.modes.video_anomaly_detection.commands import (
     BenchmarkVideoAnomalyModel,
@@ -19,6 +24,7 @@ from mlx.modes.video_anomaly_detection.requests import (
     ListVideoAnomalyModelsRequest,
     TrainVideoAnomalyRequest,
 )
+from mlx.modes.video_anomaly_detection.artifacts import resolve_training_paths
 
 
 DEFAULT_CONFIG = {
@@ -55,6 +61,23 @@ def _list_models(config: dict[str, Any]):
     return result
 
 
+def _train(config: dict[str, Any]):
+    request = TrainVideoAnomalyRequest.from_config(config)
+    reporter = RichVideoAnomalyReporter()
+    return TrainWithDatasetSource(
+        request,
+        trainer_factory=lambda resolved: TrainVideoAnomalyModel(
+            resolved, reporter=reporter
+        ),
+        root_resolver=video_anomaly_dataset_root,
+        artifact_dir_resolver=lambda resolved: resolve_training_paths(
+            resolved.to_config()
+        )["output_dir"],
+        profile=config.get("profile"),
+        reporter=reporter,
+    ).execute()
+
+
 ACTION_HANDLERS = {
     "benchmark": lambda config: BenchmarkVideoAnomalyModel(
         BenchmarkVideoAnomalyRequest.from_config(config),
@@ -65,10 +88,7 @@ ACTION_HANDLERS = {
         reporter=RichVideoAnomalyReporter(),
     ).execute(),
     "ls-models": _list_models,
-    "train": lambda config: TrainVideoAnomalyModel(
-        TrainVideoAnomalyRequest.from_config(config),
-        reporter=RichVideoAnomalyReporter(),
-    ).execute(),
+    "train": _train,
 }
 
 
@@ -94,6 +114,7 @@ def run_video_anomaly_detection(mode_config: dict[str, Any]):
         if name not in explicit:
             config[name] = default
     action = config.get("action") or "ls-models"
+    validate_dataset_source_options(config, action=action)
     if action == "train" and not config.get("model"):
         config["model"] = "resnet18"
     handler = ACTION_HANDLERS.get(action)

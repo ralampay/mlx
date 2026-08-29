@@ -47,6 +47,7 @@ mlx/
 ├── cli_config.py                 pure parsed-option normalization
 ├── cli_routing.py                lazy mode registry and runner resolution
 ├── core/                         shared commands, requests, errors, UI, seeds, model summaries
+│   ├── datasets.py              S3 ZIP staging, safe extraction, cache, root contracts
 │   ├── image_backbones.py        neutral penultimate-image-feature contracts
 │   ├── deep_svdd.py              shared Deep-SVDD score/calibration semantics
 │   └── streaming.py              neutral frame-source contracts and OpenCV decoder
@@ -86,6 +87,37 @@ The primary workflow commands are:
 Large commands should keep `execute()` readable by delegating cohesive steps to private methods
 or focused helpers. Stateless tensor transforms, metrics, serialization helpers, and model
 builders remain functions.
+
+## Portable Training Dataset Sources
+
+Every train-capable mode accepts either its existing local `dataset_path` or an S3 ZIP through
+the shared `TrainWithDatasetSource` command. Runners remain composition roots: they inject the
+mode's existing training command, its dataset-root contract, the reporter, and the artifact
+directory resolver. The wrapper changes only the typed request's resolved `dataset_path`; model
+trainers and loaders therefore remain storage-provider neutral. S3/Boto3 details do not enter
+mode commands or dataset implementations.
+
+`StageS3Dataset` owns the local staging lifecycle. It validates the S3 URI, inspects object
+identity, downloads through an injected S3 client, computes SHA-256, securely extracts into a
+temporary sibling directory, resolves the mode-specific root, writes a completion manifest, and
+atomically publishes a persistent cache entry under `~/.cache/mlx/datasets` by default. Cache
+identity includes bucket/key plus VersionId or ETag provenance and object size. Incomplete entries
+are never treated as valid. Training artifacts receive `dataset_source.json`; credentials and
+profile names are deliberately excluded.
+
+The shared streaming ZIP extractor rejects traversal, absolute and Windows-drive paths,
+symbolic links, special files, normalized duplicates, and file/directory conflicts. It checks
+declared uncompressed size against free space and an optional caller limit. Dataset semantics
+remain mode owned through injected root resolvers: object detection requires exactly one
+`data.yaml`; classification requires one `train`/`val` root; segmentation additionally requires
+paired image/mask directories; video anomaly detection requires normal train/validation roots.
+The same extractor and applicable root resolver are used by SageMaker container entrypoints.
+
+The CLI rejects an explicitly supplied local dataset together with `--dataset-s3-uri`, rejects
+S3 input for non-training actions, and requires persistent `--output` for local S3 training.
+`--profile` is resolved only at the Boto3 construction boundary. For SageMaker object detection
+and image classification, an explicit CLI S3 URI overrides the YAML URI for a new submission;
+resume validation continues to enforce the original run-spec URI.
 
 ## Object-Detection Providers
 

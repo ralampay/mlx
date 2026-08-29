@@ -1,0 +1,22 @@
+version: 1
+
+aws:
+  region: ap-southeast-1
+  profile: mlx-training
+  dataset_s3_uri: s3://my-dataset-bucket/datasets/image-classification.zip
+  checkpoint_s3_uri: s3://my-training-bucket/mlx-checkpoints
+  instance_type: ml.g4dn.xlarge
+  volume_size_gb: 100
+  managed_spot: true
+  max_runtime_seconds: 86400
+  max_wait_seconds: 172800
+
+training:
+  model: resnet18
+  epochs: 50
+  batch_size: 16
+  width: 224
+  height: 224
+  use_best: true
+  # Omit device to select cuda:0 when the instance exposes a GPU.
+

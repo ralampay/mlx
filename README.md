@@ -75,7 +75,8 @@ the object-detection provider they need:
 python -m pip install ".[object-detection-ultralytics]"
 python -m pip install ".[object-detection-libreyolo]"
 python -m pip install ".[object-detection]"  # both providers
-python -m pip install ".[aws,object-detection]"  # SageMaker training lifecycle
+python -m pip install ".[aws,object-detection]"  # SageMaker detection lifecycle
+python -m pip install ".[aws]"                   # SageMaker classification lifecycle
 ```
 
 For local AWS credentials, least-privilege IAM policies, S3 preparation, and SageMaker lifecycle
@@ -95,7 +96,7 @@ Available CLI modes are:
 | --- | --- |
 | `object_detection` | `train`, `benchmark`, AWS `resume`/`status`/`stop`, `infer-camera`, `infer-video`, `convert`, `ls-models` |
 | `track` | `run`, `export-mot`, `ls-trackers` |
-| `image_classification` | `train`, `test`, `benchmark`, `infer-image`, `cam`, `build-dataset`, `ls-models` |
+| `image_classification` | `train`, `test`, `benchmark`, AWS `resume`/`status`/`stop`, `infer-image`, `cam`, `build-dataset`, `ls-models` |
 | `segmentation` | `train`, `test`, `benchmark`, `infer-image`, `infer-camera`, `infer-video`, `build-dataset`, `ls-models` |
 | `nlp` | `embed` |
 
@@ -266,6 +267,9 @@ treated as OOD when its squared-Euclidean `ood_score` is greater than the calibr
 See the [image-classification guide](./docs/image_classification/README.md) for model
 families, dataset layouts, joint Deep SVDD behavior, evaluation artifacts, and
 explainability workflows.
+
+Image-classification training can run asynchronously on SageMaker with Managed Spot
+recovery. See the [AWS image-classification guide](./docs/image_classification/aws-sagemaker-training.md).
 
 ## Segmentation
 

@@ -12,6 +12,9 @@ This mode provides the image-classification workflow exposed by:
 python -m mlx --mode image_classification
 ```
 
+For asynchronous Managed Spot training, recovery, status, stop, and resume operations, see the
+[AWS SageMaker guide](./aws-sagemaker-training.md).
+
 The source is organized by responsibility:
 
 - `runner.py`: default config and action dispatch.

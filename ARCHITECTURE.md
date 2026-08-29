@@ -49,6 +49,7 @@ mlx/
 ├── core/                         shared commands, requests, errors, UI, seeds, model summaries
 └── modes/
     ├── image_classification/     classification data, models, OOD, training, inference, CAM
+    │   └── aws/                  SageMaker Spot lifecycle and native checkpoint recovery
     ├── segmentation/             paired-mask data, U-Net models, metrics, research artifacts
     │   ├── streaming.py          injected frame source/sink contracts and OpenCV adapters
     │   ├── visualization.py      pure mask coloring, blending, and view composition
@@ -71,7 +72,7 @@ The primary workflow commands are:
 
 | Mode | Commands |
 | --- | --- |
-| Image classification | `TrainImageClassificationModel`, `SmokeTestImageClassificationModel`, `BenchmarkImageClassification`, `InferImageClassification`, `GenerateImageClassificationCams`, `BuildImageClassificationDataset`, `ListImageClassificationModels` |
+| Image classification | `TrainImageClassificationModel`, `SmokeTestImageClassificationModel`, `BenchmarkImageClassification`, `InferImageClassification`, `GenerateImageClassificationCams`, `BuildImageClassificationDataset`, `ListImageClassificationModels`, AWS submit/status/stop/resume commands |
 | Segmentation | `TrainSegmentationModel`, `SmokeTestSegmentationModel`, `BenchmarkSegmentation`, `InferSegmentationImage`, `RunSegmentationStreamInference`, `BuildSegmentationDataset`, `ListSegmentationModels` |
 | Object detection | `TrainObjectDetectionModel`, `BenchmarkObjectDetectionModel`, `CreateObjectDetector`, `ConvertObjectDetectionModel`, `ListObjectDetectionModels`, `RunObjectDetectionStream`, AWS submit/status/stop/resume commands |
 | Tracking | `CreateTrackingAlgorithm`, `RunObjectDetectionTrackingCommand`, `RunTrackByDetectionCommand`, `RunTrackingVideo`, `ExportMOTFromClassAwareTracking`, `BenchmarkMOTTracking`, `ExportTrackingReplay` |
@@ -220,6 +221,16 @@ benchmark against `validation_split` after selecting the checkpoint. SageMaker s
 research artifacts and provider-native plots/predictions under `benchmark/` in `model.tar.gz`, in
 addition to the selected checkpoint and training summary. CloudWatch epoch/progress/ETA metrics
 remain operational signals rather than model-quality metrics.
+
+Image classification exposes the same asynchronous lifecycle through its mode-owned `aws`
+package for standard, joint Deep-SVDD, and one-shot Siamese training. It uses the classifier's
+native `{model}.last.pth` full-state checkpoint, keeping model, optimizer, completed epoch,
+history, random state, labels, dimensions, family, and OOD state under the classification
+boundary. Two checksum-validated recovery slots and the best deployable checkpoint synchronize
+through SageMaker's checkpoint directory. Manual resume retains the original training payload
+and immutable image, allowing only a higher total epoch target plus capacity/runtime changes.
+Final model artifacts include the best checkpoint, resumable checkpoint, training CSV, and a
+sanitized summary.
 
 ## Presentation, Errors, and Compatibility
 

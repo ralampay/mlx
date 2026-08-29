@@ -55,8 +55,19 @@ def test_segmentation_encoder_uses_an_explicit_backbone_adapter() -> None:
 
 
 def test_aws_integration_has_separate_client_image_and_status_boundaries() -> None:
-    aws_package = MODES / "object_detection" / "aws"
+    for mode in ("object_detection", "image_classification"):
+        aws_package = MODES / mode / "aws"
+        assert (aws_package / "clients.py").is_file()
+        assert (aws_package / "image.py").is_file()
+        assert (aws_package / "status.py").is_file()
 
-    assert (aws_package / "clients.py").is_file()
-    assert (aws_package / "image.py").is_file()
-    assert (aws_package / "status.py").is_file()
+
+def test_classification_aws_boundary_does_not_depend_on_detection_mode() -> None:
+    aws_package = MODES / "image_classification" / "aws"
+    violations = []
+    for path in aws_package.glob("*.py"):
+        for module in _imports(path):
+            if module.startswith("mlx.modes.object_detection"):
+                violations.append(f"{path.name} imports {module}")
+
+    assert violations == []

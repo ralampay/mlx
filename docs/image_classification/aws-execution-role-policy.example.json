@@ -1,0 +1,42 @@
+{
+  "Version": "2012-10-17",
+  "Statement": [
+    {
+      "Sid": "ReadDataset",
+      "Effect": "Allow",
+      "Action": ["s3:GetObject"],
+      "Resource": "arn:aws:s3:::<DATASET_BUCKET>/<DATASET_OBJECT_KEY>.zip"
+    },
+    {
+      "Sid": "ReadWriteTrainingArtifacts",
+      "Effect": "Allow",
+      "Action": ["s3:GetObject", "s3:PutObject", "s3:AbortMultipartUpload"],
+      "Resource": "arn:aws:s3:::<CHECKPOINT_BUCKET>/<CHECKPOINT_PREFIX>/*"
+    },
+    {
+      "Sid": "ListAndLocateBuckets",
+      "Effect": "Allow",
+      "Action": ["s3:ListBucket", "s3:GetBucketLocation"],
+      "Resource": ["arn:aws:s3:::<DATASET_BUCKET>", "arn:aws:s3:::<CHECKPOINT_BUCKET>"]
+    },
+    {
+      "Sid": "PullTrainingImage",
+      "Effect": "Allow",
+      "Action": ["ecr:BatchCheckLayerAvailability", "ecr:BatchGetImage", "ecr:GetDownloadUrlForLayer"],
+      "Resource": "arn:aws:ecr:<REGION>:<ACCOUNT_ID>:repository/<ECR_REPOSITORY>"
+    },
+    {
+      "Sid": "EcrAuthorization",
+      "Effect": "Allow",
+      "Action": "ecr:GetAuthorizationToken",
+      "Resource": "*"
+    },
+    {
+      "Sid": "LogsAndMetrics",
+      "Effect": "Allow",
+      "Action": ["logs:CreateLogGroup", "logs:CreateLogStream", "logs:DescribeLogStreams", "logs:PutLogEvents", "cloudwatch:PutMetricData"],
+      "Resource": "*"
+    }
+  ]
+}
+

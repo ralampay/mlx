@@ -1,0 +1,87 @@
+{
+  "Version": "2012-10-17",
+  "Statement": [
+    {
+      "Sid": "IdentifyCaller",
+      "Effect": "Allow",
+      "Action": "sts:GetCallerIdentity",
+      "Resource": "*"
+    },
+    {
+      "Sid": "InspectTrainingBuckets",
+      "Effect": "Allow",
+      "Action": "s3:GetBucketLocation",
+      "Resource": [
+        "arn:aws:s3:::<DATASET_BUCKET>",
+        "arn:aws:s3:::<CHECKPOINT_BUCKET>"
+      ]
+    },
+    {
+      "Sid": "ValidateDatasetObject",
+      "Effect": "Allow",
+      "Action": "s3:GetObject",
+      "Resource": "arn:aws:s3:::<DATASET_BUCKET>/<DATASET_OBJECT_KEY>.zip"
+    },
+    {
+      "Sid": "ValidateCheckpointBucket",
+      "Effect": "Allow",
+      "Action": "s3:ListBucket",
+      "Resource": "arn:aws:s3:::<CHECKPOINT_BUCKET>"
+    },
+    {
+      "Sid": "ManageMlxRunManifests",
+      "Effect": "Allow",
+      "Action": ["s3:GetObject", "s3:PutObject"],
+      "Resource": "arn:aws:s3:::<CHECKPOINT_BUCKET>/<CHECKPOINT_PREFIX>/<RESOURCE_PREFIX>/*"
+    },
+    {
+      "Sid": "AuthorizeEcrLogin",
+      "Effect": "Allow",
+      "Action": "ecr:GetAuthorizationToken",
+      "Resource": "*"
+    },
+    {
+      "Sid": "CreateAndInspectTrainingRepository",
+      "Effect": "Allow",
+      "Action": ["ecr:CreateRepository", "ecr:DescribeImages", "ecr:DescribeRepositories", "ecr:TagResource"],
+      "Resource": "arn:aws:ecr:<REGION>:<ACCOUNT_ID>:repository/<ECR_REPOSITORY>"
+    },
+    {
+      "Sid": "PushTrainingImages",
+      "Effect": "Allow",
+      "Action": ["ecr:BatchCheckLayerAvailability", "ecr:BatchGetImage", "ecr:CompleteLayerUpload", "ecr:GetDownloadUrlForLayer", "ecr:InitiateLayerUpload", "ecr:PutImage", "ecr:UploadLayerPart"],
+      "Resource": "arn:aws:ecr:<REGION>:<ACCOUNT_ID>:repository/<ECR_REPOSITORY>"
+    },
+    {
+      "Sid": "ProvisionScopedExecutionRole",
+      "Effect": "Allow",
+      "Action": ["iam:GetRole", "iam:CreateRole", "iam:PutRolePolicy"],
+      "Resource": "arn:aws:iam::<ACCOUNT_ID>:role/<RESOURCE_PREFIX>-sagemaker-*"
+    },
+    {
+      "Sid": "PassRoleOnlyToSageMaker",
+      "Effect": "Allow",
+      "Action": "iam:PassRole",
+      "Resource": "arn:aws:iam::<ACCOUNT_ID>:role/<EXECUTION_ROLE_NAME_OR_PREFIX_WILDCARD>",
+      "Condition": {"StringEquals": {"iam:PassedToService": "sagemaker.amazonaws.com"}}
+    },
+    {
+      "Sid": "ManageMlxTrainingJobs",
+      "Effect": "Allow",
+      "Action": ["sagemaker:AddTags", "sagemaker:CreateTrainingJob", "sagemaker:DescribeTrainingJob", "sagemaker:StopTrainingJob"],
+      "Resource": "arn:aws:sagemaker:<REGION>:<ACCOUNT_ID>:training-job/<RESOURCE_PREFIX>-*"
+    },
+    {
+      "Sid": "FindActiveMlxAttempts",
+      "Effect": "Allow",
+      "Action": "sagemaker:ListTrainingJobs",
+      "Resource": "*"
+    },
+    {
+      "Sid": "ReadMlxTrainingMetrics",
+      "Effect": "Allow",
+      "Action": "cloudwatch:GetMetricStatistics",
+      "Resource": "*"
+    }
+  ]
+}

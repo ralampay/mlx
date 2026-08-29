@@ -107,6 +107,11 @@ ACTION_HANDLERS = {
 
 
 def run_image_classification(mode_config: dict[str, Any]) -> Any:
+    if mode_config.get("platform", "local") == "aws":
+        from mlx.modes.image_classification.aws.runner import run_aws_image_classification
+
+        return run_aws_image_classification(mode_config)
+
     config = {**DEFAULT_CONFIG, **mode_config}
     action = config["action"]
     if action == "ls-models":

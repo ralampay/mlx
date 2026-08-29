@@ -7,6 +7,7 @@ import torch
 from torch import nn
 from torch.utils.data import TensorDataset
 
+from mlx.core.commands import CallbackWorkflowReporter
 from mlx.core.exceptions import MLXUserError
 from mlx.modes.image_classification import train
 from mlx.modes.image_classification.utils import (
@@ -150,8 +151,20 @@ def test_standard_training_resumes_without_repeating_epochs(monkeypatch, tmp_pat
     )
 
     first_config = _config(tmp_path, epochs=1)
-    train._train_standard("resnet18", first_config)
+    events = []
+    train._train_standard(
+        "resnet18",
+        first_config,
+        reporter=CallbackWorkflowReporter(events.append),
+    )
     last_checkpoint = tmp_path / "artifacts" / "resnet18.last.pth"
+    epoch_event = next(
+        event
+        for event in events
+        if isinstance(event.payload, dict)
+        and event.payload.get("event") == "training_epoch"
+    )
+    assert epoch_event.payload["checkpoint_path"] == str(last_checkpoint)
     second_config = _config(
         tmp_path,
         epochs=2,

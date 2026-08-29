@@ -233,6 +233,7 @@ def _train_one_shot(
             val_loss=avg_val_loss,
             metrics=val_metrics,
             checkpoint_message=checkpoint_message,
+            checkpoint_path=last_checkpoint_path,
         )
 
     emit(reporter, "success", "One-shot training complete!")
@@ -389,6 +390,7 @@ def _train_standard(
             val_loss=avg_val_loss,
             metrics=val_metrics,
             checkpoint_message=checkpoint_message,
+            checkpoint_path=last_checkpoint_path,
         )
 
     if joint_svdd:
@@ -779,6 +781,7 @@ def _emit_epoch_result(
     val_loss: float,
     metrics: dict[str, float],
     checkpoint_message: str | None = None,
+    checkpoint_path: Path | None = None,
 ) -> None:
     values = [
         ("loss", train_loss),
@@ -799,6 +802,7 @@ def _emit_epoch_result(
             "event": "training_epoch",
             "metrics": {"train_loss": train_loss, "val_loss": val_loss, **metrics},
             "checkpoint_message": checkpoint_message,
+            "checkpoint_path": str(checkpoint_path) if checkpoint_path else None,
         },
     )
     if checkpoint_message:

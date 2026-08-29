@@ -47,6 +47,9 @@ mlx/
 ├── cli_config.py                 pure parsed-option normalization
 ├── cli_routing.py                lazy mode registry and runner resolution
 ├── core/                         shared commands, requests, errors, UI, seeds, model summaries
+│   ├── image_backbones.py        neutral penultimate-image-feature contracts
+│   ├── deep_svdd.py              shared Deep-SVDD score/calibration semantics
+│   └── streaming.py              neutral frame-source contracts and OpenCV decoder
 └── modes/
     ├── image_classification/     classification data, models, OOD, training, inference, CAM
     │   └── aws/                  SageMaker Spot lifecycle and native checkpoint recovery
@@ -60,11 +63,12 @@ mlx/
     │   ├── commands.py           neutral train, benchmark, create, convert, list, stream commands
     │   ├── evaluation.py         normalized benchmark metrics and research-artifact contract
     │   ├── artifacts.py          shared checkpoint discovery and export-path rules
-    │   ├── streaming.py          frame ports, optional metadata capability, OpenCV adapters
+    │   ├── streaming.py          frame-sink adapter and compatibility frame-source re-exports
     │   ├── aws/                  SageMaker Spot submission, lifecycle, and recovery boundary
     │   ├── tracking/             tracking, MOT evaluation, replay export, registry, algorithms
     │   ├── libreyolo/            LibreYOLO implementation using the Ralampay fork
     │   └── ultralytics/          Ultralytics implementation and compatibility exports
+    ├── video_anomaly_detection/  normal-only clip data, 3D/legacy backbones, SVDD, research artifacts
     └── nlp/                      GGUF-backed CSV embedding command and Rich reporter
 ```
 
@@ -74,6 +78,7 @@ The primary workflow commands are:
 | --- | --- |
 | Image classification | `TrainImageClassificationModel`, `SmokeTestImageClassificationModel`, `BenchmarkImageClassification`, `InferImageClassification`, `GenerateImageClassificationCams`, `BuildImageClassificationDataset`, `ListImageClassificationModels`, AWS submit/status/stop/resume commands |
 | Segmentation | `TrainSegmentationModel`, `SmokeTestSegmentationModel`, `BenchmarkSegmentation`, `InferSegmentationImage`, `RunSegmentationStreamInference`, `BuildSegmentationDataset`, `ListSegmentationModels` |
+| Video anomaly detection | `TrainVideoAnomalyModel`, `BenchmarkVideoAnomalyModel`, `InferVideoAnomaly`, `ListVideoAnomalyModels` |
 | Object detection | `TrainObjectDetectionModel`, `BenchmarkObjectDetectionModel`, `CreateObjectDetector`, `ConvertObjectDetectionModel`, `ListObjectDetectionModels`, `RunObjectDetectionStream`, AWS submit/status/stop/resume commands |
 | Tracking | `CreateTrackingAlgorithm`, `RunObjectDetectionTrackingCommand`, `RunTrackByDetectionCommand`, `RunTrackingVideo`, `ExportMOTFromClassAwareTracking`, `BenchmarkMOTTracking`, `ExportTrackingReplay` |
 | NLP | `EmbedCsvCommand` (`EmbedCsv` is the legacy path-returning API) |
@@ -176,6 +181,52 @@ B5 only, attention and efficient mode enabled, average fusion, and zero drop pat
 conversion adapters may accept other axis-aligned detection checkpoints supported by the fork,
 but non-detection tasks and cross-provider checkpoint loading are outside the neutral provider
 contract.
+
+## Video Anomaly Detection
+
+`video_anomaly_detection` is a first-class normal-only workflow. Its runner constructs typed
+requests and presentation adapters; commands own training, benchmarking, listing, and headless
+video inference. Mode-owned data, backbone, metric, and artifact modules remain independent of
+CLI state. The default tensor flow is:
+
+```text
+[B,T,C,H,W] -> [B,C,T,H,W] -> family-aware inflated 3D backbone
+              -> global 3D pool -> [B,D] -> SVDD projection -> [B]
+```
+
+The image-classification registry remains authoritative for compatible aliases and 2D source
+weights. The video-owned 3D factory maps each standard family to a dedicated clip-native class,
+inflates spatial kernels, replaces normalization/pooling with 3D equivalents, keeps pointwise
+temporal kernels at one, and enforces temporal stride one. Its registry contains only 3D
+construction strategy; it does not redefine model-family capability. Standard pretrained weights
+are fully inflated, while Drax-specific branches remain freshly initialized and are recorded as
+partial provenance. Both Drax families preserve `average` and `sknet` fusion.
+
+Checkpoint version 2 records `backbone_mode`, concrete 3D class, inflation kernel, stride policy,
+pooling, and pretrained provenance. Missing `backbone_mode` identifies a version-1 checkpoint,
+which is reconstructed through the retained frame-wise `build_image_feature_backbone` plus
+registered `TEMPORAL_ENCODERS` path. New requests default to `3d`; the legacy path remains an
+explicit compatibility boundary rather than being folded into the 3D contract.
+
+Deep-SVDD squared-distance and quantile semantics are shared in `mlx.core.deep_svdd`; image
+classification and video anomaly models retain mode-owned projection/checkpoint structures. The
+video center is initialized once from normal training embeddings and stored as a fixed buffer.
+Optimization consumes only normal clips. The deployment threshold is calibrated from normal
+validation scores and persisted. Resume restores the exact center, optimizer, history, and RNG
+state; benchmark and inference reject checkpoints without a stored center or finite threshold and
+never recalibrate using test data.
+
+The generic dataset owns deterministic complete windows over
+`<split>/{normal,anomaly}/<source>/<frames>`. Training and validation expose only `normal`; an
+anomaly source under training is an actionable error. Source/frame metadata travels through
+evaluation into per-window and aggregated per-frame records. Direct compressed-video decoding is
+provided for inference through `mlx.core.streaming.OpenCVFrameSource`; frame-sequence extraction
+is the current training-data boundary. The same core frame-source API is re-exported by object
+detection to preserve its existing public imports.
+
+Benchmark artifacts are first-class outputs: structured clip/frame metrics, prediction records,
+ROC/PR data, plots, provenance including checkpoint SHA-256, and a deterministic Markdown report.
+Commands emit `WorkflowEvent` values; all Rich rendering remains in the mode presentation module.
 
 ## AWS SageMaker Training
 

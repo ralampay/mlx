@@ -77,3 +77,52 @@ class StandardClassifierAdapter(nn.Module):
 
 def build_feature_adapter(model_name: str, model: nn.Module) -> StandardClassifierAdapter:
     return StandardClassifierAdapter(model_name, model)
+
+
+class StandardImageFeatureBackbone(nn.Module):
+    """Classification compatibility adapter implementing the neutral core contract."""
+
+    def __init__(self, adapter: StandardClassifierAdapter) -> None:
+        super().__init__()
+        self.adapter = adapter
+        self.feature_dim = adapter.feature_dim
+
+    def forward(self, images: torch.Tensor) -> torch.Tensor:
+        return self.adapter.forward_features(images)
+
+
+def build_image_feature_backbone(
+    model_name: str,
+    config: dict,
+) -> StandardImageFeatureBackbone:
+    # Local imports avoid a package initialization cycle and keep the registry authoritative.
+    from mlx.modes.image_classification.models import (
+        build_image_classification_model,
+        model_family_for,
+    )
+
+    if model_family_for(model_name) != "standard":
+        raise MLXUserError(
+            f"Model '{model_name}' is a one-shot/Siamese model and cannot be used as an image feature backbone."
+        )
+    model = build_image_classification_model(
+        model_name,
+        {**config, "ood_method": "none"},
+        num_classes=1,
+    )
+    adapter = build_feature_adapter(model_name, model)
+    _remove_classification_head(model_name, model)
+    return StandardImageFeatureBackbone(adapter)
+
+
+def _remove_classification_head(model_name: str, model: nn.Module) -> None:
+    """Remove only the final logits layer after the adapter captured its width."""
+
+    if model_name.startswith("resnet") or model_name == "draxnet":
+        model.fc = nn.Identity()
+    elif model_name == "densenet121":
+        model.classifier = nn.Identity()
+    elif model_name in {"mobilenet_v3_large", "efficientnet_b0", "drax_mobilenet_v3_large"}:
+        model.classifier = nn.Identity()
+    elif model_name.startswith("convnext_"):
+        model.classifier[2] = nn.Identity()

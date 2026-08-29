@@ -135,14 +135,14 @@ class ConvNeXtBlock(nn.Module):
         return residual + x
 
 
-def _resolve_num_heads(dim: int, max_heads: int = 8) -> int:
+def resolve_attention_num_heads(dim: int, max_heads: int = 8) -> int:
     for num_heads in range(min(max_heads, dim), 0, -1):
         if dim % num_heads == 0:
             return num_heads
     return 1
 
 
-def _resolve_efficient_dim(dim: int) -> int:
+def resolve_efficient_attention_dim(dim: int) -> int:
     reduced_dim = max(32, dim // 2)
     while reduced_dim > 1 and dim % reduced_dim != 0:
         reduced_dim -= 1
@@ -183,8 +183,10 @@ class DraxBlock(nn.Module):
             self.attn_up = None
             return
 
-        attention_dim = _resolve_efficient_dim(dim) if efficient else dim
-        self.attention = SelfAttention2D(attention_dim, num_heads=_resolve_num_heads(attention_dim))
+        attention_dim = resolve_efficient_attention_dim(dim) if efficient else dim
+        self.attention = SelfAttention2D(
+            attention_dim, num_heads=resolve_attention_num_heads(attention_dim)
+        )
         if efficient:
             self.attn_down = nn.Conv2d(dim, attention_dim, kernel_size=1)
             self.attn_up = nn.Conv2d(attention_dim, dim, kernel_size=1)

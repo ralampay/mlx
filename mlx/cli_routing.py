@@ -19,6 +19,8 @@ MODE_REGISTRY: dict[str, str] = {
     "track": "mlx.modes.object_detection.tracking.runner:run_tracking",
     "tracking": "mlx.modes.object_detection.tracking.runner:run_tracking",
     "segmentation": "mlx.modes.segmentation.runner:run_segmentation",
+    "video-anomaly-detection": "mlx.modes.video_anomaly_detection.runner:run_video_anomaly_detection",
+    "video_anomaly_detection": "mlx.modes.video_anomaly_detection.runner:run_video_anomaly_detection",
     "nlp": "mlx.modes.nlp.runner:run_nlp",
 }
 

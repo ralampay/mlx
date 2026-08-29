@@ -1,0 +1,108 @@
+from __future__ import annotations
+
+from typing import Any
+
+from mlx.core.exceptions import MLXUserError
+from mlx.modes.video_anomaly_detection.commands import (
+    BenchmarkVideoAnomalyModel,
+    InferVideoAnomaly,
+    ListVideoAnomalyModels,
+    TrainVideoAnomalyModel,
+)
+from mlx.modes.video_anomaly_detection.presentation import (
+    RichVideoAnomalyReporter,
+    display_video_anomaly_models,
+)
+from mlx.modes.video_anomaly_detection.requests import (
+    BenchmarkVideoAnomalyRequest,
+    InferVideoAnomalyRequest,
+    ListVideoAnomalyModelsRequest,
+    TrainVideoAnomalyRequest,
+)
+
+
+DEFAULT_CONFIG = {
+    "action": "ls-models",
+    "model": "resnet18",
+    "height": 224,
+    "width": 224,
+    "batch_size": 8,
+    "workers": 0,
+    "epochs": 50,
+    "lr": 0.001,
+    "clip_length": 16,
+    "frame_stride": 1,
+    "backbone_mode": "3d",
+    "backbone_temporal_kernel_size": 3,
+    "temporal_model": "tcn",
+    "temporal_hidden_dim": 256,
+    "temporal_embedding_dim": 128,
+    "temporal_kernel_size": 3,
+    "temporal_dropout": 0.0,
+    "svdd_dim": 128,
+    "svdd_hidden_dim": 256,
+    "svdd_quantile": 0.95,
+    "frame_aggregation": "mean",
+}
+
+
+def _list_models(config: dict[str, Any]):
+    result = ListVideoAnomalyModels(
+        ListVideoAnomalyModelsRequest.from_config(config),
+        reporter=RichVideoAnomalyReporter(),
+    ).execute()
+    display_video_anomaly_models(result)
+    return result
+
+
+ACTION_HANDLERS = {
+    "benchmark": lambda config: BenchmarkVideoAnomalyModel(
+        BenchmarkVideoAnomalyRequest.from_config(config),
+        reporter=RichVideoAnomalyReporter(),
+    ).execute(),
+    "infer-video": lambda config: InferVideoAnomaly(
+        InferVideoAnomalyRequest.from_config(config),
+        reporter=RichVideoAnomalyReporter(),
+    ).execute(),
+    "ls-models": _list_models,
+    "train": lambda config: TrainVideoAnomalyModel(
+        TrainVideoAnomalyRequest.from_config(config),
+        reporter=RichVideoAnomalyReporter(),
+    ).execute(),
+}
+
+
+def run_video_anomaly_detection(mode_config: dict[str, Any]):
+    config = {**DEFAULT_CONFIG, **mode_config}
+    explicit = set(mode_config.get("_explicit_options") or ())
+    legacy_temporal_options = {
+        "temporal_model",
+        "temporal_hidden_dim",
+        "temporal_embedding_dim",
+        "temporal_kernel_size",
+        "temporal_dropout",
+    }
+    explicitly_legacy = bool(explicit & legacy_temporal_options)
+    if "backbone_mode" not in explicit and explicitly_legacy:
+        config["backbone_mode"] = "frame-2d"
+    elif config.get("backbone_mode") == "3d" and explicitly_legacy:
+        raise MLXUserError(
+            "Temporal-CNN options apply only to --backbone-mode frame-2d; "
+            "3D backbones learn space and time jointly."
+        )
+    for name, default in (("height", 224), ("width", 224), ("batch_size", 8), ("epochs", 50), ("lr", 0.001)):
+        if name not in explicit:
+            config[name] = default
+    action = config.get("action") or "ls-models"
+    if action == "train" and not config.get("model"):
+        config["model"] = "resnet18"
+    handler = ACTION_HANDLERS.get(action)
+    if handler is None:
+        available = ", ".join(sorted(ACTION_HANDLERS))
+        raise MLXUserError(
+            f"Unsupported action '{action}' for video-anomaly-detection. Available actions: {available}."
+        )
+    return handler(config)
+
+
+__all__ = ["ACTION_HANDLERS", "DEFAULT_CONFIG", "run_video_anomaly_detection"]

@@ -4,6 +4,7 @@ import torch
 from torch.utils.data import DataLoader
 
 from mlx.core.exceptions import MLXUserError
+from mlx.core.deep_svdd import quantile_threshold
 from mlx.modes.image_classification.models.joint_svdd import JointDeepSVDDClassifier
 
 
@@ -78,10 +79,6 @@ def calibrate_svdd_threshold(
     scores: torch.Tensor,
     quantile: float,
 ) -> float:
-    if not 0 < quantile < 1:
-        raise MLXUserError("The Deep SVDD calibration quantile must be strictly between zero and one.")
-    if scores.numel() == 0:
-        raise MLXUserError("Cannot calibrate Deep SVDD from an empty score collection.")
-    threshold = torch.quantile(scores.float(), quantile).to(model.svdd_threshold.device)
+    threshold = quantile_threshold(scores, quantile).to(model.svdd_threshold.device)
     model.svdd_threshold.copy_(threshold)
     return float(threshold.item())

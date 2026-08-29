@@ -11,6 +11,8 @@ from mlx.modes.image_classification.models.blocks import (
     DraxBlock,
     DropPath,
     LayerNorm2D,
+    resolve_attention_num_heads,
+    resolve_efficient_attention_dim,
     SelfAttention2D,
 )
 from mlx.modes.image_classification.models.drax_mobilenet import (
@@ -25,7 +27,10 @@ from mlx.modes.image_classification.models.standard import (
     registered_standard_model_names,
     register_standard_model,
 )
-from mlx.modes.image_classification.models.adapters import build_feature_adapter
+from mlx.modes.image_classification.models.adapters import (
+    build_feature_adapter,
+    build_image_feature_backbone,
+)
 from mlx.modes.image_classification.models.joint_svdd import JointDeepSVDDClassifier
 from mlx.modes.image_classification.ood.deep_svdd import validate_svdd_config
 
@@ -54,6 +59,12 @@ register_standard_model("drax_mobilenet_v3_large", build_drax_mobilenet_v3_large
 
 def supported_model_names() -> list[str]:
     return sorted(ONE_SHOT_MODEL_NAMES | STANDARD_MODEL_NAMES | set(registered_standard_model_names()))
+
+
+def standard_model_names() -> list[str]:
+    """Return capability-selected standard models from the authoritative registry."""
+
+    return [name for name in supported_model_names() if model_family_for(name) == "standard"]
 
 
 def model_family_for(model_name: str) -> str:
@@ -139,9 +150,13 @@ __all__ = [
     "SIAMESE_BACKBONE_MODELS",
     "build_image_classification_model",
     "build_feature_adapter",
+    "build_image_feature_backbone",
     "build_drax_mobilenet_v3_large",
     "build_draxnet",
     "model_family_for",
     "register_standard_model",
+    "resolve_attention_num_heads",
+    "resolve_efficient_attention_dim",
     "supported_model_names",
+    "standard_model_names",
 ]

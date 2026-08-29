@@ -2,7 +2,7 @@
 
 MLX is a command-line toolkit for machine-learning workflows. It provides a shared
 CLI and project conventions while keeping object detection, image classification,
-segmentation, NLP, and tracking logic in focused modules.
+video anomaly detection, segmentation, NLP, and tracking logic in focused modules.
 
 ## Contents
 
@@ -11,6 +11,7 @@ segmentation, NLP, and tracking logic in focused modules.
 - [Command-line interface](#command-line-interface)
 - [Object detection and tracking](#object-detection-and-tracking)
 - [Image classification](#image-classification)
+- [Video anomaly detection](#video-anomaly-detection)
 - [Segmentation](#segmentation)
 - [NLP embeddings](#nlp-embeddings)
 - [Documentation](#documentation)
@@ -18,7 +19,8 @@ segmentation, NLP, and tracking logic in focused modules.
 ## Architecture
 
 See [ARCHITECTURE.md](./ARCHITECTURE.md) for package ownership, command conventions,
-dependency direction, presentation boundaries, and the object-detection provider API.
+dependency direction, presentation boundaries, object-detection providers, and the video-anomaly
+3D-backbone/checkpoint compatibility boundary.
 
 ## Installation
 
@@ -97,11 +99,13 @@ Available CLI modes are:
 | `object_detection` | `train`, `benchmark`, AWS `resume`/`status`/`stop`, `infer-camera`, `infer-video`, `convert`, `ls-models` |
 | `track` | `run`, `export-mot`, `ls-trackers` |
 | `image_classification` | `train`, `test`, `benchmark`, AWS `resume`/`status`/`stop`, `infer-image`, `cam`, `build-dataset`, `ls-models` |
+| `video_anomaly_detection` | `train`, `benchmark`, `infer-video`, `ls-models` |
 | `segmentation` | `train`, `test`, `benchmark`, `infer-image`, `infer-camera`, `infer-video`, `build-dataset`, `ls-models` |
 | `nlp` | `embed` |
 
-Hyphenated mode names such as `object-detection` and `image-classification` are also
-accepted. Run the following command for the complete option reference:
+Hyphenated mode names such as `object-detection`, `image-classification`, and
+`video-anomaly-detection` are also accepted. Run the following command for the complete option
+reference:
 
 ```bash
 python -m mlx --help
@@ -270,6 +274,41 @@ explainability workflows.
 
 Image-classification training can run asynchronously on SageMaker with Managed Spot
 recovery. See the [AWS image-classification guide](./docs/image_classification/aws-sagemaker-training.md).
+
+## Video anomaly detection
+
+Package: `mlx.modes.video_anomaly_detection`
+
+This mode trains a normal-only Deep SVDD model over fixed-length video clips. By default it
+inflates every standard image-classification architecture into a dedicated 3D CNN, preserves time
+through the backbone, globally pools a clip embedding, and calibrates an anomaly threshold only
+from held-out normal validation clips. `DraxNet3D` and `DraxMobileNetV3Large3D` support both
+`average` and `sknet` fusion. Siamese/one-shot models are excluded by model-family capability. Legacy
+frame-2D+TCN checkpoints remain loadable with `--backbone-mode frame-2d`.
+
+The training frame buffer contains `--clip-length` sampled RGB frames. With frame stride `S`, one
+window spans `(clip_length - 1) * S + 1` source frames. Training and validation data must contain
+normal examples only; test data may contain both normal and anomalous sequences.
+
+```bash
+python -m mlx --mode video_anomaly_detection --action train \
+    --model resnet18 --backbone-mode 3d --backbone-temporal-kernel-size 3 \
+    --dataset ./ped2-prepared --output ./artifacts/ped2 \
+    --clip-length 16 --frame-stride 1 --height 224 --width 224
+
+python -m mlx --mode video_anomaly_detection --action ls-models
+
+python -m mlx --mode video_anomaly_detection --action benchmark \
+    --model-path ./artifacts/ped2/resnet18-3d-svdd.pth \
+    --dataset ./ped2-prepared/test --output ./artifacts/ped2/benchmark
+
+python -m mlx --mode video-anomaly-detection --action infer-video \
+    --model-path ./artifacts/ped2/resnet18-3d-svdd.pth \
+    --file-path ./sample.mp4 --output ./inference
+```
+
+See the [video anomaly detection guide](./docs/video_anomaly_detection/README.md) for the dataset
+contract, UCSD Ped2 mapping, checkpoint semantics, research artifacts, and limitations.
 
 ## Segmentation
 

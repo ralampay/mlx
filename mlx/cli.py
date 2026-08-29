@@ -184,6 +184,26 @@ def build_parser() -> RichArgumentParser:
     parser.add_argument(
         "--svdd-warmup-epochs", type=int, default=0, dest="svdd_warmup_epochs"
     )
+    parser.add_argument("--clip-length", type=int, default=16, dest="clip_length")
+    parser.add_argument("--frame-stride", type=int, default=1, dest="frame_stride")
+    parser.add_argument(
+        "--backbone-mode",
+        choices=("3d", "frame-2d"),
+        default="3d",
+        dest="backbone_mode",
+    )
+    parser.add_argument(
+        "--backbone-temporal-kernel-size",
+        type=int,
+        default=3,
+        dest="backbone_temporal_kernel_size",
+    )
+    parser.add_argument("--temporal-model", default="tcn", dest="temporal_model")
+    parser.add_argument("--temporal-hidden-dim", type=int, default=256, dest="temporal_hidden_dim")
+    parser.add_argument("--temporal-embedding-dim", type=int, default=128, dest="temporal_embedding_dim")
+    parser.add_argument("--temporal-kernel-size", type=int, default=3, dest="temporal_kernel_size")
+    parser.add_argument("--temporal-dropout", type=float, default=0.0, dest="temporal_dropout")
+    parser.add_argument("--frame-aggregation", choices=("mean", "max"), default="mean", dest="frame_aggregation")
     parser.add_argument("--seed", "--random-seed", type=int, default=None, dest="random_seed")
     parser.add_argument("--run-name", default=None, dest="run_name")
     parser.add_argument("--num-classes", type=int, default=2, dest="num_classes")
@@ -261,6 +281,10 @@ def _render_help() -> None:
     usage.add_row("python -m mlx --mode segmentation --action ls-models")
     usage.add_row("python -m mlx --mode segmentation --action infer-image --model-path ./unet-seg.pt --input-img ./sample.jpg")
     usage.add_row("python -m mlx --mode segmentation --action build-dataset --dataset ./raw-segmentation")
+    usage.add_row("python -m mlx --mode video_anomaly_detection --action train --model resnet18 --backbone-mode 3d --backbone-temporal-kernel-size 3 --clip-length 16 --dataset ./ped2-prepared --output ./artifacts/ped2")
+    usage.add_row("python -m mlx --mode video_anomaly_detection --action ls-models")
+    usage.add_row("python -m mlx --mode video_anomaly_detection --action benchmark --model-path ./model.pth --dataset ./ped2-prepared/test --output ./benchmark")
+    usage.add_row("python -m mlx --mode video_anomaly_detection --action infer-video --model-path ./model.pth --file-path ./sample.mp4 --output ./inference")
     usage.add_row("python -m mlx --mode nlp --action embed --model-file ./model.gguf --input-file ./input.csv")
     console.print(usage)
 
@@ -268,7 +292,7 @@ def _render_help() -> None:
     options.add_column("Flag", style="cyan", no_wrap=True)
     options.add_column("Default", style="magenta")
     options.add_column("Description", style="white")
-    options.add_row("--mode", "None", "Mode to run: object_detection, track, image_classification, segmentation, or nlp.")
+    options.add_row("--mode", "None", "Mode to run: object_detection, track, image_classification, segmentation, video_anomaly_detection, or nlp.")
     options.add_row("--platform", "local", "Execution platform. AWS supports object-detection and image-classification training lifecycle actions.")
     options.add_row("--config", "None", "AWS YAML job configuration. Local execution does not read this file.")
     options.add_row("--profile", "YAML/default", "AWS shared-credentials profile. An explicit value overrides aws.profile in YAML.")
@@ -348,6 +372,16 @@ def _render_help() -> None:
     options.add_row("--svdd-hidden-dim", "256", "Deep SVDD projection hidden width.")
     options.add_row("--svdd-quantile", "0.95", "Validation-score quantile used for rejection calibration.")
     options.add_row("--svdd-warmup-epochs", "0", "Classification-only epochs before applying the SVDD loss.")
+    options.add_row("--clip-length", "16", "Frames per video-anomaly clip window.")
+    options.add_row("--frame-stride", "1", "Sampling stride between frames in a video-anomaly clip.")
+    options.add_row("--backbone-mode", "3d", "Clip-native 3D backbone, or legacy frame-2d plus TCN.")
+    options.add_row("--backbone-temporal-kernel-size", "3", "Odd temporal kernel used to inflate spatial backbone convolutions.")
+    options.add_row("--temporal-model", "tcn", "Legacy frame-2d temporal encoder alias.")
+    options.add_row("--temporal-hidden-dim", "256", "Legacy frame-2d temporal CNN hidden channels.")
+    options.add_row("--temporal-embedding-dim", "128", "Legacy frame-2d temporal CNN output width.")
+    options.add_row("--temporal-kernel-size", "3", "Legacy frame-2d Conv1d kernel size.")
+    options.add_row("--temporal-dropout", "0.0", "Legacy frame-2d temporal CNN dropout.")
+    options.add_row("--frame-aggregation", "mean", "Aggregate overlapping window scores per frame using mean or max.")
     options.add_row("--seed / --random-seed", "None", "Global random seed applied across Python, NumPy, and PyTorch.")
     options.add_row("--run-name", "None", "Optional provider run folder name.")
     options.add_row("--num-classes", "2", "Number of image-classification or segmentation output classes.")
@@ -381,6 +415,7 @@ def _render_help() -> None:
     available.add_row("track", "run, export-mot, ls-trackers")
     available.add_row("image_classification", "train, test, benchmark, AWS resume/status/stop, infer-image, cam, build-dataset, ls-models")
     available.add_row("segmentation", "train, test, benchmark, infer-image, infer-camera, infer-video, build-dataset, ls-models")
+    available.add_row("video_anomaly_detection", "train, benchmark, infer-video, ls-models")
     available.add_row("nlp", "embed")
     console.print(available)
 
@@ -408,6 +443,7 @@ def _render_unknown_mode() -> None:
     table.add_row("track", "Provider-neutral video tracking and MOT benchmarking")
     table.add_row("image_classification", "Image classification workflows for both one-shot and standard classifiers")
     table.add_row("segmentation", "Semantic segmentation workflows for U-Net style models")
+    table.add_row("video_anomaly_detection", "Normal-only clip-native 3D CNN and Deep SVDD workflows")
     table.add_row("nlp", "Text embedding workflows for GGUF models and CSV data")
     console.print(table)
 

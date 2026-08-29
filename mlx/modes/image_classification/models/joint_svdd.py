@@ -4,6 +4,7 @@ import torch
 from torch import nn
 
 from mlx.core.exceptions import MLXUserError
+from mlx.core.deep_svdd import squared_euclidean_score
 from mlx.modes.image_classification.ood.types import JointClassificationOutput
 
 
@@ -33,7 +34,7 @@ class JointDeepSVDDClassifier(nn.Module):
         )
 
     def compute_svdd_score(self, svdd_embedding: torch.Tensor) -> torch.Tensor:
-        return torch.sum((svdd_embedding - self.svdd_center) ** 2, dim=1)
+        return squared_euclidean_score(svdd_embedding, self.svdd_center)
 
     def is_in_distribution(self, svdd_embedding: torch.Tensor) -> torch.Tensor:
         if not torch.isfinite(self.svdd_threshold):

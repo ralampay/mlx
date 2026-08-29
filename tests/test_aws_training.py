@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import hashlib
+import io
 import json
 import zipfile
 from datetime import datetime, timedelta, timezone
@@ -12,12 +13,16 @@ import torch
 from mlx.core.commands import CallbackWorkflowReporter
 from mlx.core.exceptions import MLXAbort, MLXUserError
 from mlx.modes.object_detection import runner as detection_runner
+from mlx.modes.object_detection.aws import runner as aws_detection_runner
 from mlx.modes.object_detection.aws.checkpoints import (
     RotatingCheckpointPublisher,
     find_valid_recovery_checkpoint,
     prepare_working_resume_checkpoint,
 )
-from mlx.modes.object_detection.aws.commands import WatchAwsObjectDetectionTraining
+from mlx.modes.object_detection.aws.commands import (
+    LocateBestAwsObjectDetectionModel,
+    WatchAwsObjectDetectionTraining,
+)
 from mlx.modes.object_detection.aws.config import (
     AwsTrainingConfig,
     AwsVpcConfig,
@@ -26,11 +31,13 @@ from mlx.modes.object_detection.aws.config import (
 from mlx.modes.object_detection.aws.entrypoint import RunSageMakerObjectDetectionTraining
 from mlx.modes.object_detection.aws.image import PublishSageMakerImage
 from mlx.modes.object_detection.aws.models import (
+    AwsBestModelLocation,
     AwsInfrastructure,
     AwsTrainingStatus,
 )
 from mlx.modes.object_detection.aws.service import SageMakerTrainingService
 from mlx.modes.object_detection.aws.status import build_training_status
+from mlx.modes.object_detection.aws.presentation import render_aws_result
 from mlx.modes.object_detection.requests import TrainObjectDetectionRequest
 from mlx.modes.object_detection.ultralytics.provider import UltralyticsProvider
 
@@ -384,6 +391,300 @@ def test_watch_translates_keyboard_interrupt_to_intentional_abort() -> None:
         command.execute()
 
     assert [item.status for item in observed] == ["InProgress"]
+
+
+class _FakeAwsClientError(Exception):
+    def __init__(self, code: str) -> None:
+        self.response = {"Error": {"Code": code}}
+        super().__init__(code)
+
+
+class _FakeAwsBotoError(Exception):
+    pass
+
+
+class _FakeBestModelS3:
+    def __init__(self, objects):
+        self.objects = objects
+
+    def get_object(self, *, Bucket, Key):
+        value = self.objects.get((Bucket, Key))
+        if value is None:
+            raise _FakeAwsClientError("NoSuchKey")
+        return {"Body": io.BytesIO(json.dumps(value).encode("utf-8"))}
+
+    def head_object(self, *, Bucket, Key):
+        value = self.objects.get((Bucket, Key))
+        if value is None:
+            raise _FakeAwsClientError("NoSuchKey")
+        return value
+
+
+class _FakeTrainingJobsPaginator:
+    def __init__(self, summaries):
+        self.summaries = summaries
+        self.arguments = None
+
+    def paginate(self, **kwargs):
+        self.arguments = kwargs
+        return [
+            {"TrainingJobSummaries": [summary]}
+            for summary in self.summaries
+        ]
+
+
+class _FakeBestModelSageMaker:
+    def __init__(self, descriptions):
+        self.descriptions = descriptions
+        self.paginator = _FakeTrainingJobsPaginator([
+            {"TrainingJobName": name} for name in descriptions
+        ])
+
+    def get_paginator(self, name):
+        assert name == "list_training_jobs"
+        return self.paginator
+
+    def describe_training_job(self, *, TrainingJobName):
+        return self.descriptions[TrainingJobName]
+
+
+def _best_model_service(*, descriptions, objects, profile=None):
+    config = AwsTrainingConfig(
+        dataset_s3_uri="s3://datasets/data.zip",
+        checkpoint_s3_uri="s3://checkpoints",
+        instance_type="ml.g4dn.xlarge",
+        training=TrainObjectDetectionRequest(
+            provider="libreyolo",
+            model="yolo9-s-drax-b5",
+        ),
+        region="ap-southeast-1",
+        profile=profile,
+        resource_prefix="mlx-od-visdrone",
+    )
+    service = object.__new__(SageMakerTrainingService)
+    service.config = config
+    service.region = "ap-southeast-1"
+    service.s3 = _FakeBestModelS3(objects)
+    service.sagemaker = _FakeBestModelSageMaker(descriptions)
+    service._client_error = _FakeAwsClientError
+    service._boto_error = _FakeAwsBotoError
+    return service
+
+
+def _run_artifact_objects(
+    run_id,
+    *,
+    model="yolo9-s-drax-b5",
+    dataset_s3_uri="s3://datasets/data.zip",
+    include_best=True,
+):
+    base_key = f"mlx-od-visdrone/runs/{run_id}"
+    spec_uri = f"s3://checkpoints/{base_key}/run-spec.json"
+    values = {
+        ("checkpoints", f"{base_key}/run-spec.json"): {
+            "run_id": run_id,
+            "run_base_s3_uri": f"s3://checkpoints/{base_key}",
+            "dataset_s3_uri": dataset_s3_uri,
+            "checkpoint_base_s3_uri": "s3://checkpoints",
+            "resource_prefix": "mlx-od-visdrone",
+            "training": {"provider": "libreyolo", "model": model},
+        },
+    }
+    if include_best:
+        values.update({
+            ("checkpoints", f"{base_key}/recovery/best.json"): {
+                "provider": "libreyolo",
+                "checkpoint_sha256": "a" * 64,
+            },
+            ("checkpoints", f"{base_key}/recovery/best.pt"): {
+                "ContentLength": 123456,
+                "LastModified": datetime(2026, 8, 27, tzinfo=timezone.utc),
+            },
+            ("checkpoints", f"{base_key}/recovery/current.json"): {
+                "epoch": 100,
+            },
+        })
+    return spec_uri, values
+
+
+def test_best_model_locator_returns_newest_completed_downloadable_match() -> None:
+    missing_id = "1" * 32
+    selected_id = "2" * 32
+    unrelated_id = "3" * 32
+    unrelated_dataset_id = "7" * 32
+    missing_spec, missing_objects = _run_artifact_objects(missing_id, include_best=False)
+    selected_spec, selected_objects = _run_artifact_objects(selected_id)
+    unrelated_spec, unrelated_objects = _run_artifact_objects(
+        unrelated_id,
+        model="yolo9-t",
+    )
+    unrelated_dataset_spec, unrelated_dataset_objects = _run_artifact_objects(
+        unrelated_dataset_id,
+        dataset_s3_uri="s3://datasets/other.zip",
+    )
+    descriptions = {
+        "newest-without-best": {
+            "TrainingJobStatus": "Completed",
+            "HyperParameters": {
+                "mlx_run_id": missing_id,
+                "mlx_run_spec_s3_uri": missing_spec,
+            },
+        },
+        "unrelated-model": {
+            "TrainingJobStatus": "Completed",
+            "HyperParameters": {
+                "mlx_run_id": unrelated_id,
+                "mlx_run_spec_s3_uri": unrelated_spec,
+            },
+        },
+        "unrelated-dataset": {
+            "TrainingJobStatus": "Completed",
+            "HyperParameters": {
+                "mlx_run_id": unrelated_dataset_id,
+                "mlx_run_spec_s3_uri": unrelated_dataset_spec,
+            },
+        },
+        "selected": {
+            "TrainingJobStatus": "Completed",
+            "HyperParameters": {
+                "mlx_run_id": selected_id,
+                "mlx_run_spec_s3_uri": selected_spec,
+            },
+        },
+    }
+    service = _best_model_service(
+        descriptions=descriptions,
+        objects={
+            **missing_objects,
+            **selected_objects,
+            **unrelated_objects,
+            **unrelated_dataset_objects,
+        },
+        profile="mlx-training",
+    )
+
+    result = LocateBestAwsObjectDetectionModel(service).execute()
+
+    assert result.job_name == "selected"
+    assert result.run_id == selected_id
+    assert result.completed_epoch == 100
+    assert result.size_bytes == 123456
+    assert result.sha256 == "a" * 64
+    assert result.best_model_s3_uri.endswith(f"/{selected_id}/recovery/best.pt")
+    assert result.download_command.endswith(
+        "--region ap-southeast-1 --profile mlx-training"
+    )
+    assert service.sagemaker.paginator.arguments == {
+        "StatusEquals": "Completed",
+        "NameContains": "mlx-od-visdrone",
+        "SortBy": "CreationTime",
+        "SortOrder": "Descending",
+    }
+
+
+def test_best_model_locator_reports_matching_runs_without_valid_best() -> None:
+    run_id = "4" * 32
+    spec_uri, objects = _run_artifact_objects(run_id, include_best=False)
+    service = _best_model_service(
+        descriptions={
+            "completed": {
+                "TrainingJobStatus": "Completed",
+                "HyperParameters": {
+                    "mlx_run_id": run_id,
+                    "mlx_run_spec_s3_uri": spec_uri,
+                },
+            }
+        },
+        objects=objects,
+    )
+
+    with pytest.raises(MLXUserError, match="none has a valid downloadable"):
+        service.locate_best_model()
+
+
+def test_best_model_locator_reports_no_completed_matching_run() -> None:
+    service = _best_model_service(
+        descriptions={
+            "unmanaged": {
+                "TrainingJobStatus": "Completed",
+                "HyperParameters": {},
+            }
+        },
+        objects={},
+    )
+
+    with pytest.raises(MLXUserError, match="No completed AWS object-detection run"):
+        service.locate_best_model()
+
+
+def test_best_model_locator_translates_aws_listing_failures() -> None:
+    service = _best_model_service(descriptions={}, objects={})
+
+    class FailingSageMaker:
+        def get_paginator(self, name):
+            raise _FakeAwsBotoError("unavailable")
+
+    service.sagemaker = FailingSageMaker()
+
+    with pytest.raises(MLXUserError, match="AWS best-model lookup failed"):
+        service.locate_best_model()
+
+
+def test_best_model_action_does_not_require_job_name(monkeypatch) -> None:
+    location = AwsBestModelLocation(
+        job_name="job",
+        run_id="5" * 32,
+        provider="libreyolo",
+        model="yolo9-s-drax-b5",
+        completed_epoch=100,
+        best_model_s3_uri="s3://checkpoints/run/recovery/best.pt",
+        size_bytes=123,
+        last_modified=None,
+        sha256="b" * 64,
+        download_command="aws s3 cp source target",
+    )
+
+    class FakeService:
+        def __init__(self, config):
+            self.config = config
+
+        def locate_best_model(self):
+            return location
+
+    rendered = []
+    monkeypatch.setattr(aws_detection_runner, "load_aws_training_config", lambda *_: "config")
+    monkeypatch.setattr(aws_detection_runner, "SageMakerTrainingService", FakeService)
+    monkeypatch.setattr(
+        aws_detection_runner,
+        "render_aws_result",
+        lambda value, **_: rendered.append(value),
+    )
+
+    result = aws_detection_runner.run_aws_object_detection(
+        {"action": "best-model", "config_path": "aws.yaml"}
+    )
+
+    assert result is location
+    assert rendered == [location]
+
+
+def test_best_model_location_renders_machine_readable_json(capsys) -> None:
+    location = AwsBestModelLocation(
+        job_name="job",
+        run_id="6" * 32,
+        provider="libreyolo",
+        model="yolo9-s-drax-b5",
+        completed_epoch=100,
+        best_model_s3_uri="s3://checkpoints/run/recovery/best.pt",
+        size_bytes=123,
+        last_modified="2026-08-27T00:00:00+00:00",
+        sha256="c" * 64,
+        download_command="aws s3 cp source target",
+    )
+
+    render_aws_result(location, output_format="json")
+
+    assert json.loads(capsys.readouterr().out) == location.to_dict()
 
 
 def test_status_translation_is_independent_of_aws_clients() -> None:

@@ -129,6 +129,7 @@ def test_mode_descriptors_supply_defaults_and_alias_metadata() -> None:
     assert canonical is alias
     assert canonical.default_action == "ls-models"
     assert "benchmark" in canonical.actions
+    assert "best-model" in resolve_mode_descriptor("object_detection").actions
 
 
 def test_cli_applies_mode_default_before_dispatch_and_emits_clean_json(

@@ -102,7 +102,7 @@ Available CLI modes are:
 
 | Mode | Actions |
 | --- | --- |
-| `object_detection` | `train`, `benchmark`, AWS `resume`/`status`/`stop`, `infer-camera`, `infer-video`, `convert`, `ls-models` |
+| `object_detection` | `train`, `benchmark`, AWS `best-model`/`resume`/`status`/`stop`, `infer-camera`, `infer-video`, `convert`, `ls-models` |
 | `track` | `run`, `export-mot`, `ls-trackers` |
 | `image_classification` | `train`, `test`, `benchmark`, AWS `resume`/`status`/`stop`, `infer-image`, `cam`, `build-dataset`, `ls-models` |
 | `video_anomaly_detection` | `train`, `benchmark`, `infer-video`, `ls-models` |

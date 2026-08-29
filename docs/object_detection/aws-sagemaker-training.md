@@ -353,6 +353,19 @@ Status includes the SageMaker primary/secondary state, last recoverable epoch, p
 expected finish time, interruption count, training and billable seconds, approximate Spot savings,
 failure reason, and artifact locations. ETA appears after recoverable epoch metrics exist.
 
+Locate the best downloadable checkpoint using only the original YAML configuration:
+
+```bash
+python -m mlx --mode object-detection --platform aws --action best-model \
+    --config ./aws-training.yaml --profile mlx-training
+```
+
+No `--job-name` is required. MLX scans completed jobs newest-first and returns the first valid
+`recovery/best.pt` whose run manifest matches the YAML dataset, checkpoint base, resource prefix,
+provider, and model. Table output includes the S3 URI, checkpoint size, completed epoch, recorded
+SHA-256, and a ready-to-run `aws s3 cp` command. Use `--format json` for the same fields as a JSON
+object. This action only reports the location; it does not download the model.
+
 Stop and resume later using the original job name:
 
 ```bash

@@ -88,7 +88,7 @@ The primary workflow commands are:
 | Image classification | `TrainImageClassificationModel`, `SmokeTestImageClassificationModel`, `BenchmarkImageClassification`, `InferImageClassification`, `GenerateImageClassificationCams`, `BuildImageClassificationDataset`, `ListImageClassificationModels`, AWS submit/status/stop/resume commands |
 | Segmentation | `TrainSegmentationModel`, `SmokeTestSegmentationModel`, `BenchmarkSegmentation`, `InferSegmentationImage`, `RunSegmentationStreamInference`, `BuildSegmentationDataset`, `ListSegmentationModels` |
 | Video anomaly detection | `TrainVideoAnomalyModel`, `BenchmarkVideoAnomalyModel`, `InferVideoAnomaly`, `ListVideoAnomalyModels` |
-| Object detection | `TrainObjectDetectionModel`, `BenchmarkObjectDetectionModel`, `CreateObjectDetector`, `ConvertObjectDetectionModel`, `ListObjectDetectionModels`, `RunObjectDetectionStream`, AWS submit/status/stop/resume commands |
+| Object detection | `TrainObjectDetectionModel`, `BenchmarkObjectDetectionModel`, `CreateObjectDetector`, `ConvertObjectDetectionModel`, `ListObjectDetectionModels`, `RunObjectDetectionStream`, AWS submit/status/stop/resume and best-model locator commands |
 | Tracking | `CreateTrackingAlgorithm`, `RunObjectDetectionTrackingCommand`, `RunTrackByDetectionCommand`, `RunTrackingVideo`, `ExportMOTFromClassAwareTracking`, `BenchmarkMOTTracking`, `ExportTrackingReplay` |
 | NLP | `EmbedCsvCommand` (`EmbedCsv` is the legacy path-returning API) |
 
@@ -343,6 +343,13 @@ epoch, optimizer, scaler, EMA, and available scheduler/RNG state; a project-owne
 announces CloudWatch progress after copying and validating a complete checkpoint into the
 inactive recovery slot. If the newest slot is corrupt, the prior slot is used. Work from an
 incomplete interrupted epoch may be repeated.
+
+`LocateBestAwsObjectDetectionModel` resolves a downloadable best checkpoint from the AWS training
+YAML without requiring a job name. The mode-owned service scans completed MLX SageMaker jobs in
+newest-first order, matches immutable run manifests against the configured resource prefix,
+dataset, checkpoint base, provider, and model, and validates the `recovery/best.json` metadata and
+`best.pt` object before returning a structured S3 location. It does not download the model or use
+the SageMaker `model.tar.gz`, whose selected packaged checkpoint may differ from `best.pt`.
 
 When `training.validate_after_training` is enabled, the training container runs the neutral
 benchmark against `validation_split` after selecting the checkpoint. SageMaker stages the common

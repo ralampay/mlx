@@ -69,9 +69,12 @@ def _list_models(config: dict[str, Any]):
 
 def _train(config: dict[str, Any]):
     explicit = set(config.get("_explicit_options") or ())
+    request_config = dict(config)
+    if request_config.get("dataset_s3_uri") and "dataset_path" not in explicit:
+        request_config["dataset_path"] = ""
     request = TrainVideoAnomalyRequest.from_config(
         {
-            **config,
+            **request_config,
             "backbone_mode_explicit": "backbone_mode" in explicit,
             "temporal_options_explicit": bool(
                 explicit

@@ -767,6 +767,36 @@ def test_train_composition_normalizes_cli_explicitness_into_typed_request(
     assert captured["request"].temporal_options_explicit is True
 
 
+def test_train_composition_removes_implicit_local_dataset_for_s3(
+    monkeypatch, tmp_path
+) -> None:
+    from mlx.modes.video_anomaly_detection import runner
+
+    captured = {}
+
+    class FakeDatasetSourceTraining:
+        def __init__(self, request, **_kwargs):
+            captured["request"] = request
+
+        def execute(self):
+            return "ok"
+
+    monkeypatch.setattr(runner, "TrainWithDatasetSource", FakeDatasetSourceTraining)
+    result = runner._train(
+        {
+            "model": "resnet18",
+            "dataset_path": "./tmp/dataset",
+            "dataset_s3_uri": "s3://datasets/avenue.zip",
+            "output_path": str(tmp_path),
+            "_explicit_options": {"dataset_s3_uri"},
+        }
+    )
+
+    assert result == "ok"
+    assert captured["request"].dataset_path == ""
+    assert captured["request"].dataset_s3_uri == "s3://datasets/avenue.zip"
+
+
 def test_video_model_registries_are_read_only_and_extensible() -> None:
     from mlx.modes.video_anomaly_detection.models import TEMPORAL_ENCODERS
     from mlx.modes.video_anomaly_detection.models.temporal import (

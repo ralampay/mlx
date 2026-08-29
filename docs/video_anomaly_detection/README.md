@@ -257,15 +257,32 @@ configuration, device, batch size, threshold, score type, timestamp, and evaluat
 
 ## Video inference
 
-Inference is headless and uses a sliding temporal window over the complete decoded frame:
+Inference uses OpenCV to display the decoded video while applying a sliding temporal window:
 
 ```bash
 python -m mlx --mode video_anomaly_detection --action infer-video \
   --model-path ./model.pth --file-path ./sample.mp4 --output ./inference
 ```
 
-It writes `predictions.jsonl` and `predictions.csv` with start/end frame and time, sampled frame
-indices, anomaly score, stored threshold, and anomaly decision. No object detector is used.
+The OpenCV window labels each displayed frame `NORMAL` or `ANOMALY` using the temporal window that
+ends at that frame, and shows its score and the stored threshold. The first frames display
+`WARMING UP` until the model has enough temporal context. Press `q` or Escape to stop. Use
+`--no-display` for headless, batched processing; `--format json` is also always headless.
+
+After processing, the command prints a video-level `Anomaly detected` or `No anomaly detected`
+verdict. A video is anomalous when at least one complete temporal window has a score strictly
+greater than the checkpoint's stored threshold. It writes `summary.json` with that verdict, the
+number of scored and anomalous windows, display completion state, and the maximum score. It also
+writes `predictions.jsonl` and `predictions.csv` with start/end frame and time, sampled frame
+indices, anomaly score, stored threshold, and each window's anomaly decision. No object detector
+is used.
+
+The checkpoint metadata is authoritative for the backbone, input dimensions, clip length, frame
+stride, preprocessing, and threshold. `--model` is optional for inference; when explicitly given,
+it must match the checkpoint and acts as a compatibility check.
+
+For a machine-readable result, add `--format json`. The returned object includes the aggregate
+summary and the full prediction timeline.
 
 The core fields in each JSONL record follow this shape (records also retain sampled frame indices):
 
@@ -279,6 +296,15 @@ The core fields in each JSONL record follow this shape (records also retain samp
   "threshold": 0.73,
   "is_anomaly": true
 }
+```
+
+The inference artifact directory has this shape:
+
+```text
+<output>/
+├── summary.json
+├── predictions.jsonl
+└── predictions.csv
 ```
 
 ## Interpretation and limitations

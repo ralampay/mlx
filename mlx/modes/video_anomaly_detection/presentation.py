@@ -1,8 +1,10 @@
 from __future__ import annotations
 
-from collections.abc import Callable
+from collections.abc import Callable, Mapping
 from typing import Any, Protocol
 
+import cv2
+import numpy as np
 from rich.progress import (
     BarColumn,
     MofNCompleteColumn,
@@ -18,6 +20,70 @@ from rich.table import Table
 from mlx.core.commands import WorkflowEvent
 from mlx.core.presentation import RichInfrastructureEventRenderer
 from mlx.core.ui import console, print_info, print_success, print_warning
+
+
+def annotate_video_anomaly_frame(
+    frame: np.ndarray,
+    prediction: Mapping[str, Any] | None,
+    frames_buffered: int,
+    frames_required: int,
+) -> np.ndarray:
+    """Overlay the decision for the temporal window ending at this frame."""
+
+    annotated = frame.copy()
+    if prediction is None:
+        color = (0, 191, 255)
+        lines = (
+            "WARMING UP",
+            f"Temporal context: {frames_buffered}/{frames_required} frames",
+        )
+    else:
+        is_anomaly = bool(prediction["is_anomaly"])
+        color = (0, 0, 255) if is_anomaly else (0, 180, 0)
+        lines = (
+            "ANOMALY" if is_anomaly else "NORMAL",
+            (
+                f"Score: {float(prediction['anomaly_score']):.4f} | "
+                f"Threshold: {float(prediction['threshold']):.4f}"
+            ),
+        )
+    _draw_status_panel(annotated, lines=lines, color=color)
+    return annotated
+
+
+def _draw_status_panel(
+    frame: np.ndarray,
+    *,
+    lines: tuple[str, ...],
+    color: tuple[int, int, int],
+) -> None:
+    font = cv2.FONT_HERSHEY_SIMPLEX
+    scales = (0.8, 0.55)
+    thicknesses = (2, 1)
+    measurements = [
+        cv2.getTextSize(line, font, scales[index], thicknesses[index])
+        for index, line in enumerate(lines)
+    ]
+    panel_width = min(
+        max(size[0][0] for size in measurements) + 24,
+        frame.shape[1],
+    )
+    panel_height = min(68, frame.shape[0])
+    overlay = frame.copy()
+    cv2.rectangle(overlay, (0, 0), (panel_width, panel_height), (0, 0, 0), -1)
+    cv2.addWeighted(overlay, 0.65, frame, 0.35, 0, frame)
+    for index, line in enumerate(lines):
+        y = min(27 + index * 27, max(frame.shape[0] - 4, 0))
+        cv2.putText(
+            frame,
+            line,
+            (10, y),
+            font,
+            scales[index],
+            color,
+            thicknesses[index],
+            cv2.LINE_AA,
+        )
 
 
 class _ProgressDisplay(Protocol):
@@ -168,5 +234,6 @@ def display_video_anomaly_models(summaries) -> None:
 __all__ = [
     "RichVideoAnomalyReporter",
     "RichVideoAnomalyTrainingProgress",
+    "annotate_video_anomaly_frame",
     "display_video_anomaly_models",
 ]

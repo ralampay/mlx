@@ -58,7 +58,7 @@ mlx/
 │   ├── presentation.py          shared Rich rendering for core infrastructure events
 │   ├── image_backbones.py        neutral penultimate-image-feature contracts
 │   ├── deep_svdd.py              shared Deep-SVDD score/calibration semantics
-│   └── streaming.py              neutral frame-source contracts and OpenCV decoder
+│   └── streaming.py              neutral frame I/O contracts and lazy OpenCV adapters
 └── modes/
     ├── image_classification/     classification data, models, OOD, training, inference, CAM
     │   └── aws/                  SageMaker Spot lifecycle and native checkpoint recovery
@@ -89,7 +89,7 @@ The primary workflow commands are:
 | Image classification | `TrainImageClassificationModel`, `SmokeTestImageClassificationModel`, `BenchmarkImageClassification`, `InferImageClassification`, `GenerateImageClassificationCams`, `BuildImageClassificationDataset`, `ListImageClassificationModels`, AWS submit/status/stop/resume commands |
 | Segmentation | `TrainSegmentationModel`, `SmokeTestSegmentationModel`, `BenchmarkSegmentation`, `InferSegmentationImage`, `RunSegmentationStreamInference`, `BuildSegmentationDataset`, `ListSegmentationModels` |
 | Video anomaly detection | `TrainVideoAnomalyModel`, `BenchmarkVideoAnomalyModel`, `InferVideoAnomaly`, `ListVideoAnomalyModels`, AWS all-model submit/status/resume commands |
-| Object detection | `TrainObjectDetectionModel`, `BenchmarkObjectDetectionModel`, `CreateObjectDetector`, `ConvertObjectDetectionModel`, `ListObjectDetectionModels`, `RunObjectDetectionStream`, AWS submit/status/stop/resume commands |
+| Object detection | `TrainObjectDetectionModel`, `BenchmarkObjectDetectionModel`, `CreateObjectDetector`, `ConvertObjectDetectionModel`, `ListObjectDetectionModels`, `RunObjectDetectionStream`, AWS submit/status/stop/resume and best-model locator commands |
 | Tracking | `CreateTrackingAlgorithm`, `RunObjectDetectionTrackingCommand`, `RunTrackByDetectionCommand`, `RunTrackingVideo`, `ExportMOTFromClassAwareTracking`, `BenchmarkMOTTracking`, `ExportTrackingReplay` |
 | NLP | `EmbedCsvCommand` (`EmbedCsv` is the legacy path-returning API) |
 
@@ -238,14 +238,26 @@ contract.
 ## Video Anomaly Detection
 
 `video_anomaly_detection` is a first-class normal-only workflow. Its runner constructs typed
-requests and presentation adapters; commands own training, benchmarking, listing, and headless
-video inference. Mode-owned data, backbone, metric, and artifact modules remain independent of
+requests and presentation adapters; commands own training, benchmarking, listing, and video
+inference. Mode-owned data, backbone, metric, and artifact modules remain independent of
 CLI state. The default tensor flow is:
 
 ```text
 [B,T,C,H,W] -> [B,C,T,H,W] -> family-aware inflated 3D backbone
               -> global 3D pool -> [B,D] -> SVDD projection -> [B]
 ```
+
+`InferVideoAnomaly` treats deployment-checkpoint metadata as authoritative and only validates a
+model alias when the caller explicitly supplies one. It decodes the requested video through the
+shared frame-source interface, scores complete sliding windows, and optionally sends annotated
+frames through an injected shared frame sink. The mode-owned renderer labels the temporal window
+ending at each frame without coupling the command to OpenCV presentation calls. The command
+returns a `VideoAnomalyInferenceResult` containing a video-level verdict, aggregate score/count
+fields, display completion state, artifact paths, and the complete per-window timeline. Any window
+whose score is strictly greater than the stored normal-validation threshold marks the video
+anomalous. Display mode scores each complete window immediately so its ending frame receives the
+corresponding verdict; headless mode retains batching. The command writes the same summary to
+`summary.json` and retains detailed JSONL and CSV predictions; reporters own terminal rendering.
 
 The image-classification registry remains authoritative for compatible aliases and 2D source
 weights. Cross-mode access is isolated in
@@ -332,6 +344,13 @@ epoch, optimizer, scaler, EMA, and available scheduler/RNG state; a project-owne
 announces CloudWatch progress after copying and validating a complete checkpoint into the
 inactive recovery slot. If the newest slot is corrupt, the prior slot is used. Work from an
 incomplete interrupted epoch may be repeated.
+
+`LocateBestAwsObjectDetectionModel` resolves a downloadable best checkpoint from the AWS training
+YAML without requiring a job name. The mode-owned service scans completed MLX SageMaker jobs in
+newest-first order, matches immutable run manifests against the configured resource prefix,
+dataset, checkpoint base, provider, and model, and validates the `recovery/best.json` metadata and
+`best.pt` object before returning a structured S3 location. It does not download the model or use
+the SageMaker `model.tar.gz`, whose selected packaged checkpoint may differ from `best.pt`.
 
 When `training.validate_after_training` is enabled, the training container runs the neutral
 benchmark against `validation_split` after selecting the checkpoint. SageMaker stages the common

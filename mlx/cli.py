@@ -267,6 +267,7 @@ def _render_help() -> None:
     usage.add_row("python -m mlx --mode object_detection --action train --dataset coco8 --model yolo26")
     usage.add_row("python -m mlx --mode object_detection --action benchmark --dataset ./dataset --model-path ./best.pt --split test --output ./benchmark")
     usage.add_row("python -m mlx --mode object_detection --platform aws --action train --config ./aws-training.yaml")
+    usage.add_row("python -m mlx --mode object_detection --platform aws --action best-model --config ./aws-training.yaml")
     usage.add_row("python -m mlx --mode object_detection --platform aws --action status --config ./aws-training.yaml --job-name JOB_NAME --watch")
     usage.add_row("python -m mlx --mode object_detection --platform aws --action resume --config ./aws-training.yaml --job-name JOB_NAME")
     usage.add_row("python -m mlx --mode object_detection --action train --dataset coco8 --model draxnet-yolo26 --output ./runs/draxnet")

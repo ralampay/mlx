@@ -5,6 +5,7 @@ from typing import Any
 from mlx.core.exceptions import MLXUserError
 from mlx.modes.object_detection.aws.commands import (
     GetAwsObjectDetectionTrainingStatus,
+    LocateBestAwsObjectDetectionModel,
     ResumeAwsObjectDetectionTraining,
     StopAwsObjectDetectionTraining,
     SubmitAwsObjectDetectionTraining,
@@ -26,6 +27,8 @@ def run_aws_object_detection(config: dict[str, Any]) -> Any:
 
     if action == "train":
         result = SubmitAwsObjectDetectionTraining(service).execute()
+    elif action == "best-model":
+        result = LocateBestAwsObjectDetectionModel(service).execute()
     elif action == "resume":
         job_name = _require_job_name(config, action)
         result = ResumeAwsObjectDetectionTraining(service, job_name).execute()
@@ -53,7 +56,7 @@ def run_aws_object_detection(config: dict[str, Any]) -> Any:
     else:
         raise MLXUserError(
             f"Unsupported AWS object-detection action '{action}'. "
-            "Available actions: resume, status, stop, train."
+            "Available actions: best-model, resume, status, stop, train."
         )
 
     render_aws_result(result, output_format=output_format)

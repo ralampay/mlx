@@ -15,6 +15,12 @@ class FrameSource(Protocol):
     def release(self) -> None: ...
 
 
+class FrameSink(Protocol):
+    def show(self, frame: np.ndarray) -> bool: ...
+
+    def close(self) -> None: ...
+
+
 class NullFrameSink:
     """Headless sink that consumes rendered frames without terminal or GUI output."""
 
@@ -23,6 +29,29 @@ class NullFrameSink:
 
     def close(self) -> None:
         return None
+
+
+class OpenCVFrameSink:
+    """Shared lazy OpenCV display that stops on q or Escape."""
+
+    def __init__(self, *, title: str, delay_ms: int) -> None:
+        try:
+            import cv2
+        except ImportError as exc:
+            raise MLXUserError(
+                "OpenCV is required for stream display. Install opencv-python and try again."
+            ) from exc
+        self._cv2 = cv2
+        self.title = title
+        self.delay_ms = delay_ms
+
+    def show(self, frame: np.ndarray) -> bool:
+        self._cv2.imshow(self.title, frame)
+        key = self._cv2.waitKey(self.delay_ms) & 0xFF
+        return key not in (ord("q"), 27)
+
+    def close(self) -> None:
+        self._cv2.destroyAllWindows()
 
 
 @dataclass(frozen=True, slots=True)
@@ -109,9 +138,11 @@ def _positive_float_or_none(value: float) -> float | None:
 
 
 __all__ = [
+    "FrameSink",
     "FrameSource",
     "FrameSourceMetadata",
     "MetadataFrameSource",
     "NullFrameSink",
+    "OpenCVFrameSink",
     "OpenCVFrameSource",
 ]

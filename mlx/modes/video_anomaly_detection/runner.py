@@ -7,6 +7,7 @@ from mlx.core.datasets import (
     validate_dataset_source_options,
 )
 from mlx.core.commands import NullWorkflowReporter
+from mlx.core.streaming import OpenCVFrameSink
 from mlx.core.exceptions import MLXUserError
 from mlx.modes.video_anomaly_detection.commands import (
     BenchmarkVideoAnomalyModel,
@@ -16,6 +17,7 @@ from mlx.modes.video_anomaly_detection.commands import (
 )
 from mlx.modes.video_anomaly_detection.presentation import (
     RichVideoAnomalyReporter,
+    annotate_video_anomaly_frame,
     display_video_anomaly_models,
 )
 from mlx.modes.video_anomaly_detection.requests import (
@@ -103,15 +105,33 @@ def _train(config: dict[str, Any]):
     ).execute()
 
 
+def _infer_video(config: dict[str, Any]):
+    request_config = dict(config)
+    if "model" not in set(config.get("_explicit_options") or ()):
+        request_config["model"] = None
+    display = bool(config.get("display", True)) and config.get("output_format") != "json"
+    frame_sink = (
+        OpenCVFrameSink(
+            title="MLX Video Anomaly Detection",
+            delay_ms=max(int(config.get("window_delay") or 10), 1),
+        )
+        if display
+        else None
+    )
+    return InferVideoAnomaly(
+        InferVideoAnomalyRequest.from_config(request_config),
+        reporter=_reporter(config),
+        frame_sink=frame_sink,
+        frame_renderer=annotate_video_anomaly_frame if display else None,
+    ).execute()
+
+
 ACTION_HANDLERS = {
     "benchmark": lambda config: BenchmarkVideoAnomalyModel(
         BenchmarkVideoAnomalyRequest.from_config(config),
         reporter=_reporter(config),
     ).execute(),
-    "infer-video": lambda config: InferVideoAnomaly(
-        InferVideoAnomalyRequest.from_config(config),
-        reporter=_reporter(config),
-    ).execute(),
+    "infer-video": _infer_video,
     "ls-models": _list_models,
     "train": _train,
 }

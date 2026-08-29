@@ -3,6 +3,7 @@ from __future__ import annotations
 import hashlib
 import json
 import re
+import shlex
 import time
 from datetime import datetime, timezone
 from pathlib import Path
@@ -15,6 +16,7 @@ from mlx.modes.object_detection.aws.clients import AwsClientBundle
 from mlx.modes.object_detection.aws.config import AwsTrainingConfig
 from mlx.modes.object_detection.aws.image import PublishSageMakerImage, source_digest
 from mlx.modes.object_detection.aws.models import (
+    AwsBestModelLocation,
     AwsInfrastructure,
     AwsTrainingStatus,
     AwsTrainingStopResult,
@@ -596,6 +598,158 @@ class SageMakerTrainingService:
             description,
             latest_metric=self._latest_metric,
             console_url=self._console_url(job_name),
+        )
+
+    def locate_best_model(self) -> AwsBestModelLocation:
+        """Find the newest completed matching run with a downloadable best checkpoint."""
+        matching_jobs = 0
+        try:
+            paginator = self.sagemaker.get_paginator("list_training_jobs")
+            pages = paginator.paginate(
+                StatusEquals="Completed",
+                NameContains=_safe_job_component(self.config.resource_prefix)[:32],
+                SortBy="CreationTime",
+                SortOrder="Descending",
+            )
+            for page in pages:
+                for summary in page.get("TrainingJobSummaries", []):
+                    job_name = str(summary.get("TrainingJobName") or "")
+                    if not job_name:
+                        continue
+                    description = self._describe(job_name)
+                    candidate = self._matching_run(description)
+                    if candidate is None:
+                        continue
+                    matching_jobs += 1
+                    run_id, run_base = candidate
+                    result = self._best_model_location(
+                        job_name=job_name,
+                        run_id=run_id,
+                        run_base=run_base,
+                    )
+                    if result is not None:
+                        return result
+        except MLXUserError:
+            raise
+        except (self._client_error, self._boto_error) as exc:
+            raise self._translate("best-model lookup", exc) from exc
+
+        requested = (
+            f"provider '{self.config.training.provider}' and model "
+            f"'{self.config.training.model}' under "
+            f"{_join_s3(self.config.checkpoint_s3_uri, self.config.resource_prefix, 'runs')}"
+        )
+        if matching_jobs:
+            raise MLXUserError(
+                f"Completed AWS object-detection runs match {requested}, but none has a valid "
+                "downloadable recovery/best.pt checkpoint."
+            )
+        raise MLXUserError(
+            f"No completed AWS object-detection run matches {requested}."
+        )
+
+    def _matching_run(self, description: Mapping[str, Any]) -> Optional[tuple[str, str]]:
+        hyperparameters = description.get("HyperParameters", {})
+        if not isinstance(hyperparameters, Mapping):
+            return None
+        run_id = str(hyperparameters.get("mlx_run_id") or "")
+        run_spec_uri = str(hyperparameters.get("mlx_run_spec_s3_uri") or "")
+        if not run_id or not re.fullmatch(r"[a-f0-9]{32}", run_id):
+            return None
+        expected_run_base = _join_s3(
+            self.config.checkpoint_s3_uri,
+            self.config.resource_prefix,
+            "runs",
+            run_id,
+        )
+        if run_spec_uri != _join_s3(expected_run_base, "run-spec.json"):
+            return None
+        spec = self._get_optional_json(run_spec_uri)
+        if spec is None or spec.get("run_id") != run_id:
+            return None
+        training = spec.get("training")
+        if not isinstance(training, Mapping):
+            return None
+        expected_values = (
+            (spec.get("run_base_s3_uri"), expected_run_base),
+            (spec.get("dataset_s3_uri"), self.config.dataset_s3_uri),
+            (spec.get("checkpoint_base_s3_uri"), self.config.checkpoint_s3_uri),
+            (spec.get("resource_prefix"), self.config.resource_prefix),
+            (training.get("provider"), self.config.training.provider),
+            (training.get("model"), self.config.training.model),
+        )
+        if any(actual != expected for actual, expected in expected_values):
+            return None
+        return run_id, expected_run_base
+
+    def _best_model_location(
+        self,
+        *,
+        job_name: str,
+        run_id: str,
+        run_base: str,
+    ) -> Optional[AwsBestModelLocation]:
+        recovery_uri = _join_s3(run_base, "recovery")
+        metadata = self._get_optional_json(_join_s3(recovery_uri, "best.json"))
+        if metadata is None or metadata.get("provider") != self.config.training.provider:
+            return None
+        sha256 = metadata.get("checkpoint_sha256")
+        if not isinstance(sha256, str) or re.fullmatch(r"[a-f0-9]{64}", sha256) is None:
+            return None
+
+        best_model_uri = _join_s3(recovery_uri, "best.pt")
+        bucket, key = _parse_s3_uri(best_model_uri)
+        try:
+            model_object = self.s3.head_object(Bucket=bucket, Key=key)
+        except self._client_error as exc:
+            if exc.response.get("Error", {}).get("Code") in {
+                "404",
+                "NoSuchKey",
+                "NotFound",
+            }:
+                return None
+            raise self._translate("best-model artifact lookup", exc) from exc
+        except self._boto_error as exc:
+            raise self._translate("best-model artifact lookup", exc) from exc
+        size_bytes = int(model_object.get("ContentLength", 0))
+        if size_bytes <= 0:
+            return None
+
+        completed_epoch = None
+        current = self._get_optional_json(_join_s3(recovery_uri, "current.json"))
+        if current is not None:
+            try:
+                completed_epoch = int(current["epoch"])
+            except (KeyError, TypeError, ValueError):
+                completed_epoch = None
+        last_modified = model_object.get("LastModified")
+        if hasattr(last_modified, "isoformat"):
+            last_modified = last_modified.isoformat()
+        elif last_modified is not None:
+            last_modified = str(last_modified)
+        target_name = f"{_safe_job_component(self.config.training.model).lower()}-best.pt"
+        command_parts = [
+            "aws",
+            "s3",
+            "cp",
+            best_model_uri,
+            f"./{target_name}",
+            "--region",
+            self.region,
+        ]
+        if self.config.profile:
+            command_parts.extend(("--profile", self.config.profile))
+        return AwsBestModelLocation(
+            job_name=job_name,
+            run_id=run_id,
+            provider=self.config.training.provider,
+            model=self.config.training.model,
+            completed_epoch=completed_epoch,
+            best_model_s3_uri=best_model_uri,
+            size_bytes=size_bytes,
+            last_modified=last_modified,
+            sha256=sha256,
+            download_command=" ".join(shlex.quote(part) for part in command_parts),
         )
 
     def stop(self, job_name: str, *, config_path: str) -> AwsTrainingStopResult:

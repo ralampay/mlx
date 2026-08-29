@@ -4,6 +4,7 @@ from mlx.modes.video_anomaly_detection.commands import (
     ListVideoAnomalyModels,
     TrainVideoAnomalyModel,
 )
+from mlx.modes.video_anomaly_detection.inference import VideoAnomalyInferenceResult
 from mlx.modes.video_anomaly_detection.models import VideoAnomaly3DModel, VideoAnomalyModel
 from mlx.modes.video_anomaly_detection.requests import (
     BenchmarkVideoAnomalyRequest,
@@ -17,6 +18,7 @@ __all__ = [
     "BenchmarkVideoAnomalyRequest",
     "InferVideoAnomaly",
     "InferVideoAnomalyRequest",
+    "VideoAnomalyInferenceResult",
     "ListVideoAnomalyModels",
     "ListVideoAnomalyModelsRequest",
     "TrainVideoAnomalyModel",

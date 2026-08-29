@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import csv
 import gc
+import json
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -14,8 +15,10 @@ from torch.utils.data import Dataset
 
 from mlx.cli import build_parser
 from mlx.cli_routing import MODE_REGISTRY
+from mlx.core.artifacts import json_safe
 from mlx.core.commands import CallbackWorkflowReporter
 from mlx.core.exceptions import MLXUserError
+from mlx.core.streaming import FrameSourceMetadata
 from mlx.modes.image_classification.models import (
     ONE_SHOT_MODEL_NAMES,
     STANDARD_MODEL_NAMES,
@@ -55,6 +58,7 @@ from mlx.modes.video_anomaly_detection.requests import (
 from mlx.modes.video_anomaly_detection.evaluation import BenchmarkVideoAnomalyModel
 from mlx.modes.video_anomaly_detection.inference import InferVideoAnomaly
 from mlx.modes.video_anomaly_detection.list_models import ListVideoAnomalyModels
+from mlx.modes.video_anomaly_detection.presentation import annotate_video_anomaly_frame
 from mlx.modes.video_anomaly_detection.training import TrainVideoAnomalyModel
 
 
@@ -534,8 +538,9 @@ def test_benchmark_uses_stored_threshold_and_writes_research_artifacts(tmp_path)
 
 
 class FakeFrameSource:
-    def __init__(self):
-        self.frames = [np.full((2, 2, 3), value, dtype=np.uint8) for value in range(4)]
+    def __init__(self, values=range(4), *, fps: float | None = 2.0):
+        self.frames = [np.full((2, 2, 3), value, dtype=np.uint8) for value in values]
+        self.fps = fps
         self.released = False
 
     def read(self):
@@ -546,11 +551,29 @@ class FakeFrameSource:
     def release(self):
         self.released = True
 
+    def metadata(self):
+        return FrameSourceMetadata(fps=self.fps, frame_count=len(self.frames))
 
-def test_headless_video_inference_slides_windows_and_writes_jsonl(tmp_path) -> None:
+
+class FakeFrameSink:
+    def __init__(self, *, stop_after: int | None = None):
+        self.frames = []
+        self.stop_after = stop_after
+        self.closed = False
+
+    def show(self, frame):
+        self.frames.append(frame)
+        return self.stop_after is None or len(self.frames) < self.stop_after
+
+    def close(self):
+        self.closed = True
+
+
+def test_headless_video_inference_reports_normal_video_and_writes_artifacts(tmp_path) -> None:
     source = FakeFrameSource()
     output = tmp_path / "inference"
-    records = InferVideoAnomaly(
+    events = []
+    result = InferVideoAnomaly(
         InferVideoAnomalyRequest(
             model_path="unused.pth",
             file_path="unused.mp4",
@@ -560,12 +583,242 @@ def test_headless_video_inference_slides_windows_and_writes_jsonl(tmp_path) -> N
         checkpoint_loader=_fake_checkpoint_loader,
         frame_source=source,
         frame_transform=lambda frame: torch.from_numpy(frame.transpose(2, 0, 1)).float() / 255,
+        reporter=CallbackWorkflowReporter(events.append),
     ).execute()
 
-    assert [(row["start_frame"], row["end_frame"]) for row in records] == [(0, 1), (1, 2), (2, 3)]
+    assert [(row["start_frame"], row["end_frame"]) for row in result.predictions] == [
+        (0, 1),
+        (1, 2),
+        (2, 3),
+    ]
+    assert result.anomaly_detected is False
+    assert result.windows_scored == 3
+    assert result.anomalous_windows == 0
+    assert result.predictions[1]["start_time_seconds"] == pytest.approx(0.5)
     assert source.released is True
     assert (output / "predictions.jsonl").is_file()
     assert (output / "predictions.csv").is_file()
+    assert json.loads((output / "summary.json").read_text(encoding="utf-8")) == result.summary()
+    assert json_safe(result)["predictions"] == list(result.predictions)
+    assert events[-1].level == "success"
+    assert events[-1].message.startswith("No anomaly detected")
+
+
+def test_headless_video_inference_reports_anomaly_when_any_window_exceeds_threshold(
+    tmp_path,
+) -> None:
+    source = FakeFrameSource([0, 255, 255, 0], fps=None)
+    events = []
+    result = InferVideoAnomaly(
+        InferVideoAnomalyRequest(
+            model_path="unused.pth",
+            file_path="sample.mp4",
+            output_path=str(tmp_path / "inference"),
+            batch_size=2,
+        ),
+        checkpoint_loader=_fake_checkpoint_loader,
+        frame_source=source,
+        frame_transform=lambda frame: torch.from_numpy(frame.transpose(2, 0, 1)).float() / 255,
+        reporter=CallbackWorkflowReporter(events.append),
+    ).execute()
+
+    assert result.anomaly_detected is True
+    assert result.anomalous_windows == 1
+    assert result.max_anomaly_score == pytest.approx(1.0)
+    assert [row["is_anomaly"] for row in result.predictions] == [False, True, False]
+    assert all(row["start_time_seconds"] is None for row in result.predictions)
+    assert events[-1].level == "warning"
+    assert events[-1].message.startswith("Anomaly detected")
+
+
+def test_displayed_video_inference_labels_every_frame_and_scores_complete_windows(
+    tmp_path,
+) -> None:
+    source = FakeFrameSource([0, 255, 255, 0])
+    sink = FakeFrameSink()
+    rendered_predictions = []
+
+    def renderer(frame, prediction, frames_buffered, frames_required):
+        rendered_predictions.append(
+            (
+                None if prediction is None else prediction["is_anomaly"],
+                frames_buffered,
+                frames_required,
+            )
+        )
+        return frame.copy()
+
+    result = InferVideoAnomaly(
+        InferVideoAnomalyRequest(
+            model_path="unused.pth",
+            file_path="sample.mp4",
+            output_path=str(tmp_path / "inference"),
+            batch_size=8,
+        ),
+        checkpoint_loader=_fake_checkpoint_loader,
+        frame_source=source,
+        frame_transform=lambda frame: torch.from_numpy(frame.transpose(2, 0, 1)).float() / 255,
+        frame_sink=sink,
+        frame_renderer=renderer,
+    ).execute()
+
+    assert rendered_predictions == [
+        (None, 1, 2),
+        (False, 2, 2),
+        (True, 2, 2),
+        (False, 2, 2),
+    ]
+    assert result.frames_displayed == 4
+    assert result.windows_scored == 3
+    assert result.anomaly_detected is True
+    assert result.stopped_by_user is False
+    assert source.released is True
+    assert sink.closed is True
+
+
+def test_displayed_video_inference_stops_cleanly_during_warmup(tmp_path) -> None:
+    source = FakeFrameSource([1, 2, 3])
+    sink = FakeFrameSink(stop_after=1)
+    result = InferVideoAnomaly(
+        InferVideoAnomalyRequest(
+            model_path="unused.pth",
+            output_path=str(tmp_path),
+        ),
+        checkpoint_loader=_fake_checkpoint_loader,
+        frame_source=source,
+        frame_transform=lambda frame: torch.from_numpy(frame.transpose(2, 0, 1)).float(),
+        frame_sink=sink,
+        frame_renderer=lambda frame, *_args: frame,
+    ).execute()
+
+    assert result.stopped_by_user is True
+    assert result.frames_displayed == 1
+    assert result.windows_scored == 0
+    assert result.max_anomaly_score is None
+    assert source.released is True
+    assert sink.closed is True
+
+
+def test_video_anomaly_frame_annotation_is_colored_and_does_not_mutate_input() -> None:
+    frame = np.zeros((120, 320, 3), dtype=np.uint8)
+    warming = annotate_video_anomaly_frame(frame, None, 3, 16)
+    normal = annotate_video_anomaly_frame(
+        frame,
+        {"is_anomaly": False, "anomaly_score": 0.2, "threshold": 0.5},
+        16,
+        16,
+    )
+    anomaly = annotate_video_anomaly_frame(
+        frame,
+        {"is_anomaly": True, "anomaly_score": 0.8, "threshold": 0.5},
+        16,
+        16,
+    )
+
+    assert np.count_nonzero(warming) > 0
+    assert np.count_nonzero(normal[:, :, 1]) > np.count_nonzero(normal[:, :, 2])
+    assert np.count_nonzero(anomaly[:, :, 2]) > np.count_nonzero(anomaly[:, :, 1])
+    assert np.count_nonzero(frame) == 0
+
+
+def test_video_anomaly_display_requires_sink_and_renderer_together() -> None:
+    with pytest.raises(ValueError, match="both a frame sink and frame renderer"):
+        InferVideoAnomaly(
+            InferVideoAnomalyRequest(model_path="unused.pth"),
+            frame_sink=FakeFrameSink(),
+        )
+
+
+def test_video_inference_uses_video_factory_and_releases_short_source(tmp_path) -> None:
+    source = FakeFrameSource([1])
+    factory_calls = []
+
+    def factory(**kwargs):
+        factory_calls.append(kwargs)
+        return source
+
+    with pytest.raises(MLXUserError, match="at least 2 decoded frames"):
+        InferVideoAnomaly(
+            InferVideoAnomalyRequest(
+                model_path="unused.pth",
+                file_path="sample.mp4",
+                output_path=str(tmp_path),
+            ),
+            checkpoint_loader=_fake_checkpoint_loader,
+            frame_source_factory=factory,
+            frame_transform=lambda frame: torch.from_numpy(frame.transpose(2, 0, 1)).float(),
+        ).execute()
+
+    assert factory_calls == [{"source": "video", "file_path": "sample.mp4"}]
+    assert source.released is True
+
+
+def test_video_inference_rejects_nonfinite_scores_and_releases_source(tmp_path) -> None:
+    class NonFiniteModel(nn.Module):
+        def forward(self, clips):
+            return SimpleNamespace(anomaly_score=torch.full((len(clips),), float("nan")))
+
+    def loader(*_args, **_kwargs):
+        model, checkpoint, stored = _fake_checkpoint_loader(None)
+        return NonFiniteModel(), checkpoint, stored
+
+    source = FakeFrameSource([1, 2])
+    sink = FakeFrameSink()
+    with pytest.raises(MLXUserError, match="non-finite anomaly score"):
+        InferVideoAnomaly(
+            InferVideoAnomalyRequest(
+                model_path="unused.pth",
+                output_path=str(tmp_path),
+            ),
+            checkpoint_loader=loader,
+            frame_source=source,
+            frame_transform=lambda frame: torch.from_numpy(frame.transpose(2, 0, 1)).float(),
+            frame_sink=sink,
+            frame_renderer=lambda frame, *_args: frame,
+        ).execute()
+
+    assert source.released is True
+    assert sink.closed is True
+
+
+@pytest.mark.parametrize("threshold", [None, "invalid", float("nan"), float("inf")])
+def test_video_inference_requires_finite_calibrated_threshold(threshold) -> None:
+    def loader(*_args, **_kwargs):
+        model, checkpoint, stored = _fake_checkpoint_loader(None)
+        checkpoint["svdd_threshold"] = threshold
+        return model, checkpoint, stored
+
+    with pytest.raises(MLXUserError, match="calibrated threshold"):
+        InferVideoAnomaly(
+            InferVideoAnomalyRequest(model_path="unused.pth"),
+            checkpoint_loader=loader,
+            frame_source=FakeFrameSource(),
+        ).execute()
+
+
+def test_video_inference_requires_positive_batch_size() -> None:
+    with pytest.raises(MLXUserError, match="batch size must be a positive integer"):
+        InferVideoAnomaly(
+            InferVideoAnomalyRequest(model_path="unused.pth", batch_size=0),
+            checkpoint_loader=_fake_checkpoint_loader,
+            frame_source=FakeFrameSource(),
+        ).execute()
+
+
+def test_video_inference_releases_source_when_metadata_loading_fails() -> None:
+    class BrokenMetadataSource(FakeFrameSource):
+        def metadata(self):
+            raise MLXUserError("bad metadata")
+
+    source = BrokenMetadataSource()
+    with pytest.raises(MLXUserError, match="bad metadata"):
+        InferVideoAnomaly(
+            InferVideoAnomalyRequest(model_path="unused.pth"),
+            checkpoint_loader=_fake_checkpoint_loader,
+            frame_source=source,
+        ).execute()
+
+    assert source.released is True
 
 
 def test_cli_mode_aliases_and_options() -> None:
@@ -737,6 +990,76 @@ def test_runner_3d_default_legacy_selection_and_conflict(monkeypatch) -> None:
                 "_explicit_options": {"backbone_mode", "temporal_model"},
             }
         )
+
+
+def test_inference_runner_uses_checkpoint_model_unless_model_is_explicit(
+    monkeypatch,
+) -> None:
+    from mlx.modes.video_anomaly_detection import runner
+
+    requests = []
+    inference_options = []
+    sink_options = []
+    sink = FakeFrameSink()
+
+    class FakeOpenCVFrameSink:
+        def __new__(cls, **kwargs):
+            sink_options.append(kwargs)
+            return sink
+
+    class FakeInference:
+        def __init__(self, request, **kwargs):
+            requests.append(request)
+            inference_options.append(kwargs)
+
+        def execute(self):
+            return "ok"
+
+    monkeypatch.setattr(runner, "InferVideoAnomaly", FakeInference)
+    monkeypatch.setattr(runner, "OpenCVFrameSink", FakeOpenCVFrameSink)
+
+    assert runner.run_video_anomaly_detection({"action": "infer-video"}) == "ok"
+    assert requests[-1].model is None
+    assert sink_options[-1] == {
+        "title": "MLX Video Anomaly Detection",
+        "delay_ms": 10,
+    }
+    assert inference_options[-1]["frame_sink"] is sink
+    assert inference_options[-1]["frame_renderer"] is annotate_video_anomaly_frame
+
+    assert (
+        runner.run_video_anomaly_detection(
+            {
+                "action": "infer-video",
+                "model": "densenet121",
+                "_explicit_options": {"model"},
+            }
+        )
+        == "ok"
+    )
+    assert requests[-1].model == "densenet121"
+
+    sink_options.clear()
+    assert (
+        runner.run_video_anomaly_detection(
+            {"action": "infer-video", "display": False}
+        )
+        == "ok"
+    )
+    assert requests[-1].model is None
+    assert inference_options[-1]["frame_sink"] is None
+    assert inference_options[-1]["frame_renderer"] is None
+    assert sink_options == []
+
+    assert (
+        runner.run_video_anomaly_detection(
+            {"action": "infer-video", "output_format": "json"}
+        )
+        == "ok"
+    )
+    assert inference_options[-1]["frame_sink"] is None
+    assert inference_options[-1]["frame_renderer"] is None
+    assert sink_options == []
 
 
 def test_train_composition_normalizes_cli_explicitness_into_typed_request(

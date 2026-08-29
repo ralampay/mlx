@@ -167,6 +167,8 @@ The extracted archive must contain exactly one `data.yaml`, either at its root o
 directory. Install `.[aws]` for Boto3 support. MLX safely extracts and caches the object under
 `~/.cache/mlx/datasets` (configurable with `--dataset-cache-dir`) and writes
 `dataset_source.json` under `--output`. Do not combine `--dataset` and `--dataset-s3-uri`.
+See the shared [S3 dataset training guide](../s3-dataset-training.md) for IAM, cache identity,
+safe extraction, provenance, SageMaker behavior, and troubleshooting.
 
 For this repository, `coco8` is the best default example dataset. It is small, is
 available through both providers, and is fast enough for smoke-testing `yolo26`,

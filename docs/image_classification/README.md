@@ -85,6 +85,8 @@ The ZIP may use one wrapper directory and must contain exactly one root with `tr
 Install `.[aws]` for Boto3, use `--dataset-cache-dir` to override the persistent
 `~/.cache/mlx/datasets` cache, and do not combine the S3 option with `--dataset`. The output
 directory includes `dataset_source.json` with non-secret object and cache provenance.
+See the shared [S3 dataset training guide](../s3-dataset-training.md) for credentials, cache and
+safe-extraction behavior, provenance fields, SageMaker differences, and troubleshooting.
 
 This same split layout is used by both model families:
 

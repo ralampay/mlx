@@ -138,6 +138,8 @@ training safeguards are applied after staging exactly as they are for local path
 `.[aws]` for Boto3. MLX safely extracts and caches the object under
 `~/.cache/mlx/datasets`, configurable with `--dataset-cache-dir`, and writes
 `dataset_source.json` with the training artifacts. Do not also pass `--dataset`.
+See the shared [S3 dataset training guide](../s3-dataset-training.md) for credentials, cache
+identity, safe extraction, provenance, local-versus-SageMaker behavior, and troubleshooting.
 
 ## UCSD Ped2 preparation example
 

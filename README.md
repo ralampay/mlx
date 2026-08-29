@@ -9,6 +9,7 @@ video anomaly detection, segmentation, NLP, and tracking logic in focused module
 - [Architecture](./ARCHITECTURE.md)
 - [Installation](#installation)
 - [Command-line interface](#command-line-interface)
+- [Training from an S3 dataset ZIP](#training-from-an-s3-dataset-zip)
 - [Object detection and tracking](#object-detection-and-tracking)
 - [Image classification](#image-classification)
 - [Video anomaly detection](#video-anomaly-detection)
@@ -138,6 +139,10 @@ archive root. It never records credentials or the selected profile. Cache evicti
 For SageMaker object-detection or image-classification training, the existing YAML
 `aws.dataset_s3_uri` remains supported. An explicit `--dataset-s3-uri` overrides it for a new
 training submission; resumed runs must retain their original dataset URI.
+
+See [Training from an S3 Dataset ZIP](docs/s3-dataset-training.md) for all four archive layouts,
+AWS credentials and IAM, cache behavior, provenance schema, safe-extraction rules, SageMaker
+differences, resume guidance, and troubleshooting.
 
 ## Object detection and tracking
 

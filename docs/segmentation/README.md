@@ -206,6 +206,8 @@ The archive root (or its one wrapper directory) must contain `train/images`, `tr
 persistent cache, passes the resolved local root to the existing loader, and records
 `dataset_source.json` with the training artifacts. `--dataset` and `--dataset-s3-uri` are mutually
 exclusive; change the cache with `--dataset-cache-dir` when needed.
+See the shared [S3 dataset training guide](../s3-dataset-training.md) for credentials, cache
+identity, safe extraction, provenance, limitations, and troubleshooting.
 
 List every comparison model and its total parameter count for the selected
 class count:

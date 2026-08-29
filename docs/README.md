@@ -24,6 +24,10 @@ python -m pip install -r requirements.txt
 See the main [installation guide](../README.md#installation) for version checks,
 verification, deactivation, and provider-specific installation alternatives.
 
+For portable training data, see [Training from an S3 Dataset ZIP](./s3-dataset-training.md). It
+covers every train-capable mode, required archive layouts, credentials, caching, provenance,
+safe extraction, SageMaker differences, and troubleshooting.
+
 ## Modes
 
 The repository documentation is split by CLI mode and backing package:
@@ -34,7 +38,7 @@ The repository documentation is split by CLI mode and backing package:
 | `mlx.modes.image_classification` | Image-classification workflows for one-shot and standard classifiers | [Image classification](./image_classification/README.md) |
 | `mlx.modes.video_anomaly_detection` | Normal-only clip-native 3D CNN and Deep SVDD workflows | [Video anomaly detection](./video_anomaly_detection/README.md) |
 | `mlx.modes.segmentation` | Semantic segmentation workflows for U-Net style models | [Segmentation](./segmentation/README.md) |
-| `mlx.core` | Shared commands, requests, errors, feature/streaming contracts, and UI helpers | Documented in [ARCHITECTURE.md](../ARCHITECTURE.md) |
+| `mlx.core` | Shared commands, requests, errors, dataset staging, feature/streaming contracts, and UI helpers | [S3 dataset training](./s3-dataset-training.md) and [ARCHITECTURE.md](../ARCHITECTURE.md) |
 
 ## CLI Mapping
 

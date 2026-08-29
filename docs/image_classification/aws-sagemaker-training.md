@@ -38,6 +38,8 @@ the command line. Credentials are never copied into the image, job hyperparamete
 For a new submission, `--dataset-s3-uri s3://bucket/portable.zip` likewise overrides
 `aws.dataset_s3_uri`; resume continues to require the dataset URI stored in the original run
 specification.
+The shared [S3 dataset training guide](../s3-dataset-training.md) documents the classification ZIP
+contract, safe extractor, and differences between local caching and SageMaker managed input.
 
 ## Lifecycle and artifacts
 

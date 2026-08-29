@@ -86,6 +86,8 @@ python -m mlx --mode object-detection --platform aws --action train \
 
 The CLI value must be a ZIP object and takes precedence over `aws.dataset_s3_uri`. Resume still
 compares against the original run specification and rejects a different dataset URI.
+The shared [S3 dataset training guide](../s3-dataset-training.md) documents the archive contract,
+safe extractor, and differences between local caching and SageMaker managed input.
 
 The same profile option is accepted by `status`, `stop`, and `resume`. MLX passes the selected
 name to `boto3.Session`; credentials remain in the standard AWS files and are never copied into a

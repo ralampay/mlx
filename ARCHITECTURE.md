@@ -118,6 +118,8 @@ S3 input for non-training actions, and requires persistent `--output` for local 
 `--profile` is resolved only at the Boto3 construction boundary. For SageMaker object detection
 and image classification, an explicit CLI S3 URI overrides the YAML URI for a new submission;
 resume validation continues to enforce the original run-spec URI.
+User-facing archive contracts and operational guidance live in
+[`docs/s3-dataset-training.md`](docs/s3-dataset-training.md).
 
 ## Object-Detection Providers
 

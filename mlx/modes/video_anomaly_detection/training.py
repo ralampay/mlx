@@ -440,7 +440,12 @@ class TrainVideoAnomalyModel:
                 f"Epoch {epoch + 1}/{epochs} train_svdd={train_loss:.6f} val_svdd={val_loss:.6f}",
                 current=epoch + 1,
                 total=epochs,
-                payload={"event": "video_anomaly_training_epoch", "metrics": row, "best": best},
+                payload={
+                    "event": "video_anomaly_training_epoch",
+                    "metrics": row,
+                    "best": best,
+                    "checkpoint_path": str(paths["last_checkpoint"]),
+                },
             )
         return best
 

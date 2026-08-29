@@ -141,6 +141,10 @@ training safeguards are applied after staging exactly as they are for local path
 See the shared [S3 dataset training guide](../s3-dataset-training.md) for credentials, cache
 identity, safe extraction, provenance, local-versus-SageMaker behavior, and troubleshooting.
 
+To train every compatible 3D configuration sequentially on one SageMaker GPU, use the dedicated
+[AWS video-anomaly batch training guide](./aws-sagemaker-training.md). It covers the Avenue S3
+example, recommended parameters, IAM, per-model result prefixes, status, and recovery.
+
 ## UCSD Ped2 preparation example
 
 Ped2 training clips contain normal behavior only. Map each training sequence to

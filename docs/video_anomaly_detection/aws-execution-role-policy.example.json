@@ -1,0 +1,38 @@
+{
+  "Version": "2012-10-17",
+  "Statement": [
+    {
+      "Sid": "ReadAvenueDataset",
+      "Effect": "Allow",
+      "Action": "s3:GetObject",
+      "Resource": "arn:aws:s3:::mlx-video-anomaly-datasets/avenue-video-anomaly-detection.zip"
+    },
+    {
+      "Sid": "InspectTrainingBuckets",
+      "Effect": "Allow",
+      "Action": ["s3:GetBucketLocation", "s3:ListBucket"],
+      "Resource": ["arn:aws:s3:::mlx-video-anomaly-datasets", "arn:aws:s3:::<RESULTS_BUCKET>"]
+    },
+    {
+      "Sid": "ManageTrainingArtifacts",
+      "Effect": "Allow",
+      "Action": ["s3:GetObject", "s3:PutObject", "s3:AbortMultipartUpload"],
+      "Resource": "arn:aws:s3:::<RESULTS_BUCKET>/<RESULTS_PREFIX>/*"
+    },
+    {
+      "Sid": "PullTrainingImage",
+      "Effect": "Allow",
+      "Action": ["ecr:BatchCheckLayerAvailability", "ecr:BatchGetImage", "ecr:GetDownloadUrlForLayer"],
+      "Resource": "arn:aws:ecr:<REGION>:<ACCOUNT_ID>:repository/<ECR_REPOSITORY>"
+    },
+    {
+      "Sid": "EcrAndLogs",
+      "Effect": "Allow",
+      "Action": [
+        "ecr:GetAuthorizationToken", "logs:CreateLogGroup", "logs:CreateLogStream",
+        "logs:DescribeLogStreams", "logs:PutLogEvents", "cloudwatch:PutMetricData"
+      ],
+      "Resource": "*"
+    }
+  ]
+}

@@ -78,6 +78,7 @@ mlx/
     │   ├── libreyolo/            LibreYOLO implementation using the Ralampay fork
     │   └── ultralytics/          Ultralytics implementation and compatibility exports
     ├── video_anomaly_detection/  normal-only clip data, 3D/legacy backbones, SVDD, research artifacts
+    │   └── aws/                  sequential all-model SageMaker lifecycle and recovery
     └── nlp/                      GGUF-backed CSV embedding command and Rich reporter
 ```
 
@@ -87,7 +88,7 @@ The primary workflow commands are:
 | --- | --- |
 | Image classification | `TrainImageClassificationModel`, `SmokeTestImageClassificationModel`, `BenchmarkImageClassification`, `InferImageClassification`, `GenerateImageClassificationCams`, `BuildImageClassificationDataset`, `ListImageClassificationModels`, AWS submit/status/stop/resume commands |
 | Segmentation | `TrainSegmentationModel`, `SmokeTestSegmentationModel`, `BenchmarkSegmentation`, `InferSegmentationImage`, `RunSegmentationStreamInference`, `BuildSegmentationDataset`, `ListSegmentationModels` |
-| Video anomaly detection | `TrainVideoAnomalyModel`, `BenchmarkVideoAnomalyModel`, `InferVideoAnomaly`, `ListVideoAnomalyModels` |
+| Video anomaly detection | `TrainVideoAnomalyModel`, `BenchmarkVideoAnomalyModel`, `InferVideoAnomaly`, `ListVideoAnomalyModels`, AWS all-model submit/status/resume commands |
 | Object detection | `TrainObjectDetectionModel`, `BenchmarkObjectDetectionModel`, `CreateObjectDetector`, `ConvertObjectDetectionModel`, `ListObjectDetectionModels`, `RunObjectDetectionStream`, AWS submit/status/stop/resume commands |
 | Tracking | `CreateTrackingAlgorithm`, `RunObjectDetectionTrackingCommand`, `RunTrackByDetectionCommand`, `RunTrackingVideo`, `ExportMOTFromClassAwareTracking`, `BenchmarkMOTTracking`, `ExportTrackingReplay` |
 | NLP | `EmbedCsvCommand` (`EmbedCsv` is the legacy path-returning API) |
@@ -347,6 +348,15 @@ through SageMaker's checkpoint directory. Manual resume retains the original tra
 and immutable image, allowing only a higher total epoch target plus capacity/runtime changes.
 Final model artifacts include the best checkpoint, resumable checkpoint, training CSV, and a
 sanitized summary.
+
+Video anomaly detection exposes `train-all`, `status`, and `resume` through its mode-owned AWS
+package. One SageMaker attempt extracts the dataset once and trains the frozen live 3D variant
+inventory sequentially; Drax aliases expand to both fusion modes. A batch manifest records each
+variant as pending, running, completed, or failed. Completed artifact directories and per-variant
+rotating full-state checkpoints synchronize directly under the batch S3 prefix. The workflow is
+fail-fast, and a later attempt integrity-checks completed artifacts, skips them, and restores the
+active variant. Attempt model archives use a sibling prefix so old archives are not downloaded as
+checkpoint input. Local single-model training and the reusable trainer remain AWS-independent.
 
 ## Shared Primitives, Requests, and Registries
 

@@ -1,0 +1,36 @@
+version: 1
+
+aws:
+  region: REPLACE_WITH_DATASET_BUCKET_REGION
+  dataset_s3_uri: s3://mlx-video-anomaly-datasets/avenue-video-anomaly-detection.zip
+  output_s3_uri: s3://REPLACE_RESULTS_BUCKET/video-anomaly/avenue
+  instance_type: ml.g6e.2xlarge
+  volume_size_gb: 200
+  managed_spot: true
+  max_runtime_seconds: 604800
+  max_wait_seconds: 1209600
+  resource_prefix: mlx-vad
+  execution_role_arn: arn:aws:iam::111122223333:role/mlx-vad-sagemaker-execution
+  image_uri: 111122223333.dkr.ecr.REPLACE_REGION.amazonaws.com/mlx-vad-training@sha256:...
+  network_isolation: false
+  tags:
+    project: mlx-video-anomaly
+    dataset: avenue
+
+training:
+  pretrained: true
+  height: 224
+  width: 224
+  batch_size: 1
+  workers: 4
+  epochs: 50
+  lr: 0.001
+  clip_length: 16
+  frame_stride: 1
+  backbone_temporal_kernel_size: 3
+  svdd_dim: 128
+  svdd_hidden_dim: 256
+  svdd_quantile: 0.95
+  use_best: true
+  random_seed: 42
+  device: auto

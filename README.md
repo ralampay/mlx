@@ -79,7 +79,7 @@ python -m pip install ".[object-detection-ultralytics]"
 python -m pip install ".[object-detection-libreyolo]"
 python -m pip install ".[object-detection]"  # both providers
 python -m pip install ".[aws,object-detection]"  # SageMaker detection lifecycle
-python -m pip install ".[aws]"                   # SageMaker classification lifecycle
+python -m pip install ".[aws]"                   # SageMaker classification/video-anomaly lifecycle
 python -m pip install ".[nlp]"                   # GGUF CSV embedding
 python -m pip install ".[image-explainability]"  # Grad-CAM actions
 ```
@@ -89,6 +89,8 @@ does not require llama.cpp, pandas, or Grad-CAM.
 
 For local AWS credentials, least-privilege IAM policies, S3 preparation, and SageMaker lifecycle
 commands, see the [AWS object-detection training guide](docs/object_detection/aws-sagemaker-training.md).
+For sequential SageMaker training across every video-anomaly 3D configuration, see the
+[AWS video-anomaly training guide](docs/video_anomaly_detection/aws-sagemaker-training.md).
 
 ## Command-line interface
 
@@ -105,7 +107,7 @@ Available CLI modes are:
 | `object_detection` | `train`, `benchmark`, AWS `resume`/`status`/`stop`, `infer-camera`, `infer-video`, `convert`, `ls-models` |
 | `track` | `run`, `export-mot`, `ls-trackers` |
 | `image_classification` | `train`, `test`, `benchmark`, AWS `resume`/`status`/`stop`, `infer-image`, `cam`, `build-dataset`, `ls-models` |
-| `video_anomaly_detection` | `train`, `benchmark`, `infer-video`, `ls-models` |
+| `video_anomaly_detection` | `train`, AWS `train-all`/`status`/`resume`, `benchmark`, `infer-video`, `ls-models` |
 | `segmentation` | `train`, `test`, `benchmark`, `infer-image`, `infer-camera`, `infer-video`, `build-dataset`, `ls-models` |
 | `nlp` | `embed` |
 

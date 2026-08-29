@@ -9,7 +9,7 @@ from mlx.modes.video_anomaly_detection.models.backbone3d import (
     build_spatiotemporal_backbone_3d,
 )
 from mlx.modes.video_anomaly_detection.requests import ListVideoAnomalyModelsRequest
-from mlx.modes.video_anomaly_detection.models.classification_compat import standard_backbone_names
+from mlx.modes.video_anomaly_detection.variants import video_anomaly_model_variants
 
 
 @dataclass(frozen=True)
@@ -41,30 +41,30 @@ class ListVideoAnomalyModels:
     def execute(self) -> tuple[VideoAnomalyBackboneSummary, ...]:
         config = {**self.request.to_config(), "colored": True, "pretrained": False}
         summaries = []
-        for name in standard_backbone_names():
-            fusion_modes = ("average", "sknet") if name.startswith("drax") else (None,)
-            for fusion_mode in fusion_modes:
-                model_config = dict(config)
-                if fusion_mode is not None:
-                    model_config["drax_fusion_mode"] = fusion_mode
-                backbone = self.backbone_factory(name, model_config)
-                summaries.append(
-                    VideoAnomalyBackboneSummary(
-                        model_name=name,
-                        model_family="standard",
-                        feature_dim=int(backbone.feature_dim),
-                        parameter_count=count_model_parameters(backbone),
-                        pretrained_available=True,
-                        backbone_mode="3d",
-                        backbone_class=type(backbone).__name__,
-                        drax_fusion_mode=fusion_mode,
-                        pretrained_provenance=(
-                            "inflated_partial" if name.startswith("drax") else "inflated_full"
-                        ),
-                    )
+        for variant in video_anomaly_model_variants():
+            name = variant.model_name
+            fusion_mode = variant.drax_fusion_mode
+            model_config = dict(config)
+            if fusion_mode is not None:
+                model_config["drax_fusion_mode"] = fusion_mode
+            backbone = self.backbone_factory(name, model_config)
+            summaries.append(
+                VideoAnomalyBackboneSummary(
+                    model_name=name,
+                    model_family="standard",
+                    feature_dim=int(backbone.feature_dim),
+                    parameter_count=count_model_parameters(backbone),
+                    pretrained_available=True,
+                    backbone_mode="3d",
+                    backbone_class=type(backbone).__name__,
+                    drax_fusion_mode=fusion_mode,
+                    pretrained_provenance=(
+                        "inflated_partial" if name.startswith("drax") else "inflated_full"
+                    ),
                 )
-                del backbone
-                gc.collect()
+            )
+            del backbone
+            gc.collect()
         emit(
             self.reporter,
             "success",

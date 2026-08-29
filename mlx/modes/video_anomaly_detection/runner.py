@@ -118,6 +118,13 @@ ACTION_HANDLERS = {
 
 
 def run_video_anomaly_detection(mode_config: dict[str, Any]):
+    if mode_config.get("platform", "local") == "aws":
+        from mlx.modes.video_anomaly_detection.aws.runner import (
+            run_aws_video_anomaly_detection,
+        )
+
+        return run_aws_video_anomaly_detection(mode_config)
+
     config = {**DEFAULT_CONFIG, **mode_config}
     explicit = set(mode_config.get("_explicit_options") or ())
     legacy_temporal_options = {

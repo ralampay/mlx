@@ -62,7 +62,7 @@ MODE_DESCRIPTORS: tuple[ModeDescriptor, ...] = (
         aliases=("video-anomaly-detection",),
         runner="mlx.modes.video_anomaly_detection.runner:run_video_anomaly_detection",
         default_action="ls-models",
-        actions=("train", "benchmark", "infer-video", "ls-models"),
+        actions=("train", "train-all", "benchmark", "resume", "status", "infer-video", "ls-models"),
         purpose="Normal-only clip-level video anomaly detection",
     ),
     ModeDescriptor(

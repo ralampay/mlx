@@ -1,0 +1,32 @@
+{
+  "Version": "2012-10-17",
+  "Statement": [
+    {
+      "Sid": "SageMakerLifecycle",
+      "Effect": "Allow",
+      "Action": ["sagemaker:CreateTrainingJob", "sagemaker:DescribeTrainingJob", "sagemaker:ListTrainingJobs"],
+      "Resource": "*"
+    },
+    {
+      "Sid": "PassExecutionRole",
+      "Effect": "Allow",
+      "Action": "iam:PassRole",
+      "Resource": "arn:aws:iam::<ACCOUNT_ID>:role/<EXECUTION_ROLE_NAME>"
+    },
+    {
+      "Sid": "InspectBuckets",
+      "Effect": "Allow",
+      "Action": ["s3:GetBucketLocation", "s3:ListBucket"],
+      "Resource": ["arn:aws:s3:::mlx-video-anomaly-datasets", "arn:aws:s3:::<RESULTS_BUCKET>"]
+    },
+    {
+      "Sid": "DatasetAndRunObjects",
+      "Effect": "Allow",
+      "Action": ["s3:GetObject", "s3:PutObject"],
+      "Resource": [
+        "arn:aws:s3:::mlx-video-anomaly-datasets/avenue-video-anomaly-detection.zip",
+        "arn:aws:s3:::<RESULTS_BUCKET>/<RESULTS_PREFIX>/*"
+      ]
+    }
+  ]
+}

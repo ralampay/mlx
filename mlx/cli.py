@@ -293,6 +293,8 @@ def _render_help() -> None:
     usage.add_row("python -m mlx --mode segmentation --action infer-image --model-path ./unet-seg.pt --input-img ./sample.jpg")
     usage.add_row("python -m mlx --mode segmentation --action build-dataset --dataset ./raw-segmentation")
     usage.add_row("python -m mlx --mode video_anomaly_detection --action train --model resnet18 --backbone-mode 3d --backbone-temporal-kernel-size 3 --clip-length 16 --dataset ./ped2-prepared --output ./artifacts/ped2")
+    usage.add_row("python -m mlx --mode video_anomaly_detection --platform aws --action train-all --config ./aws-video-anomaly.yaml")
+    usage.add_row("python -m mlx --mode video_anomaly_detection --platform aws --action status --config ./aws-video-anomaly.yaml --job-name JOB_NAME --watch")
     usage.add_row("python -m mlx --mode video_anomaly_detection --action ls-models")
     usage.add_row("python -m mlx --mode video_anomaly_detection --action benchmark --model-path ./model.pth --dataset ./ped2-prepared/test --output ./benchmark")
     usage.add_row("python -m mlx --mode video_anomaly_detection --action infer-video --model-path ./model.pth --file-path ./sample.mp4 --output ./inference")
@@ -308,7 +310,7 @@ def _render_help() -> None:
         "None",
         "Mode to run: " + ", ".join(item.name for item in MODE_DESCRIPTORS) + ".",
     )
-    options.add_row("--platform", "local", "Execution platform. AWS supports object-detection and image-classification training lifecycle actions.")
+    options.add_row("--platform", "local", "Execution platform. AWS supports object detection, image classification, and sequential video-anomaly training.")
     options.add_row("--config", "None", "AWS YAML job configuration. Local execution does not read this file.")
     options.add_row("--profile", "YAML/default", "AWS shared-credentials profile. An explicit value overrides aws.profile in YAML.")
     options.add_row("--job-name", "None", "SageMaker job name used by status, stop, and resume.")

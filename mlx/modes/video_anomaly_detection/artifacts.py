@@ -1,19 +1,22 @@
 from __future__ import annotations
 
-import csv
-import hashlib
 import json
-import os
 import pickle
-import random
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
-import numpy as np
 import torch
 
+from mlx.core.artifacts import (
+    atomic_torch_save,
+    json_safe,
+    sha256_file,
+    write_csv as write_csv_artifact,
+    write_json_atomic,
+)
 from mlx.core.exceptions import MLXUserError
+from mlx.core.random import capture_random_state, restore_random_state
 from mlx.modes.video_anomaly_detection.models import build_video_anomaly_model
 
 
@@ -274,27 +277,18 @@ def validate_resume_checkpoint(
 
 
 def write_csv(path: Path, rows: list[dict[str, Any]], fieldnames: list[str] | None = None) -> None:
-    path.parent.mkdir(parents=True, exist_ok=True)
-    fieldnames = fieldnames or _fieldnames(rows)
-    with path.open("w", newline="", encoding="utf-8") as output:
-        writer = csv.DictWriter(output, fieldnames=fieldnames, extrasaction="ignore")
-        writer.writeheader()
-        for row in rows:
-            writer.writerow({key: _csv_value(row.get(key)) for key in fieldnames})
+    write_csv_artifact(path, rows, fieldnames=fieldnames or _fieldnames(rows))
 
 
 def write_json(path: Path, value: Any) -> None:
-    path.parent.mkdir(parents=True, exist_ok=True)
-    with path.open("w", encoding="utf-8") as output:
-        json.dump(_json_value(value), output, indent=2, sort_keys=True)
-        output.write("\n")
+    write_json_atomic(path, value)
 
 
 def write_jsonl(path: Path, rows: list[dict[str, Any]]) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     with path.open("w", encoding="utf-8") as output:
         for row in rows:
-            output.write(json.dumps(_json_value(row), sort_keys=True) + "\n")
+            output.write(json.dumps(json_safe(row), sort_keys=True) + "\n")
 
 
 def write_training_plot(path: Path, history: list[dict[str, Any]]) -> None:
@@ -316,64 +310,8 @@ def write_training_plot(path: Path, history: list[dict[str, Any]]) -> None:
     plt.close(fig)
 
 
-def sha256_file(path: str | Path) -> str:
-    digest = hashlib.sha256()
-    with Path(path).open("rb") as source:
-        for chunk in iter(lambda: source.read(1024 * 1024), b""):
-            digest.update(chunk)
-    return digest.hexdigest()
-
-
 def utc_timestamp() -> str:
     return datetime.now(timezone.utc).replace(microsecond=0).isoformat()
-
-
-def atomic_torch_save(payload: dict[str, Any], path: Path) -> None:
-    path.parent.mkdir(parents=True, exist_ok=True)
-    temporary = path.with_name(f".{path.name}.tmp-{os.getpid()}")
-    try:
-        torch.save(payload, temporary)
-        os.replace(temporary, path)
-    finally:
-        temporary.unlink(missing_ok=True)
-
-
-def capture_random_state() -> dict[str, Any]:
-    numpy_state = np.random.get_state()
-    result: dict[str, Any] = {
-        "python": random.getstate(),
-        "numpy": {
-            "bit_generator": numpy_state[0],
-            "state": numpy_state[1].tolist(),
-            "position": numpy_state[2],
-            "has_gauss": numpy_state[3],
-            "cached_gaussian": numpy_state[4],
-        },
-        "torch": torch.get_rng_state(),
-    }
-    if torch.cuda.is_available():
-        result["torch_cuda"] = torch.cuda.get_rng_state_all()
-    return result
-
-
-def restore_random_state(state: dict[str, Any]) -> None:
-    if "python" in state:
-        random.setstate(state["python"])
-    numpy_state = state.get("numpy")
-    if numpy_state:
-        np.random.set_state(
-            (
-                numpy_state["bit_generator"],
-                np.asarray(numpy_state["state"], dtype=np.uint32),
-                int(numpy_state["position"]),
-                int(numpy_state["has_gauss"]),
-                float(numpy_state["cached_gaussian"]),
-            )
-        )
-    if "torch" in state:
-        torch.set_rng_state(state["torch"])
-    if "torch_cuda" in state and torch.cuda.is_available():
-        torch.cuda.set_rng_state_all(state["torch_cuda"])
 
 
 def _finite_float_or_none(value: torch.Tensor) -> float | None:
@@ -396,31 +334,6 @@ def _fieldnames(rows: list[dict[str, Any]]) -> list[str]:
             if key not in fields:
                 fields.append(key)
     return fields
-
-
-def _csv_value(value: Any) -> Any:
-    if isinstance(value, (list, tuple)):
-        return json.dumps(value)
-    if isinstance(value, float):
-        return f"{value:.8f}"
-    return value
-
-
-def _json_value(value: Any) -> Any:
-    if isinstance(value, dict):
-        return {str(key): _json_value(item) for key, item in value.items()}
-    if isinstance(value, (list, tuple)):
-        return [_json_value(item) for item in value]
-    if isinstance(value, Path):
-        return str(value)
-    if isinstance(value, torch.Tensor):
-        return _json_value(value.detach().cpu().tolist())
-    if isinstance(value, (np.integer,)):
-        return int(value)
-    if isinstance(value, (np.floating, float)):
-        numeric = float(value)
-        return numeric if np.isfinite(numeric) else None
-    return value
 
 
 __all__ = [

@@ -8,12 +8,23 @@ from rich.panel import Panel
 from rich.table import Table
 
 from mlx.core.commands import WorkflowEvent
+from mlx.core.presentation import RichInfrastructureEventRenderer
 from mlx.core.ui import console, print_error, print_info, print_success, print_warning
 from mlx.modes.object_detection.models import DetectionResult, ObjectDetectionBenchmarkResult
 
 
 class RichWorkflowReporter:
+    def __init__(
+        self,
+        infrastructure_events: RichInfrastructureEventRenderer | None = None,
+    ) -> None:
+        self._infrastructure_events = (
+            infrastructure_events or RichInfrastructureEventRenderer()
+        )
+
     def emit(self, event: WorkflowEvent) -> None:
+        if self._infrastructure_events.handle(event):
+            return
         if isinstance(event.payload, dict):
             event_name = event.payload.get("event")
             if event_name == "training_summary":

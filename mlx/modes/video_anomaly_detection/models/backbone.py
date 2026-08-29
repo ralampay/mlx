@@ -11,9 +11,11 @@ from mlx.core.image_backbones import ImageFeatureBackboneFactory
 def build_default_frame_backbone(model_name: str, config: dict[str, Any]):
     """Compatibility boundary for the image-classification model registry."""
 
-    from mlx.modes.image_classification.models import build_image_feature_backbone
+    from mlx.modes.video_anomaly_detection.models.classification_compat import (
+        build_frame_feature_backbone,
+    )
 
-    return build_image_feature_backbone(model_name, config)
+    return build_frame_feature_backbone(model_name, config)
 
 
 class FrameBackbone(nn.Module):

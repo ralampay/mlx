@@ -14,6 +14,7 @@ from torch.utils.data import Dataset
 
 from mlx.cli import build_parser
 from mlx.cli_routing import MODE_REGISTRY
+from mlx.core.commands import CallbackWorkflowReporter
 from mlx.core.exceptions import MLXUserError
 from mlx.modes.image_classification.models import (
     ONE_SHOT_MODEL_NAMES,
@@ -321,8 +322,10 @@ def test_normal_only_training_center_calibration_checkpoint_csv_and_resume(tmp_p
         random_seed=9,
         backbone_mode="frame-2d",
     )
+    events = []
     result = TrainVideoAnomalyModel(
         TrainVideoAnomalyRequest(**base, epochs=1),
+        reporter=CallbackWorkflowReporter(events.append),
         model_factory=tiny_video_model,
         dataset_factory=SyntheticNormalClips,
     ).execute()
@@ -337,6 +340,34 @@ def test_normal_only_training_center_calibration_checkpoint_csv_and_resume(tmp_p
     assert last["training_state_version"] == 1
     with (output / "training.csv").open(newline="", encoding="utf-8") as source:
         assert len(list(csv.DictReader(source))) == 1
+
+    progress_events = [
+        event
+        for event in events
+        if isinstance(event.payload, dict)
+        and event.payload.get("event") == "video_anomaly_training_progress"
+    ]
+    phases = {event.payload["phase"] for event in progress_events}
+    assert {
+        "center",
+        "train",
+        "validation",
+        "best-calibration",
+        "last-calibration",
+    } <= phases
+    assert any(
+        isinstance(event.payload, dict)
+        and event.payload.get("event") == "video_anomaly_training_epoch"
+        for event in events
+    )
+    for phase in phases:
+        statuses = [
+            event.payload["status"]
+            for event in progress_events
+            if event.payload["phase"] == phase
+        ]
+        assert statuses[0] == "start"
+        assert statuses[-1] == "complete"
 
     resumed = TrainVideoAnomalyModel(
         TrainVideoAnomalyRequest(**base, epochs=2, model_path=str(last_path)),
@@ -706,3 +737,46 @@ def test_runner_3d_default_legacy_selection_and_conflict(monkeypatch) -> None:
                 "_explicit_options": {"backbone_mode", "temporal_model"},
             }
         )
+
+
+def test_train_composition_normalizes_cli_explicitness_into_typed_request(
+    monkeypatch, tmp_path
+) -> None:
+    from mlx.modes.video_anomaly_detection import runner
+
+    captured = {}
+
+    class FakeDatasetSourceTraining:
+        def __init__(self, request, **_kwargs):
+            captured["request"] = request
+
+        def execute(self):
+            return "ok"
+
+    monkeypatch.setattr(runner, "TrainWithDatasetSource", FakeDatasetSourceTraining)
+    result = runner._train(
+        {
+            "model": "resnet18",
+            "output_path": str(tmp_path),
+            "_explicit_options": {"backbone_mode", "temporal_dropout"},
+        }
+    )
+
+    assert result == "ok"
+    assert captured["request"].backbone_mode_explicit is True
+    assert captured["request"].temporal_options_explicit is True
+
+
+def test_video_model_registries_are_read_only_and_extensible() -> None:
+    from mlx.modes.video_anomaly_detection.models import TEMPORAL_ENCODERS
+    from mlx.modes.video_anomaly_detection.models.temporal import (
+        DEFAULT_TEMPORAL_ENCODER_REGISTRY,
+    )
+    builder = lambda *args, **kwargs: torch.nn.Identity()
+
+    with pytest.raises(TypeError):
+        TEMPORAL_ENCODERS["custom"] = builder
+
+    extended = DEFAULT_TEMPORAL_ENCODER_REGISTRY.register("custom", builder)
+    assert "custom" in extended.entries
+    assert "custom" not in TEMPORAL_ENCODERS

@@ -8,6 +8,7 @@ from torch.utils.data import Dataset
 from torchvision import transforms
 
 from mlx.core.exceptions import MLXUserError
+from mlx.core.datasets import resolve_split_dataset_root
 from mlx.modes.video_anomaly_detection.clips import ClipWindow, window_start_indices
 
 try:
@@ -20,6 +21,14 @@ IMAGE_EXTENSIONS = {".png", ".jpg", ".jpeg", ".bmp", ".tif", ".tiff"}
 VIDEO_EXTENSIONS = {".mp4", ".avi", ".mov", ".mkv"}
 IMAGENET_MEAN = (0.485, 0.456, 0.406)
 IMAGENET_STD = (0.229, 0.224, 0.225)
+
+
+def video_anomaly_dataset_root(extracted_path: Path) -> Path:
+    return resolve_split_dataset_root(
+        extracted_path,
+        required_paths=("train/normal", "val/normal"),
+        dataset_label="video-anomaly dataset",
+    )
 
 
 def build_frame_transform(*, height: int, width: int):

@@ -1,14 +1,14 @@
 from __future__ import annotations
 
-import os
-import random
 from pathlib import Path
 from typing import Any
 
 import numpy as np
 import torch
 
+from mlx.core.artifacts import atomic_torch_save
 from mlx.core.exceptions import MLXUserError
+from mlx.core.random import capture_random_state, restore_random_state
 from mlx.modes.segmentation.models import DEFAULT_MODEL, build_segmentation_model
 
 
@@ -172,7 +172,7 @@ def save_training_checkpoint(
             "best_foreground_dice": float(best_foreground_dice),
             "optimizer_state_dict": optimizer.state_dict(),
             "history": list(history),
-            "random_state": _capture_random_state(),
+            "random_state": capture_random_state(),
         }
     )
     _atomic_torch_save(payload, checkpoint_path)
@@ -229,7 +229,7 @@ def load_training_checkpoint(
     completed_epoch = int(checkpoint.get("completed_epoch", 0))
     if len(history) != completed_epoch:
         raise MLXUserError(f"Resume checkpoint '{path}' has inconsistent epoch history.")
-    _restore_random_state(checkpoint.get("random_state") or {})
+    restore_random_state(checkpoint.get("random_state") or {})
     return {
         "completed_epoch": completed_epoch,
         "best_val_loss": float(checkpoint.get("best_val_loss", float("inf"))),
@@ -293,55 +293,7 @@ def load_checkpoint_bundle(config: dict[str, Any]) -> tuple[Any, dict[str, Any]]
     return model, metadata
 
 
-def _atomic_torch_save(payload: dict[str, Any], checkpoint_path: Path) -> None:
-    checkpoint_path.parent.mkdir(parents=True, exist_ok=True)
-    temporary_path = checkpoint_path.with_name(
-        f".{checkpoint_path.name}.tmp-{os.getpid()}"
-    )
-    try:
-        torch.save(payload, temporary_path)
-        os.replace(temporary_path, checkpoint_path)
-    finally:
-        if temporary_path.exists():
-            temporary_path.unlink()
-
-
-def _capture_random_state() -> dict[str, Any]:
-    numpy_state = np.random.get_state()
-    state: dict[str, Any] = {
-        "python": random.getstate(),
-        "numpy": {
-            "bit_generator": numpy_state[0],
-            "state": numpy_state[1].tolist(),
-            "position": numpy_state[2],
-            "has_gauss": numpy_state[3],
-            "cached_gaussian": numpy_state[4],
-        },
-        "torch": torch.get_rng_state(),
-    }
-    if torch.cuda.is_available():
-        state["torch_cuda"] = torch.cuda.get_rng_state_all()
-    return state
-
-
-def _restore_random_state(state: dict[str, Any]) -> None:
-    if "python" in state:
-        random.setstate(tuple(state["python"]))
-    numpy_state = state.get("numpy")
-    if numpy_state:
-        np.random.set_state(
-            (
-                numpy_state["bit_generator"],
-                np.asarray(numpy_state["state"], dtype=np.uint32),
-                int(numpy_state["position"]),
-                int(numpy_state["has_gauss"]),
-                float(numpy_state["cached_gaussian"]),
-            )
-        )
-    if "torch" in state:
-        torch.set_rng_state(state["torch"].cpu())
-    if torch.cuda.is_available() and state.get("torch_cuda"):
-        torch.cuda.set_rng_state_all(state["torch_cuda"])
+_atomic_torch_save = atomic_torch_save
 
 
 def compute_pixel_accuracy(predictions: torch.Tensor, targets: torch.Tensor) -> float:

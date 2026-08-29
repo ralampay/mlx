@@ -4,6 +4,7 @@ from pathlib import Path
 from typing import Any
 
 from mlx.core.exceptions import MLXUserError
+from mlx.core.commands import NullWorkflowReporter
 from mlx.modes.object_detection.presentation import RichWorkflowReporter
 from mlx.modes.object_detection.streaming import OpenCVFrameSink
 from mlx.modes.object_detection.tracking.class_aware import (
@@ -21,10 +22,12 @@ from mlx.modes.object_detection.tracking.session import RunTrackingVideo
 
 def run_tracking(config: dict[str, Any]):
     action = config.get("action") or "run"
-    reporter = RichWorkflowReporter()
+    is_json = config.get("output_format") == "json"
+    reporter = NullWorkflowReporter() if is_json else RichWorkflowReporter()
     if action == "ls-trackers":
         trackers = list_trackers()
-        print_trackers(trackers)
+        if not is_json:
+            print_trackers(trackers)
         return trackers
     if action == "export-mot":
         source_path = config.get("tracking_jsonl")
@@ -46,7 +49,9 @@ def run_tracking(config: dict[str, Any]):
             reporter=reporter,
         ).execute()
     if action == "run":
-        request = TrackingRequest.from_config(config)
+        request = TrackingRequest.from_config(
+            {**config, "display": False} if is_json else config
+        )
         sink = (
             OpenCVFrameSink(title="MLX Tracking", delay_ms=10)
             if request.display
@@ -58,7 +63,7 @@ def run_tracking(config: dict[str, Any]):
             renderer=annotate_tracks if sink is not None else None,
             reporter=reporter,
         ).execute()
-        if result.benchmark is not None:
+        if result.benchmark is not None and not is_json:
             print_tracking_benchmark(result.benchmark)
         return result
     raise MLXUserError(

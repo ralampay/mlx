@@ -39,15 +39,23 @@ contracts. `mlx.core.requests.ConfigRequest` supplies a lossless bridge between 
 dataclasses and legacy configuration dictionaries. New application APIs should accept a typed
 request; dictionary entry points exist only for CLI and compatibility use.
 
+`ModeDescriptor` is the source of canonical names, aliases, default actions, action inventories,
+purposes, and lazy runner paths. The CLI applies the selected default before dispatch. Local
+`--format json` attaches null reporters and suppresses Rich/display presenters; the top-level
+boundary serializes the returned structured result once.
+
 ## Package Topology and Commands
 
 ```text
 mlx/
-├── cli.py                        CLI parser and top-level error/presentation boundary
+├── cli.py                        CLI parser and top-level error/JSON boundary
 ├── cli_config.py                 pure parsed-option normalization
-├── cli_routing.py                lazy mode registry and runner resolution
+├── cli_routing.py                immutable mode descriptors and lazy runner resolution
 ├── core/                         shared commands, requests, errors, UI, seeds, model summaries
-│   ├── datasets.py              S3 ZIP staging, safe extraction, cache, root contracts
+│   ├── artifacts.py             atomic serialization, hashes, and JSON normalization
+│   ├── aws/                     shared SageMaker lifecycle infrastructure
+│   ├── datasets.py              S3 ZIP staging, safe extraction, cache, resolver protocol
+│   ├── presentation.py          shared Rich rendering for core infrastructure events
 │   ├── image_backbones.py        neutral penultimate-image-feature contracts
 │   ├── deep_svdd.py              shared Deep-SVDD score/calibration semantics
 │   └── streaming.py              neutral frame-source contracts and OpenCV decoder
@@ -97,6 +105,10 @@ directory resolver. The wrapper changes only the typed request's resolved `datas
 trainers and loaders therefore remain storage-provider neutral. S3/Boto3 details do not enter
 mode commands or dataset implementations.
 
+`DatasetSourceSpec` makes the local-versus-S3 choice explicit before staging. It derives typed
+request defaults instead of comparing a CLI path sentinel. CLI explicit-option bookkeeping is
+consumed at the integration boundary and is not retained as domain request metadata.
+
 `StageS3Dataset` owns the local staging lifecycle. It validates the S3 URI, inspects object
 identity, downloads through an injected S3 client, computes SHA-256, securely extracts into a
 temporary sibling directory, resolves the mode-specific root, writes a completion manifest, and
@@ -105,10 +117,16 @@ identity includes bucket/key plus VersionId or ETag provenance and object size. 
 are never treated as valid. Training artifacts receive `dataset_source.json`; credentials and
 profile names are deliberately excluded.
 
+S3 downloads emit structured `dataset_download` lifecycle events rather than terminal output.
+The reusable `RichDatasetDownloadProgress` renderer consumes those infrastructure events as one
+in-place progress line with byte count, percentage, transfer speed, and remaining time. Each
+train-capable mode composes it through `RichInfrastructureEventRenderer`; JSON and direct Python
+use keep their null or injected reporters and remain terminal-independent.
+
 The shared streaming ZIP extractor rejects traversal, absolute and Windows-drive paths,
 symbolic links, special files, normalized duplicates, and file/directory conflicts. It checks
 declared uncompressed size against free space and an optional caller limit. Dataset semantics
-remain mode owned through injected root resolvers: object detection requires exactly one
+remain mode owned through injected root resolvers located in each mode's data module: object detection requires exactly one
 `data.yaml`; classification requires one `train`/`val` root; segmentation additionally requires
 paired image/mask directories; video anomaly detection requires normal train/validation roots.
 The same extractor and applicable root resolver are used by SageMaker container entrypoints.
@@ -229,7 +247,11 @@ CLI state. The default tensor flow is:
 ```
 
 The image-classification registry remains authoritative for compatible aliases and 2D source
-weights. The video-owned 3D factory maps each standard family to a dedicated clip-native class,
+weights. Cross-mode access is isolated in
+`video_anomaly_detection.models.classification_compat`; other video model, training, and listing
+modules depend on this gateway rather than classifier internals. It supplies frame feature
+backbones, an inflation-safe feature wrapper, capability lookup, source provenance, and custom
+block classification. The video-owned 3D factory maps each standard family to a dedicated clip-native class,
 inflates spatial kernels, replaces normalization/pooling with 3D equivalents, keeps pointwise
 temporal kernels at one, and enforces temporal stride one. Its registry contains only 3D
 construction strategy; it does not redefine model-family capability. Standard pretrained weights
@@ -250,6 +272,13 @@ validation scores and persisted. Resume restores the exact center, optimizer, hi
 state; benchmark and inference reject checkpoints without a stored center or finite threshold and
 never recalibrate using test data.
 
+The training command emits batch-level phase events while initializing the center, optimizing an
+epoch, validating, and calibrating final thresholds. `RichVideoAnomalyReporter` renders each phase
+as a transient in-place progress line and writes one persistent epoch summary containing training
+SVDD loss, validation loss, current best validation objective, and learning rate. The command stays
+terminal-neutral, and callback/null reporters retain the same structured lifecycle for Python,
+tests, automation adapters, and JSON execution.
+
 The generic dataset owns deterministic complete windows over
 `<split>/{normal,anomaly}/<source>/<frames>`. Training and validation expose only `normal`; an
 anomaly source under training is an actionable error. Source/frame metadata travels through
@@ -260,7 +289,9 @@ detection to preserve its existing public imports.
 
 Benchmark artifacts are first-class outputs: structured clip/frame metrics, prediction records,
 ROC/PR data, plots, provenance including checkpoint SHA-256, and a deterministic Markdown report.
-Commands emit `WorkflowEvent` values; all Rich rendering remains in the mode presentation module.
+`VideoAnomalyBenchmarkArtifactWriter` owns serialization, plotting, and report generation while
+the command coordinates evaluation. Commands emit `WorkflowEvent` values; all Rich rendering
+remains in the mode presentation module.
 
 ## AWS SageMaker Training
 
@@ -288,12 +319,12 @@ separate prefixes under the configured checkpoint base. MLX may create and reuse
 repository and narrowly scoped SageMaker execution role when the caller does not provide them.
 Stopping compute preserves checkpoints and returns a resumable job identity.
 
-The AWS package keeps replaceable infrastructure at narrow boundaries. `clients.py` creates the
-Boto3 client bundle at the composition edge; callers may inject the same bundle shape in tests or
-other runtimes. `image.py` owns source hashing, Docker command execution, and immutable ECR image
-publication. `status.py` performs the side-effect-free translation from a SageMaker description
-and metric reader into `AwsTrainingStatus`. `service.py` remains the compatibility facade for
-storage, IAM, submission, resume, stop, and monitoring coordination.
+Shared AWS infrastructure lives under `mlx.core.aws`: lifecycle values and commands, Boto3 client
+construction, source hashing, Docker/ECR publication, and side-effect-free status translation.
+Mode AWS modules retain compatibility re-exports. Each mode continues to own configuration and
+IAM policy, training payload serialization, checkpoint/recovery codecs, container entrypoints,
+and service composition; these distinct ML semantics are deliberately not folded into a generic
+service.
 
 Recovery is intentionally a completed-epoch guarantee. Provider `last.pt` files include model,
 epoch, optimizer, scaler, EMA, and available scheduler/RNG state; a project-owned publisher only
@@ -317,12 +348,35 @@ and immutable image, allowing only a higher total epoch target plus capacity/run
 Final model artifacts include the best checkpoint, resumable checkpoint, training CSV, and a
 sanitized summary.
 
+## Shared Primitives, Requests, and Registries
+
+`mlx.core.artifacts` contains only behavior that is identical across modes: JSON-safe value
+normalization, atomic JSON/PyTorch writes, CSV serialization, and SHA-256 hashing. RNG capture and
+restore live in `mlx.core.random`. Checkpoint schemas, compatibility checks, naming, plots, and
+reports remain mode owned. Deep-SVDD sharing remains similarly narrow in `mlx.core.deep_svdd`.
+
+Image classification and segmentation expose action-specific request subclasses while retaining
+their former umbrella request types for Python compatibility. `ConfigRequest` keeps unknown
+public compatibility values but discards underscore-prefixed CLI bookkeeping. Commands may still
+adapt a typed request to a mapping at a legacy boundary; runners are responsible for selecting
+the action-specific type.
+
+Tracking, object-detection providers, image-classification custom models, temporal encoders, and
+3D video backbones expose immutable registry mappings or registry value objects. Extension APIs
+return a new registry for dependency injection. Historic registration calls also update their
+default registry for compatibility, while exported mappings remain read-only to callers.
+
+NLP (`pandas`, `llama-cpp-python`) and Grad-CAM are optional package extras. Their adapters remain
+lazy and raise actionable `MLXUserError` messages when the selected capability is not installed.
+
 ## Presentation, Errors, and Compatibility
 
 Commands expose structured values and provider-neutral protocols. Long-running training,
 benchmark, dataset-build, conversion, CAM, and embedding commands report structured
-`WorkflowEvent` values; Rich tables, progress bars, prompts, and panels belong to mode-owned
-`presentation.py` adapters. Compatibility functions may attach those adapters, while direct
+`WorkflowEvent` values; task-specific Rich tables, progress bars, prompts, and panels belong to
+mode-owned `presentation.py` adapters. Rendering for shared infrastructure events may live in
+`mlx.core.presentation` and is composed by those mode adapters. Compatibility functions may
+attach the adapters, while direct
 command construction defaults to a no-op reporter and remains suitable for Python and tests.
 Detection streaming and
 tracking video execution support headless use through injected presentation boundaries:

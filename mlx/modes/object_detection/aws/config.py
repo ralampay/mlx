@@ -36,6 +36,7 @@ _TRAINING_KEYS = set(TrainObjectDetectionRequest.__dataclass_fields__) - {
     "dataset_cache_dir",
     "output_path",
     "model_path",
+    "extras",
 }
 _CLI_TRAINING_KEYS = _TRAINING_KEYS - {"plots", "save_period"}
 

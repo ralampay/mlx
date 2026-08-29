@@ -5,13 +5,39 @@ import copy
 import torch
 from torch import nn
 
-from mlx.modes.image_classification.models.blocks import (
-    DropPath,
-    DraxBlock,
-    resolve_attention_num_heads,
-    resolve_drax_fusion_mode,
-    resolve_efficient_attention_dim,
-)
+
+
+def _resolve_drax_fusion_mode(value: str) -> str:
+    normalized = value.strip().lower()
+    if normalized not in {"average", "sknet"}:
+        raise ValueError("Drax fusion mode must be 'average' or 'sknet'.")
+    return normalized
+
+
+def _resolve_attention_num_heads(dim: int, max_heads: int = 8) -> int:
+    return next(heads for heads in range(min(max_heads, dim), 0, -1) if dim % heads == 0)
+
+
+def _resolve_efficient_attention_dim(dim: int) -> int:
+    reduced_dim = max(32, dim // 2)
+    while reduced_dim > 1 and dim % reduced_dim != 0:
+        reduced_dim -= 1
+    return reduced_dim
+
+
+class DropPath3D(nn.Module):
+    def __init__(self, drop_prob: float = 0.0) -> None:
+        super().__init__()
+        self.drop_prob = float(drop_prob)
+
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        if self.drop_prob == 0.0 or not self.training:
+            return x
+        keep_prob = 1.0 - self.drop_prob
+        shape = (x.shape[0],) + (1,) * (x.ndim - 1)
+        random_tensor = keep_prob + torch.rand(shape, dtype=x.dtype, device=x.device)
+        random_tensor.floor_()
+        return x.div(keep_prob) * random_tensor
 
 
 class SelfAttention3D(nn.Module):
@@ -119,11 +145,11 @@ class DraxBlock3D(nn.Module):
         super().__init__()
         self.use_attention = use_attention
         self.efficient = efficient
-        self.fusion_mode = resolve_drax_fusion_mode(fusion_mode)
+        self.fusion_mode = _resolve_drax_fusion_mode(fusion_mode)
         self.convnext = ConvNeXtBlock3D(
             dim, temporal_kernel_size=temporal_kernel_size
         )
-        self.drop_path = DropPath(drop_path)
+        self.drop_path = DropPath3D(drop_path)
 
         if use_attention and self.fusion_mode == "sknet":
             fusion_dim = max(32, dim // 16)
@@ -141,9 +167,9 @@ class DraxBlock3D(nn.Module):
             self.attn_down = None
             self.attn_up = None
             return
-        attention_dim = resolve_efficient_attention_dim(dim) if efficient else dim
+        attention_dim = _resolve_efficient_attention_dim(dim) if efficient else dim
         self.attention = SelfAttention3D(
-            attention_dim, num_heads=resolve_attention_num_heads(attention_dim)
+            attention_dim, num_heads=_resolve_attention_num_heads(attention_dim)
         )
         if efficient:
             self.attn_down = nn.Conv3d(dim, attention_dim, kernel_size=1)
@@ -173,7 +199,7 @@ class DraxBlock3D(nn.Module):
         return x + self.drop_path(fused)
 
 
-def inflate_drax_block(source: DraxBlock, temporal_kernel_size: int) -> DraxBlock3D:
+def inflate_drax_block(source: nn.Module, temporal_kernel_size: int) -> DraxBlock3D:
     target = DraxBlock3D(
         source.convnext.dwconv.in_channels,
         temporal_kernel_size=temporal_kernel_size,

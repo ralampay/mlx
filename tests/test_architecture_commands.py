@@ -5,7 +5,8 @@ from pathlib import Path
 import numpy as np
 import pytest
 
-from mlx.cli import MODE_REGISTRY, build_parser
+from mlx.cli import MODE_REGISTRY, build_parser, main
+from mlx.cli_routing import resolve_mode_descriptor
 from mlx.core.commands import CallbackWorkflowReporter
 from mlx.core.exceptions import MLXUserError
 from mlx.core.model_listing import ModelParameterSummary
@@ -119,6 +120,34 @@ def test_cli_parses_s3_dataset_staging_options() -> None:
     )
     assert namespace.dataset_s3_uri == "s3://datasets/training.zip"
     assert namespace.dataset_cache_dir == "/tmp/mlx-cache"
+
+
+def test_mode_descriptors_supply_defaults_and_alias_metadata() -> None:
+    canonical = resolve_mode_descriptor("video_anomaly_detection")
+    alias = resolve_mode_descriptor("video-anomaly-detection")
+
+    assert canonical is alias
+    assert canonical.default_action == "ls-models"
+    assert "benchmark" in canonical.actions
+
+
+def test_cli_applies_mode_default_before_dispatch_and_emits_clean_json(
+    monkeypatch, capsys
+) -> None:
+    captured = {}
+
+    def fake_resolver(_mode):
+        def run(config):
+            captured.update(config)
+            return {"path": Path("artifact.json"), "ok": True}
+
+        return run
+
+    monkeypatch.setattr("mlx.cli._resolve_mode_runner", fake_resolver)
+
+    assert main(["--mode", "image_classification", "--format", "json"]) == 0
+    assert captured["action"] == "test"
+    assert capsys.readouterr().out == '{"ok": true, "path": "artifact.json"}\n'
 
 
 def test_typed_request_round_trips_legacy_extra_values() -> None:

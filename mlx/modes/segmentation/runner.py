@@ -5,12 +5,13 @@ from typing import Any
 
 from mlx.core.datasets import (
     TrainWithDatasetSource,
-    segmentation_dataset_root,
     validate_dataset_source_options,
 )
+from mlx.core.commands import NullWorkflowReporter
+from mlx.core.streaming import NullFrameSink
 from mlx.core.exceptions import MLXUserError
 from mlx.core.ui import print_model_parameter_table
-from mlx.modes.segmentation.data import BuildSegmentationDataset
+from mlx.modes.segmentation.data import BuildSegmentationDataset, segmentation_dataset_root
 from mlx.modes.segmentation.evaluation import BenchmarkSegmentation
 from mlx.modes.segmentation.inference import (
     InferSegmentationImage,
@@ -26,7 +27,11 @@ from mlx.modes.segmentation.presentation import (
 )
 from mlx.modes.segmentation.requests import (
     BuildSegmentationDatasetRequest,
+    BenchmarkSegmentationRequest,
+    InferSegmentationRequest,
     SegmentationRequest,
+    SmokeTestSegmentationRequest,
+    TrainSegmentationRequest,
 )
 from mlx.modes.segmentation.train import (
     SmokeTestSegmentationModel,
@@ -54,48 +59,57 @@ DEFAULT_CONFIG = {
 }
 
 
+def _reporter(config: dict[str, Any]):
+    return NullWorkflowReporter() if config.get("output_format") == "json" else RichSegmentationReporter()
+
+
 def _list_models(config: dict[str, Any]):
     summaries = ListSegmentationModels(config).execute()
-    print_model_parameter_table(summaries, title="Segmentation Models")
+    if config.get("output_format") != "json":
+        print_model_parameter_table(summaries, title="Segmentation Models")
     return summaries
 
 
 def _infer_image(config: dict[str, Any]):
     result = InferSegmentationImage(
-        SegmentationRequest.from_config(config)
+        InferSegmentationRequest.from_config(config)
     ).execute()
-    if config.get("display", True):
+    if config.get("output_format") != "json" and config.get("display", True):
         display_segmentation_result(result)
     return result
 
 
 def _run_stream(config: dict[str, Any], *, source: str):
-    request = SegmentationRequest.from_config(config)
+    request = InferSegmentationRequest.from_config(config)
     frame_source = OpenCVSegmentationFrameSource(
         source=source,
         camera_index=request.camera_index,
         file_path=request.file_path,
     )
-    frame_sink = OpenCVSegmentationFrameSink(
-        title=(
-            "MLX Segmentation (Camera)"
-            if source == "camera"
-            else "MLX Segmentation (Video)"
-        ),
-        delay_ms=1 if source == "camera" else 10,
+    frame_sink = (
+        NullFrameSink()
+        if config.get("output_format") == "json"
+        else OpenCVSegmentationFrameSink(
+            title=(
+                "MLX Segmentation (Camera)"
+                if source == "camera"
+                else "MLX Segmentation (Video)"
+            ),
+            delay_ms=1 if source == "camera" else 10,
+        )
     )
     return RunSegmentationStreamInference(
         request,
         source=source,
         frame_source=frame_source,
         frame_sink=frame_sink,
-        reporter=RichSegmentationReporter(),
+        reporter=_reporter(config),
     ).execute()
 
 
 def _train(config: dict[str, Any]):
-    request = SegmentationRequest.from_config(config)
-    reporter = RichSegmentationReporter()
+    request = TrainSegmentationRequest.from_config(config)
+    reporter = _reporter(config)
     return TrainWithDatasetSource(
         request,
         trainer_factory=lambda resolved: TrainSegmentationModel(
@@ -112,12 +126,12 @@ def _train(config: dict[str, Any]):
 
 ACTION_HANDLERS = {
     "benchmark": lambda config: BenchmarkSegmentation(
-        SegmentationRequest.from_config(config),
-        reporter=RichSegmentationReporter(),
+        BenchmarkSegmentationRequest.from_config(config),
+        reporter=_reporter(config),
     ).execute(),
     "build-dataset": lambda config: BuildSegmentationDataset(
         BuildSegmentationDatasetRequest.from_config(config),
-        reporter=RichSegmentationReporter(),
+        reporter=_reporter(config),
         input_resolver=resolve_segmentation_dataset_build_request,
     ).execute(),
     "infer-camera": lambda config: _run_stream(config, source="camera"),
@@ -125,8 +139,8 @@ ACTION_HANDLERS = {
     "infer-video": lambda config: _run_stream(config, source="video"),
     "ls-models": _list_models,
     "test": lambda config: SmokeTestSegmentationModel(
-        SegmentationRequest.from_config(config),
-        reporter=RichSegmentationReporter(),
+        SmokeTestSegmentationRequest.from_config(config),
+        reporter=_reporter(config),
     ).execute(),
     "train": _train,
 }
@@ -134,6 +148,7 @@ ACTION_HANDLERS = {
 
 def run_segmentation(mode_config: dict[str, Any]) -> Any:
     config = {**DEFAULT_CONFIG, **mode_config}
+    config["action"] = config.get("action") or DEFAULT_CONFIG["action"]
     validate_dataset_source_options(config, action=config["action"])
     if config["action"] == "ls-models":
         return ACTION_HANDLERS["ls-models"](config)
@@ -141,7 +156,8 @@ def run_segmentation(mode_config: dict[str, Any]) -> Any:
     config["model"] = mode_config.get("model") or DEFAULT_MODEL
     config["input_size"] = tuple(config.get("input_size", (config["width"], config["height"])))
 
-    print_segmentation_config_summary(config["model"], config)
+    if config.get("output_format") != "json":
+        print_segmentation_config_summary(config["model"], config)
 
     handler = ACTION_HANDLERS.get(config["action"])
     if handler is None:

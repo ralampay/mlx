@@ -41,6 +41,8 @@ class TrainVideoAnomalyRequest(VideoAnomalyRequest):
     epochs: int = 50
     lr: Optional[float] = 0.001
     use_best: bool = True
+    backbone_mode_explicit: bool = False
+    temporal_options_explicit: bool = False
 
 
 @dataclass(frozen=True)

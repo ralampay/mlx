@@ -33,7 +33,9 @@ class TrackingRequest:
         values["extras"] = {
             name: value
             for name, value in config.items()
-            if name not in field_names and name != "track_class_ids"
+            if name not in field_names
+            and name != "track_class_ids"
+            and not name.startswith("_")
         }
         return cls(**values)
 

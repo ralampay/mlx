@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import hashlib
 import platform
 import time
 from pathlib import Path
@@ -14,6 +13,7 @@ from torch import nn
 from torch.utils.data import DataLoader
 
 from mlx.core.commands import NullWorkflowReporter, WorkflowReporter, emit
+from mlx.core.artifacts import sha256_file as _sha256
 from mlx.core.exceptions import MLXUserError
 from mlx.modes.segmentation.data import (
     SegmentationEvaluationDataset,
@@ -458,11 +458,3 @@ class BenchmarkSegmentation:
     def _output_dir(self) -> Path | None:
         output_path = self.config.get("output_path")
         return Path(output_path).expanduser() if output_path else None
-
-
-def _sha256(path: Path) -> str:
-    digest = hashlib.sha256()
-    with path.open("rb") as input_file:
-        while chunk := input_file.read(1024 * 1024):
-            digest.update(chunk)
-    return digest.hexdigest()

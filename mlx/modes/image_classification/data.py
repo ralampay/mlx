@@ -21,9 +21,17 @@ except ImportError as exc:  # pragma: no cover - pillow is expected via torchvis
 
 from mlx.core.commands import NullWorkflowReporter, WorkflowReporter, emit
 from mlx.core.exceptions import MLXUserError
+from mlx.core.datasets import resolve_split_dataset_root
 from mlx.modes.image_classification.requests import BuildImageClassificationDatasetRequest
 
 IMAGE_EXTENSIONS = (".png", ".jpg", ".jpeg", ".bmp")
+
+
+def classification_dataset_root(extracted_path: Path) -> Path:
+    return resolve_split_dataset_root(
+        extracted_path,
+        dataset_label="image-classification dataset",
+    )
 
 
 def _iter_image_paths(directory: Path) -> List[Path]:

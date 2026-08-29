@@ -80,7 +80,12 @@ python -m pip install ".[object-detection-libreyolo]"
 python -m pip install ".[object-detection]"  # both providers
 python -m pip install ".[aws,object-detection]"  # SageMaker detection lifecycle
 python -m pip install ".[aws]"                   # SageMaker classification lifecycle
+python -m pip install ".[nlp]"                   # GGUF CSV embedding
+python -m pip install ".[image-explainability]"  # Grad-CAM actions
 ```
+
+The base installation keeps NLP and image-explanation providers optional so importing the CLI
+does not require llama.cpp, pandas, or Grad-CAM.
 
 For local AWS credentials, least-privilege IAM policies, S3 preparation, and SageMaker lifecycle
 commands, see the [AWS object-detection training guide](docs/object_detection/aws-sagemaker-training.md).
@@ -111,6 +116,10 @@ reference:
 ```bash
 python -m mlx --help
 ```
+
+Mode aliases, default actions, and action inventories come from one routing registry. Use
+`--format json` for a single machine-readable local result with progress and Rich presentation
+suppressed; errors are emitted as JSON on standard error.
 
 ### Training from an S3 dataset ZIP
 

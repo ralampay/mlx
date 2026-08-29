@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import pickle
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
@@ -46,20 +47,98 @@ TRAINING_COLUMNS = [
 ]
 
 
+@dataclass(frozen=True)
+class VideoAnomalyTrainingData:
+    train_dataset: Any
+    validation_dataset: Any
+    train_loader: DataLoader
+    center_loader: DataLoader
+    validation_loader: DataLoader
+
+
+def _emit_training_progress(
+    reporter: WorkflowReporter | None,
+    *,
+    status: str,
+    phase: str,
+    message: str,
+    current: int,
+    total: int,
+    epoch: int | None = None,
+    epochs: int | None = None,
+) -> None:
+    if reporter is None:
+        return
+    emit(
+        reporter,
+        "progress",
+        message,
+        current=current,
+        total=total,
+        payload={
+            "event": "video_anomaly_training_progress",
+            "status": status,
+            "phase": phase,
+            "epoch": epoch,
+            "epochs": epochs,
+        },
+    )
+
+
 @torch.no_grad()
-def initialize_svdd_center(model, loader, device: str, eps: float = 0.1) -> torch.Tensor:
+def initialize_svdd_center(
+    model,
+    loader,
+    device: str,
+    eps: float = 0.1,
+    *,
+    reporter: WorkflowReporter | None = None,
+) -> torch.Tensor:
     was_training = model.training
     model.eval()
     total = torch.zeros_like(model.svdd_head.center, device=device)
     count = 0
-    for clips, _, _ in loader:
-        embeddings = model(clips.to(device)).svdd_embedding
-        total += embeddings.sum(dim=0)
-        count += embeddings.shape[0]
+    batches_completed = 0
+    batch_total = len(loader)
+    completed = False
+    _emit_training_progress(
+        reporter,
+        status="start",
+        phase="center",
+        message="Initializing Deep SVDD center",
+        current=0,
+        total=batch_total,
+    )
+    try:
+        for batch_index, (clips, _, _) in enumerate(loader, start=1):
+            embeddings = model(clips.to(device)).svdd_embedding
+            total += embeddings.sum(dim=0)
+            count += embeddings.shape[0]
+            batches_completed = batch_index
+            _emit_training_progress(
+                reporter,
+                status="update",
+                phase="center",
+                message="Initializing Deep SVDD center",
+                current=batch_index,
+                total=batch_total,
+            )
+        if count == 0:
+            raise MLXUserError(
+                "Cannot initialize the Deep SVDD center from an empty normal training loader."
+            )
+        completed = True
+    finally:
+        _emit_training_progress(
+            reporter,
+            status="complete" if completed else "failed",
+            phase="center",
+            message="Initializing Deep SVDD center",
+            current=batch_total if completed else batches_completed,
+            total=batch_total,
+        )
     if was_training:
         model.train()
-    if count == 0:
-        raise MLXUserError("Cannot initialize the Deep SVDD center from an empty normal training loader.")
     center = total / count
     near_zero = center.abs() < eps
     signs = torch.where(center < 0, -torch.ones_like(center), torch.ones_like(center))
@@ -69,12 +148,59 @@ def initialize_svdd_center(model, loader, device: str, eps: float = 0.1) -> torc
 
 
 @torch.no_grad()
-def collect_scores(model, loader, device: str) -> torch.Tensor:
+def collect_scores(
+    model,
+    loader,
+    device: str,
+    *,
+    reporter: WorkflowReporter | None = None,
+    phase: str = "validation",
+    message: str = "Validating normal clips",
+    epoch: int | None = None,
+    epochs: int | None = None,
+) -> torch.Tensor:
     model.eval()
-    scores = [model(clips.to(device)).anomaly_score.cpu() for clips, _, _ in loader]
-    if not scores:
-        raise MLXUserError("Cannot evaluate Deep SVDD using an empty clip loader.")
-    return torch.cat(scores)
+    scores = []
+    batch_total = len(loader)
+    completed = False
+    _emit_training_progress(
+        reporter,
+        status="start",
+        phase=phase,
+        message=message,
+        current=0,
+        total=batch_total,
+        epoch=epoch,
+        epochs=epochs,
+    )
+    try:
+        for batch_index, (clips, _, _) in enumerate(loader, start=1):
+            scores.append(model(clips.to(device)).anomaly_score.cpu())
+            _emit_training_progress(
+                reporter,
+                status="update",
+                phase=phase,
+                message=message,
+                current=batch_index,
+                total=batch_total,
+                epoch=epoch,
+                epochs=epochs,
+            )
+        if not scores:
+            raise MLXUserError("Cannot evaluate Deep SVDD using an empty clip loader.")
+        completed = True
+        return torch.cat(scores)
+    finally:
+        _emit_training_progress(
+            reporter,
+            status="complete" if completed else "failed",
+            phase=phase,
+            message=message,
+            current=batch_total if completed else len(scores),
+            total=batch_total,
+            epoch=epoch,
+            epochs=epochs,
+        )
 
 
 class TrainVideoAnomalyModel:
@@ -98,12 +224,15 @@ class TrainVideoAnomalyModel:
         seed_everything(config.get("random_seed"))
         paths = resolve_training_paths(config)
         paths["output_dir"].mkdir(parents=True, exist_ok=True)
-        train_dataset = self._dataset(config, "train", normal_only=True)
-        val_dataset = self._dataset(config, "val", normal_only=True)
-        train_loader = self._loader(train_dataset, config, shuffle=True)
-        center_loader = self._loader(train_dataset, config, shuffle=False)
-        val_loader = self._loader(val_dataset, config, shuffle=False)
+        emit(self.reporter, "info", "Preparing normal-only video clip datasets")
+        data = self._training_data(config)
         device = str(config["device"])
+        emit(
+            self.reporter,
+            "info",
+            f"Loaded {len(data.train_dataset)} training windows and "
+            f"{len(data.validation_dataset)} normal validation windows",
+        )
         model_config = dict(config)
         if config.get("model_path"):
             model_config["pretrained"] = False
@@ -114,7 +243,12 @@ class TrainVideoAnomalyModel:
             model, optimizer, config, paths["training_csv"]
         )
         if not resumed:
-            initialize_svdd_center(model, center_loader, device)
+            initialize_svdd_center(
+                model,
+                data.center_loader,
+                device,
+                reporter=self.reporter,
+            )
 
         epochs = int(config["epochs"])
         emit(
@@ -122,48 +256,32 @@ class TrainVideoAnomalyModel:
             "info",
             f"Training normal-only video anomaly model for {epochs} epochs on {device}",
         )
-        for epoch in range(start_epoch, epochs):
-            train_scores, train_loss = self._train_epoch(model, train_loader, optimizer, device)
-            val_scores = collect_scores(model, val_loader, device)
-            val_loss = float(val_scores.mean().item())
-            row = _history_row(
-                epoch + 1,
-                train_loss,
-                train_scores,
-                val_scores,
-                float(optimizer.param_groups[0]["lr"]),
-            )
-            history.append(row)
-            write_csv(paths["training_csv"], history, TRAINING_COLUMNS)
-            improved = val_loss < best
-            if improved:
-                best = val_loss
-            if improved or not bool(config.get("use_best", True)):
-                save_deployment_checkpoint(paths["checkpoint"], model, config)
-            save_training_checkpoint(
-                paths["last_checkpoint"],
-                model,
-                optimizer,
-                config,
-                completed_epoch=epoch + 1,
-                history=history,
-                best_validation_objective=best,
-            )
-            emit(
-                self.reporter,
-                "progress",
-                f"Epoch {epoch + 1}/{epochs} train_svdd={train_loss:.6f} val_svdd={val_loss:.6f}",
-                current=epoch + 1,
-                total=epochs,
-                payload={"event": "video_anomaly_training_epoch", "metrics": row, "best": best},
-            )
+        best = self._run_epochs(
+            model=model,
+            optimizer=optimizer,
+            train_loader=data.train_loader,
+            validation_loader=data.validation_loader,
+            device=device,
+            config=config,
+            paths=paths,
+            start_epoch=start_epoch,
+            history=history,
+            best=best,
+        )
 
         if not paths["checkpoint"].is_file():
             save_deployment_checkpoint(paths["checkpoint"], model, config)
-        self._calibrate_checkpoint(paths["checkpoint"], val_loader, config, device)
+        self._calibrate_checkpoint(paths["checkpoint"], data.validation_loader, config, device)
         # The current model is the resumable last state; calibrate and persist it without
         # disturbing optimizer/history state.
-        last_scores = collect_scores(model, val_loader, device)
+        last_scores = collect_scores(
+            model,
+            data.validation_loader,
+            device,
+            reporter=self.reporter,
+            phase="last-calibration",
+            message="Calibrating resumable checkpoint threshold",
+        )
         model.svdd_head.threshold.copy_(
             quantile_threshold(last_scores, float(config["svdd_quantile"])).to(device)
         )
@@ -186,8 +304,8 @@ class TrainVideoAnomalyModel:
             "backbone_mode": config["backbone_mode"],
             "dataset": str(config["dataset_path"]),
             "normal_only_training": True,
-            "train_windows": len(train_dataset),
-            "validation_normal_windows": len(val_dataset),
+            "train_windows": len(data.train_dataset),
+            "validation_normal_windows": len(data.validation_dataset),
             "epochs_completed": completed_epoch,
             "seed": config.get("random_seed"),
             "device": device,
@@ -246,6 +364,85 @@ class TrainVideoAnomalyModel:
             payload={"event": "video_anomaly_training_complete", **metadata},
         )
         return {"paths": paths, "history": history, "metadata": metadata}
+
+    def _training_data(self, config: dict[str, Any]) -> VideoAnomalyTrainingData:
+        train_dataset = self._dataset(config, "train", normal_only=True)
+        validation_dataset = self._dataset(config, "val", normal_only=True)
+        return VideoAnomalyTrainingData(
+            train_dataset=train_dataset,
+            validation_dataset=validation_dataset,
+            train_loader=self._loader(train_dataset, config, shuffle=True),
+            center_loader=self._loader(train_dataset, config, shuffle=False),
+            validation_loader=self._loader(validation_dataset, config, shuffle=False),
+        )
+
+    def _run_epochs(
+        self,
+        *,
+        model,
+        optimizer,
+        train_loader,
+        validation_loader,
+        device: str,
+        config: dict[str, Any],
+        paths: dict[str, Path],
+        start_epoch: int,
+        history: list[dict[str, Any]],
+        best: float,
+    ) -> float:
+        epochs = int(config["epochs"])
+        for epoch in range(start_epoch, epochs):
+            train_scores, train_loss = self._train_epoch(
+                model,
+                train_loader,
+                optimizer,
+                device,
+                epoch=epoch + 1,
+                epochs=epochs,
+            )
+            val_scores = collect_scores(
+                model,
+                validation_loader,
+                device,
+                reporter=self.reporter,
+                phase="validation",
+                message=f"Epoch {epoch + 1}/{epochs}: validating normal clips",
+                epoch=epoch + 1,
+                epochs=epochs,
+            )
+            val_loss = float(val_scores.mean().item())
+            row = _history_row(
+                epoch + 1,
+                train_loss,
+                train_scores,
+                val_scores,
+                float(optimizer.param_groups[0]["lr"]),
+            )
+            history.append(row)
+            write_csv(paths["training_csv"], history, TRAINING_COLUMNS)
+            improved = val_loss < best
+            if improved:
+                best = val_loss
+            if improved or not bool(config.get("use_best", True)):
+                save_deployment_checkpoint(paths["checkpoint"], model, config)
+            save_training_checkpoint(
+                paths["last_checkpoint"],
+                model,
+                optimizer,
+                config,
+                completed_epoch=epoch + 1,
+                history=history,
+                best_validation_objective=best,
+            )
+            emit(
+                self.reporter,
+                "progress",
+                f"Epoch {epoch + 1}/{epochs} train_svdd={train_loss:.6f} val_svdd={val_loss:.6f}",
+                current=epoch + 1,
+                total=epochs,
+                payload={"event": "video_anomaly_training_epoch", "metrics": row, "best": best},
+            )
+        return best
 
     def _dataset(self, config: dict[str, Any], split: str, *, normal_only: bool):
         return self.dataset_factory(
@@ -309,19 +506,69 @@ class TrainVideoAnomalyModel:
         emit(self.reporter, "info", f"Resuming from completed epoch {completed}: {path}")
         return completed, float(checkpoint.get("best_validation_objective", float("inf"))), history, True
 
-    @staticmethod
-    def _train_epoch(model, loader, optimizer, device: str):
+    def _train_epoch(
+        self,
+        model,
+        loader,
+        optimizer,
+        device: str,
+        *,
+        epoch: int,
+        epochs: int,
+    ):
         model.train()
         scores = []
-        for clips, labels, _ in loader:
-            if torch.any(labels != 0):
-                raise MLXUserError("An anomalous sample reached the normal-only training loader.")
-            optimizer.zero_grad()
-            batch_scores = model(clips.to(device)).anomaly_score
-            loss = batch_scores.mean()
-            loss.backward()
-            optimizer.step()
-            scores.append(batch_scores.detach().cpu())
+        batch_total = len(loader)
+        completed = False
+        message = f"Epoch {epoch}/{epochs}: training normal clips"
+        _emit_training_progress(
+            self.reporter,
+            status="start",
+            phase="train",
+            message=message,
+            current=0,
+            total=batch_total,
+            epoch=epoch,
+            epochs=epochs,
+        )
+        try:
+            for batch_index, (clips, labels, _) in enumerate(loader, start=1):
+                if torch.any(labels != 0):
+                    raise MLXUserError(
+                        "An anomalous sample reached the normal-only training loader."
+                    )
+                optimizer.zero_grad()
+                batch_scores = model(clips.to(device)).anomaly_score
+                loss = batch_scores.mean()
+                loss.backward()
+                optimizer.step()
+                scores.append(batch_scores.detach().cpu())
+                _emit_training_progress(
+                    self.reporter,
+                    status="update",
+                    phase="train",
+                    message=message,
+                    current=batch_index,
+                    total=batch_total,
+                    epoch=epoch,
+                    epochs=epochs,
+                )
+            if not scores:
+                raise MLXUserError(
+                    "Cannot train Deep SVDD using an empty normal training loader."
+                )
+            completed = True
+        finally:
+            _emit_training_progress(
+                self.reporter,
+                status="complete" if completed else "failed",
+                phase="train",
+                message=message,
+                current=batch_total if completed else len(scores),
+                total=batch_total,
+                epoch=epoch,
+                epochs=epochs,
+            )
         all_scores = torch.cat(scores)
         return all_scores, float(all_scores.mean().item())
 
@@ -331,7 +578,14 @@ class TrainVideoAnomalyModel:
             str(config["model"]), {**config, "pretrained": False}
         ).to(device)
         calibrated.load_state_dict(checkpoint["state_dict"])
-        scores = collect_scores(calibrated, val_loader, device)
+        scores = collect_scores(
+            calibrated,
+            val_loader,
+            device,
+            reporter=self.reporter,
+            phase="best-calibration",
+            message="Calibrating best-checkpoint threshold",
+        )
         threshold = quantile_threshold(scores, float(config["svdd_quantile"])).to(device)
         calibrated.svdd_head.threshold.copy_(threshold)
         save_deployment_checkpoint(path, calibrated, config)
@@ -364,9 +618,9 @@ def _history_row(epoch, train_loss, train_scores, val_scores, learning_rate):
 def _validate_training_config(config: dict[str, Any]) -> None:
     if not config.get("model"):
         raise MLXUserError("Video anomaly training requires --model.")
-    from mlx.modes.image_classification.models import model_family_for
+    from mlx.modes.video_anomaly_detection.models.classification_compat import is_standard_backbone
 
-    if model_family_for(str(config["model"])) != "standard":
+    if not is_standard_backbone(str(config["model"])):
         raise MLXUserError(
             "Video anomaly detection supports standard backbones only; "
             "Siamese models are excluded."
@@ -397,8 +651,9 @@ def _validate_training_config(config: dict[str, Any]) -> None:
 
 def _apply_resume_backbone_compatibility(config: dict[str, Any]) -> None:
     resume = config.get("model_path")
-    explicit = set(config.get("_explicit_options") or ())
-    if not resume or "backbone_mode" in explicit:
+    backbone_mode_explicit = bool(config.get("backbone_mode_explicit", False))
+    temporal_options_explicit = bool(config.get("temporal_options_explicit", False))
+    if not resume or backbone_mode_explicit:
         return
     path = Path(resume).expanduser()
     if not path.is_file():
@@ -409,14 +664,7 @@ def _apply_resume_backbone_compatibility(config: dict[str, Any]) -> None:
         return  # The normal resume loader supplies the contextual user-facing error.
     if checkpoint.get("mode") == "video_anomaly_detection":
         stored_mode = str(checkpoint.get("backbone_mode", "frame-2d"))
-        temporal_options = {
-            "temporal_model",
-            "temporal_hidden_dim",
-            "temporal_embedding_dim",
-            "temporal_kernel_size",
-            "temporal_dropout",
-        }
-        if stored_mode == "3d" and explicit & temporal_options:
+        if stored_mode == "3d" and temporal_options_explicit:
             raise MLXUserError(
                 "The resume checkpoint uses a 3D backbone; temporal-CNN options cannot alter "
                 "its stored architecture."

@@ -1,13 +1,35 @@
 from __future__ import annotations
 
 from collections.abc import Callable
+from dataclasses import dataclass, field
 import inspect
+from types import MappingProxyType
+from typing import Mapping
 
 from torch import nn
 
 from mlx.core.exceptions import MLXUserError
 
-CUSTOM_STANDARD_MODEL_BUILDERS: dict[str, Callable] = {}
+
+@dataclass(frozen=True)
+class StandardModelRegistry:
+    builders: Mapping[str, Callable] = field(default_factory=dict)
+
+    def __post_init__(self) -> None:
+        object.__setattr__(self, "builders", MappingProxyType(dict(self.builders)))
+
+    def register(self, name: str, builder: Callable) -> "StandardModelRegistry":
+        normalized = name.strip().lower()
+        if not normalized:
+            raise ValueError("Standard model name cannot be empty.")
+        builders = dict(self.builders)
+        builders[normalized] = builder
+        return StandardModelRegistry(builders)
+
+
+_COMPAT_STANDARD_MODEL_BUILDERS: dict[str, Callable] = {}
+CUSTOM_STANDARD_MODEL_BUILDERS = MappingProxyType(_COMPAT_STANDARD_MODEL_BUILDERS)
+DEFAULT_STANDARD_MODEL_REGISTRY = StandardModelRegistry(_COMPAT_STANDARD_MODEL_BUILDERS)
 
 SUPPORTED_TORCHVISION_MODELS = {
     "resnet18",
@@ -22,12 +44,29 @@ SUPPORTED_TORCHVISION_MODELS = {
 }
 
 
-def register_standard_model(name: str, builder) -> None:
-    CUSTOM_STANDARD_MODEL_BUILDERS[name] = builder
+def register_standard_model(
+    name: str,
+    builder: Callable,
+    *,
+    registry: StandardModelRegistry | None = None,
+) -> StandardModelRegistry:
+    """Register against an injected registry, retaining legacy default registration."""
+
+    global DEFAULT_STANDARD_MODEL_REGISTRY
+    selected = registry or DEFAULT_STANDARD_MODEL_REGISTRY
+    updated = selected.register(name, builder)
+    if registry is None:
+        _COMPAT_STANDARD_MODEL_BUILDERS[name.strip().lower()] = builder
+        DEFAULT_STANDARD_MODEL_REGISTRY = StandardModelRegistry(
+            _COMPAT_STANDARD_MODEL_BUILDERS
+        )
+    return updated
 
 
-def registered_standard_model_names() -> list[str]:
-    return sorted(CUSTOM_STANDARD_MODEL_BUILDERS.keys())
+def registered_standard_model_names(
+    registry: StandardModelRegistry | None = None,
+) -> list[str]:
+    return sorted((registry or DEFAULT_STANDARD_MODEL_REGISTRY).builders)
 
 
 def build_standard_model(
@@ -37,8 +76,9 @@ def build_standard_model(
     colored: bool,
     pretrained: bool,
     config: dict | None = None,
+    registry: StandardModelRegistry | None = None,
 ):
-    custom_builder = CUSTOM_STANDARD_MODEL_BUILDERS.get(model_name)
+    custom_builder = (registry or DEFAULT_STANDARD_MODEL_REGISTRY).builders.get(model_name)
     if custom_builder is not None:
         builder_params = {
             "num_classes": num_classes,

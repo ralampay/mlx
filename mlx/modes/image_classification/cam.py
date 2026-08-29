@@ -263,7 +263,7 @@ def overlay_cam(rgb_image: np.ndarray, grayscale_cam: np.ndarray) -> np.ndarray:
     try:
         from pytorch_grad_cam.utils.image import show_cam_on_image
     except ImportError as exc:
-        raise MLXUserError("Install the optional Grad-CAM dependency with 'pip install grad-cam'.") from exc
+        raise MLXUserError("Image explanations require the 'image-explainability' extra.") from exc
 
     return show_cam_on_image(rgb_image.astype(np.float32), grayscale_cam, use_rgb=True)
 
@@ -278,7 +278,7 @@ def _resolve_cam_class(method: str):
     try:
         from pytorch_grad_cam import AblationCAM, GradCAM, ScoreCAM
     except ImportError as exc:
-        raise MLXUserError("Install the optional Grad-CAM dependency with 'pip install grad-cam'.") from exc
+        raise MLXUserError("Image explanations require the 'image-explainability' extra.") from exc
 
     classes = {
         "gradcam": GradCAM,

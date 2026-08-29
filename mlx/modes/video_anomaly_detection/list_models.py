@@ -9,6 +9,7 @@ from mlx.modes.video_anomaly_detection.models.backbone3d import (
     build_spatiotemporal_backbone_3d,
 )
 from mlx.modes.video_anomaly_detection.requests import ListVideoAnomalyModelsRequest
+from mlx.modes.video_anomaly_detection.models.classification_compat import standard_backbone_names
 
 
 @dataclass(frozen=True)
@@ -38,11 +39,9 @@ class ListVideoAnomalyModels:
         self.backbone_factory = backbone_factory
 
     def execute(self) -> tuple[VideoAnomalyBackboneSummary, ...]:
-        from mlx.modes.image_classification.models import standard_model_names
-
         config = {**self.request.to_config(), "colored": True, "pretrained": False}
         summaries = []
-        for name in standard_model_names():
+        for name in standard_backbone_names():
             fusion_modes = ("average", "sknet") if name.startswith("drax") else (None,)
             for fusion_mode in fusion_modes:
                 model_config = dict(config)

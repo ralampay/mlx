@@ -71,3 +71,38 @@ def test_classification_aws_boundary_does_not_depend_on_detection_mode() -> None
                 violations.append(f"{path.name} imports {module}")
 
     assert violations == []
+
+
+def test_video_classification_dependency_is_isolated_to_compatibility_adapter() -> None:
+    video_package = MODES / "video_anomaly_detection"
+    compatibility = (
+        video_package / "models" / "classification_compat.py"
+    ).resolve()
+    violations = []
+    for path in video_package.rglob("*.py"):
+        if path.resolve() == compatibility:
+            continue
+        for module in _imports(path):
+            if module.startswith("mlx.modes.image_classification"):
+                violations.append(f"{path.relative_to(ROOT)} imports {module}")
+
+    assert violations == []
+
+
+def test_shared_dataset_module_contains_no_mode_specific_root_policy() -> None:
+    source = (ROOT / "mlx" / "core" / "datasets.py").read_text(encoding="utf-8")
+    for symbol in (
+        "classification_dataset_root",
+        "segmentation_dataset_root",
+        "video_anomaly_dataset_root",
+        "object_detection_dataset_root",
+    ):
+        assert symbol not in source
+
+
+def test_mode_aws_lifecycle_modules_delegate_to_shared_infrastructure() -> None:
+    for mode in ("object_detection", "image_classification"):
+        aws_package = MODES / mode / "aws"
+        for filename in ("clients.py", "commands.py", "image.py", "models.py", "status.py"):
+            imports = _imports(aws_package / filename)
+            assert any(module.startswith("mlx.core.aws") for module in imports)

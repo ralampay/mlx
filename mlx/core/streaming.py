@@ -15,6 +15,16 @@ class FrameSource(Protocol):
     def release(self) -> None: ...
 
 
+class NullFrameSink:
+    """Headless sink that consumes rendered frames without terminal or GUI output."""
+
+    def show(self, frame: np.ndarray) -> bool:
+        return True
+
+    def close(self) -> None:
+        return None
+
+
 @dataclass(frozen=True, slots=True)
 class FrameSourceMetadata:
     width: int | None = None
@@ -102,5 +112,6 @@ __all__ = [
     "FrameSource",
     "FrameSourceMetadata",
     "MetadataFrameSource",
+    "NullFrameSink",
     "OpenCVFrameSource",
 ]

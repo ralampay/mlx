@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import csv
-import hashlib
 import json
 import math
 import platform
@@ -12,6 +11,7 @@ from pathlib import Path
 from typing import Any, Mapping
 
 from mlx.core.exceptions import MLXUserError
+from mlx.core.artifacts import sha256_file as _sha256
 from mlx.modes.object_detection.models import ObjectDetectionBenchmarkResult
 from mlx.modes.object_detection.requests import BenchmarkObjectDetectionRequest
 
@@ -158,14 +158,6 @@ def write_benchmark_artifacts(
         evaluation_backend=evaluation_backend,
         native_metrics=native_metrics,
     )
-
-
-def _sha256(path: Path) -> str:
-    digest = hashlib.sha256()
-    with path.open("rb") as input_file:
-        for chunk in iter(lambda: input_file.read(1024 * 1024), b""):
-            digest.update(chunk)
-    return digest.hexdigest()
 
 
 def _write_json(path: Path, value: Any) -> None:

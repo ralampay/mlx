@@ -118,86 +118,96 @@ class TrainSegmentationModel:
                 "numpy_version": np.__version__,
             },
         )
-        for epoch in range(start_epoch, self.epochs):
-                epoch_start = time.perf_counter()
-                train_loss = self._train_epoch(
-                    model,
-                    train_loader,
-                    criterion,
-                    optimizer,
-                )
-                val_loss, val_metrics, class_rows = self._validate(
-                    model,
-                    val_loader,
-                    criterion,
-                )
-                row = {
-                    "epoch": epoch + 1,
-                    "learning_rate": optimizer.param_groups[0]["lr"],
-                    "epoch_seconds": time.perf_counter() - epoch_start,
-                    "train_loss": train_loss,
-                    "val_loss": val_loss,
-                    **val_metrics,
-                }
-                for class_row in class_rows:
-                    slug = metric_slug(str(class_row["class_name"]))
-                    for metric in ("precision", "recall", "specificity", "dice", "iou"):
-                        row[f"{slug}_{metric}"] = class_row[metric]
-                history.append(row)
-                write_csv(self.paths["training_csv_path"], history)
-                write_training_curves(self.paths["training_curves_path"], history)
-
-                messages: list[str] = []
-                if val_loss < best_val_loss:
-                    best_val_loss = val_loss
-                    save_checkpoint(
-                        self.paths["checkpoint_path"],
-                        model,
-                        model_name=self.model_name,
-                        config=self.config,
-                    )
-                    messages.append(f"best loss → {self.paths['checkpoint_path']}")
-                foreground_dice = float(val_metrics["mean_foreground_dice"])
-                if np.isfinite(foreground_dice) and foreground_dice > best_dice:
-                    best_dice = foreground_dice
-                    save_checkpoint(
-                        self.paths["dice_checkpoint_path"],
-                        model,
-                        model_name=self.model_name,
-                        config=self.config,
-                    )
-                    messages.append(f"best Dice → {self.paths['dice_checkpoint_path']}")
-                save_training_checkpoint(
-                    self.paths["last_checkpoint_path"],
-                    model,
-                    optimizer,
-                    model_name=self.model_name,
-                    config=self.config,
-                    completed_epoch=epoch + 1,
-                    best_val_loss=best_val_loss,
-                    best_foreground_dice=best_dice,
-                    history=history,
-                )
-                messages.append(f"last → {self.paths['last_checkpoint_path']}")
-                emit(
-                    self.reporter,
-                    "progress",
-                    f"Completed segmentation epoch {epoch + 1}/{self.epochs}.",
-                    current=epoch + 1,
-                    total=self.epochs,
-                    payload={
-                        "event": "segmentation_epoch",
-                        "train_loss": train_loss,
-                        "val_loss": val_loss,
-                        "metrics": val_metrics,
-                        "checkpoints": messages,
-                    },
-                )
+        self._run_epochs(
+            model=model,
+            train_loader=train_loader,
+            val_loader=val_loader,
+            criterion=criterion,
+            optimizer=optimizer,
+            start_epoch=start_epoch,
+            best_val_loss=best_val_loss,
+            best_dice=best_dice,
+            history=history,
+        )
         emit(
             self.reporter,
             "success",
             f"Segmentation training complete; research artifacts are in {self.paths['output_dir']}"
         )
+
+    def _run_epochs(
+        self,
+        *,
+        model,
+        train_loader,
+        val_loader,
+        criterion,
+        optimizer,
+        start_epoch: int,
+        best_val_loss: float,
+        best_dice: float,
+        history: list[dict[str, Any]],
+    ) -> None:
+        for epoch in range(start_epoch, self.epochs):
+            epoch_start = time.perf_counter()
+            train_loss = self._train_epoch(model, train_loader, criterion, optimizer)
+            val_loss, val_metrics, class_rows = self._validate(model, val_loader, criterion)
+            row = {
+                "epoch": epoch + 1,
+                "learning_rate": optimizer.param_groups[0]["lr"],
+                "epoch_seconds": time.perf_counter() - epoch_start,
+                "train_loss": train_loss,
+                "val_loss": val_loss,
+                **val_metrics,
+            }
+            for class_row in class_rows:
+                slug = metric_slug(str(class_row["class_name"]))
+                for metric in ("precision", "recall", "specificity", "dice", "iou"):
+                    row[f"{slug}_{metric}"] = class_row[metric]
+            history.append(row)
+            write_csv(self.paths["training_csv_path"], history)
+            write_training_curves(self.paths["training_curves_path"], history)
+
+            messages: list[str] = []
+            if val_loss < best_val_loss:
+                best_val_loss = val_loss
+                save_checkpoint(
+                    self.paths["checkpoint_path"], model, model_name=self.model_name, config=self.config
+                )
+                messages.append(f"best loss → {self.paths['checkpoint_path']}")
+            foreground_dice = float(val_metrics["mean_foreground_dice"])
+            if np.isfinite(foreground_dice) and foreground_dice > best_dice:
+                best_dice = foreground_dice
+                save_checkpoint(
+                    self.paths["dice_checkpoint_path"], model, model_name=self.model_name, config=self.config
+                )
+                messages.append(f"best Dice → {self.paths['dice_checkpoint_path']}")
+            save_training_checkpoint(
+                self.paths["last_checkpoint_path"],
+                model,
+                optimizer,
+                model_name=self.model_name,
+                config=self.config,
+                completed_epoch=epoch + 1,
+                best_val_loss=best_val_loss,
+                best_foreground_dice=best_dice,
+                history=history,
+            )
+            messages.append(f"last → {self.paths['last_checkpoint_path']}")
+            emit(
+                self.reporter,
+                "progress",
+                f"Completed segmentation epoch {epoch + 1}/{self.epochs}.",
+                current=epoch + 1,
+                total=self.epochs,
+                payload={
+                    "event": "segmentation_epoch",
+                    "train_loss": train_loss,
+                    "val_loss": val_loss,
+                    "metrics": val_metrics,
+                    "checkpoints": messages,
+                },
+            )
 
     def _prepare_state(self, model, optimizer) -> tuple[int, float, float, list[dict[str, Any]]]:
         resume_path = self.config.get("model_path")

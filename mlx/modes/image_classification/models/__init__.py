@@ -23,6 +23,8 @@ from mlx.modes.image_classification.models.draxnet import DraxNet, build_draxnet
 from mlx.modes.image_classification.models.siamese_lenet import SiameseLeNet
 from mlx.modes.image_classification.models.siamese_backbone import SiameseBackbone
 from mlx.modes.image_classification.models.standard import (
+    DEFAULT_STANDARD_MODEL_REGISTRY,
+    StandardModelRegistry,
     build_standard_model,
     registered_standard_model_names,
     register_standard_model,
@@ -139,6 +141,7 @@ __all__ = [
     "DraxBlock",
     "DraxMobileNetV3Large",
     "DraxNet",
+    "DEFAULT_STANDARD_MODEL_REGISTRY",
     "JointDeepSVDDClassifier",
     "DropPath",
     "LayerNorm2D",
@@ -147,6 +150,7 @@ __all__ = [
     "SelfAttention2D",
     "SiameseLeNet",
     "SiameseBackbone",
+    "StandardModelRegistry",
     "SIAMESE_BACKBONE_MODELS",
     "build_image_classification_model",
     "build_feature_adapter",

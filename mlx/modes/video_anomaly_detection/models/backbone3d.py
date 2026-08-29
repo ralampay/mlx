@@ -1,19 +1,22 @@
 from __future__ import annotations
 
 import copy
+from types import MappingProxyType
 from typing import Any
 
 import torch
 from torch import nn
-from torch.nn import functional as F
 
 from mlx.core.exceptions import MLXUserError
-from mlx.modes.image_classification.models.adapters import build_image_feature_backbone
-from mlx.modes.image_classification.models.blocks import ConvNeXtBlock, DraxBlock
 from mlx.modes.video_anomaly_detection.models.blocks3d import (
     LayerNorm3D,
     inflate_convnext_block,
     inflate_drax_block,
+)
+from mlx.modes.video_anomaly_detection.models.classification_compat import (
+    build_inflatable_backbone,
+    classification_module_kind,
+    is_standard_backbone,
 )
 
 
@@ -135,9 +138,10 @@ def _is_torchvision_convnext_block(module: nn.Module) -> bool:
 def inflate_module_2d_to_3d(module: nn.Module, temporal_kernel_size: int) -> nn.Module:
     """Recursively replace spatial operators with temporal-preserving 3D equivalents."""
 
-    if isinstance(module, DraxBlock):
+    module_kind = classification_module_kind(module)
+    if module_kind == "drax":
         return inflate_drax_block(module, temporal_kernel_size)
-    if isinstance(module, ConvNeXtBlock):
+    if module_kind == "convnext":
         return inflate_convnext_block(module, temporal_kernel_size)
     if _is_torchvision_convnext_block(module):
         return TorchvisionConvNeXtBlock3D(module, temporal_kernel_size)
@@ -175,13 +179,13 @@ class InflatedImageBackbone3D(nn.Module):
             )
         temporal_kernel_size = int(config.get("backbone_temporal_kernel_size", 3))
         _validate_temporal_kernel(temporal_kernel_size)
-        source, feature_dim, provenance = _build_source(model_name, config)
+        source = build_inflatable_backbone(model_name, config)
         self.model_name = model_name
-        self.feature_dim = feature_dim
+        self.feature_dim = source.feature_dim
         self.temporal_kernel_size = temporal_kernel_size
         self.temporal_stride_policy = "preserve"
         self.pooling = "adaptive_avg_3d"
-        self.pretrained_provenance = provenance
+        self.pretrained_provenance = source.pretrained_provenance
         self.model = inflate_module_2d_to_3d(source, temporal_kernel_size)
 
     def forward(self, clips: torch.Tensor) -> torch.Tensor:
@@ -191,42 +195,13 @@ class InflatedImageBackbone3D(nn.Module):
                 f"received {tuple(clips.shape)}."
             )
         x = clips.transpose(1, 2).contiguous()
-        if hasattr(self.model, "forward_features"):
-            features = self.model.forward_features(x)
-        elif self.model_name.startswith("resnet"):
-            features = self._forward_resnet(x)
-        elif self.model_name == "densenet121":
-            x = F.relu(self.model.features(x), inplace=True)
-            features = torch.flatten(F.adaptive_avg_pool3d(x, (1, 1, 1)), 1)
-        elif self.model_name in {"mobilenet_v3_large", "efficientnet_b0"}:
-            features = torch.flatten(self.model.avgpool(self.model.features(x)), 1)
-        elif self.model_name.startswith("convnext_"):
-            features = torch.flatten(
-                F.adaptive_avg_pool3d(self.model.features(x), (1, 1, 1)), 1
-            )
-            classifier_norm = self.model.classifier[0]
-            layer_norm = getattr(classifier_norm, "norm", classifier_norm)
-            features = F.layer_norm(
-                features,
-                layer_norm.normalized_shape,
-                layer_norm.weight,
-                layer_norm.bias,
-                layer_norm.eps,
-            )
-        else:  # pragma: no cover - registry construction prevents this branch
-            raise MLXUserError(f"No 3D feature path is registered for '{self.model_name}'.")
+        features = self.model(x)
         if features.ndim != 2 or features.shape[1] != self.feature_dim:
             raise RuntimeError(
                 f"3D backbone '{self.model_name}' returned {tuple(features.shape)}; "
                 f"expected [B, {self.feature_dim}]."
             )
         return features
-
-    def _forward_resnet(self, x: torch.Tensor) -> torch.Tensor:
-        x = self.model.maxpool(self.model.relu(self.model.bn1(self.model.conv1(x))))
-        x = self.model.layer4(self.model.layer3(self.model.layer2(self.model.layer1(x))))
-        return torch.flatten(self.model.avgpool(x), 1)
-
 
 class ResNet3DBackbone(InflatedImageBackbone3D):
     supported_model_names = ("resnet18", "resnet50")
@@ -261,7 +236,7 @@ class DraxMobileNetV3Large3D(InflatedImageBackbone3D):
     supported_model_names = ("drax_mobilenet_v3_large",)
 
 
-BACKBONE_3D_REGISTRY: dict[str, type[InflatedImageBackbone3D]] = {
+BACKBONE_3D_REGISTRY = MappingProxyType({
     alias: backbone_type
     for backbone_type in (
         ResNet3DBackbone,
@@ -273,15 +248,13 @@ BACKBONE_3D_REGISTRY: dict[str, type[InflatedImageBackbone3D]] = {
         DraxMobileNetV3Large3D,
     )
     for alias in backbone_type.supported_model_names
-}
+})
 
 
 def build_spatiotemporal_backbone_3d(
     model_name: str, config: dict[str, Any]
 ) -> InflatedImageBackbone3D:
-    from mlx.modes.image_classification.models import model_family_for
-
-    if model_family_for(model_name) != "standard":
+    if not is_standard_backbone(model_name):
         raise MLXUserError(
             f"Model '{model_name}' is a one-shot/Siamese model and cannot be inflated to 3D."
         )
@@ -292,44 +265,6 @@ def build_spatiotemporal_backbone_3d(
             f"Model '{model_name}' has no 3D video-anomaly backbone. Available models: {supported}."
         )
     return backbone_type(model_name, config)
-
-
-def _build_source(
-    model_name: str, config: dict[str, Any]
-) -> tuple[nn.Module, int, str]:
-    pretrained = bool(config.get("pretrained", False))
-    source_config = {**config, "colored": True}
-    if model_name == "draxnet" and pretrained:
-        wrapper = build_image_feature_backbone(
-            model_name, {**source_config, "pretrained": False}
-        )
-        _load_partial_resnet18_weights(wrapper.adapter.model)
-    else:
-        wrapper = build_image_feature_backbone(model_name, source_config)
-    provenance = "none"
-    if pretrained:
-        provenance = "inflated_partial" if model_name.startswith("drax") else "inflated_full"
-    return wrapper.adapter.model, int(wrapper.feature_dim), provenance
-
-
-def _load_partial_resnet18_weights(model: nn.Module) -> None:
-    try:
-        from torchvision import models as torchvision_models
-
-        reference = torchvision_models.resnet18(
-            weights=torchvision_models.ResNet18_Weights.DEFAULT
-        )
-    except (ImportError, OSError, RuntimeError) as exc:
-        raise MLXUserError(
-            "Pretrained DraxNet3D initialization requires torchvision ResNet-18 weights."
-        ) from exc
-    target_state = model.state_dict()
-    compatible = {
-        name: value
-        for name, value in reference.state_dict().items()
-        if name in target_state and target_state[name].shape == value.shape
-    }
-    model.load_state_dict(compatible, strict=False)
 
 
 def _validate_temporal_kernel(value: int) -> None:

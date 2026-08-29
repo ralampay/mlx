@@ -9,12 +9,21 @@ from torch.utils.data import Dataset
 
 from mlx.core.commands import NullWorkflowReporter, WorkflowReporter, emit
 from mlx.core.exceptions import MLXUserError
+from mlx.core.datasets import resolve_split_dataset_root
 from mlx.modes.segmentation.requests import BuildSegmentationDatasetRequest
 
 import random
 import shutil
 
 IMAGE_EXTENSIONS = (".png", ".jpg", ".jpeg", ".bmp", ".tif", ".tiff")
+
+
+def segmentation_dataset_root(extracted_path: Path) -> Path:
+    return resolve_split_dataset_root(
+        extracted_path,
+        required_paths=("train/images", "train/masks", "val/images", "val/masks"),
+        dataset_label="segmentation dataset",
+    )
 
 
 def _iter_image_paths(directory: Path) -> list[Path]:

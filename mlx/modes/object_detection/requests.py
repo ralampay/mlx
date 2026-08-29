@@ -1,11 +1,13 @@
 from __future__ import annotations
 
-from dataclasses import asdict, dataclass
-from typing import Any, Mapping, Optional
+from dataclasses import dataclass
+from typing import Optional
+
+from mlx.core.requests import ConfigRequest
 
 
 @dataclass(frozen=True)
-class ObjectDetectionRequest:
+class ObjectDetectionRequest(ConfigRequest):
     provider: str = "ultralytics"
     model: Optional[str] = None
     model_path: Optional[str] = None
@@ -13,16 +15,6 @@ class ObjectDetectionRequest:
     height: int = 640
     width: int = 640
     confidence: float = 0.25
-
-    @classmethod
-    def from_config(cls, config: Mapping[str, Any]):
-        fields = cls.__dataclass_fields__
-        values = {name: config[name] for name in fields if name in config}
-        return cls(**values)
-
-    def to_config(self) -> dict[str, Any]:
-        return asdict(self)
-
 
 @dataclass(frozen=True)
 class TrainObjectDetectionRequest(ObjectDetectionRequest):
@@ -78,9 +70,5 @@ class StreamObjectDetectionRequest(ObjectDetectionRequest):
 
 
 @dataclass(frozen=True)
-class ListObjectDetectionModelsRequest:
+class ListObjectDetectionModelsRequest(ConfigRequest):
     provider: str = "ultralytics"
-
-    @classmethod
-    def from_config(cls, config: Mapping[str, Any]):
-        return cls(provider=str(config.get("provider") or "ultralytics"))

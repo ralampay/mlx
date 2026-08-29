@@ -43,7 +43,7 @@ class EmbeddingModel(Protocol):
 def _load_embedding_model(model_path: Path) -> EmbeddingModel:
     if Llama is None:
         raise MLXUserError(
-            "NLP embed requires llama-cpp-python. Install the project dependencies and try again."
+            "NLP embed requires llama-cpp-python. Install MLX with the 'nlp' extra."
         )
     try:
         return Llama(model_path=str(model_path), embedding=True)
@@ -153,7 +153,7 @@ class _EmbeddingWorkflow:
 
     def _read_input(self, input_path: Path):
         if pd is None:
-            raise MLXUserError("NLP embed requires pandas. Install the project dependencies and try again.")
+            raise MLXUserError("NLP embed requires pandas. Install MLX with the 'nlp' extra.")
         try:
             return pd.read_csv(input_path)
         except (OSError, UnicodeError, ValueError, pd.errors.ParserError) as exc:

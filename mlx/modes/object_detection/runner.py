@@ -5,9 +5,10 @@ from typing import Any
 
 from mlx.core.datasets import (
     TrainWithDatasetSource,
-    resolve_object_detection_dataset_root,
     validate_dataset_source_options,
 )
+from mlx.core.commands import NullWorkflowReporter
+from mlx.core.streaming import NullFrameSink
 from mlx.core.exceptions import MLXUserError
 from mlx.core.ui import print_model_parameter_table
 from mlx.modes.object_detection.commands import (
@@ -32,6 +33,7 @@ from mlx.modes.object_detection.requests import (
     TrainObjectDetectionRequest,
 )
 from mlx.modes.object_detection.streaming import OpenCVFrameSink, OpenCVFrameSource
+from mlx.modes.object_detection.data import object_detection_dataset_root
 
 
 def run_object_detection(config: dict[str, Any]) -> Any:
@@ -41,7 +43,8 @@ def run_object_detection(config: dict[str, Any]) -> Any:
         return run_aws_object_detection(config)
 
     action = config.get("action") or "train"
-    reporter = RichWorkflowReporter()
+    is_json = config.get("output_format") == "json"
+    reporter = NullWorkflowReporter() if is_json else RichWorkflowReporter()
 
     if action == "train":
         validate_dataset_source_options(config, action=action)
@@ -51,13 +54,13 @@ def run_object_detection(config: dict[str, Any]) -> Any:
             trainer_factory=lambda resolved: TrainObjectDetectionModel(
                 resolved, reporter=reporter
             ),
-            root_resolver=resolve_object_detection_dataset_root,
+            root_resolver=object_detection_dataset_root,
             artifact_dir_resolver=lambda resolved: Path(str(resolved.output_path)),
             profile=config.get("profile"),
             reporter=reporter,
         ).execute()
         benchmark_result = getattr(result, "benchmark_result", None)
-        if benchmark_result is not None:
+        if benchmark_result is not None and not is_json:
             print_benchmark_result(benchmark_result)
         return result
     validate_dataset_source_options(config, action=action)
@@ -76,7 +79,8 @@ def run_object_detection(config: dict[str, Any]) -> Any:
             BenchmarkObjectDetectionRequest.from_config(benchmark_config),
             reporter=reporter,
         ).execute()
-        print_benchmark_result(result)
+        if not is_json:
+            print_benchmark_result(result)
         return result
     if action == "convert":
         return ConvertObjectDetectionModel(
@@ -88,7 +92,8 @@ def run_object_detection(config: dict[str, Any]) -> Any:
             ListObjectDetectionModelsRequest.from_config(config),
             reporter=reporter,
         ).execute()
-        print_model_parameter_table(summaries, title="Object Detection Models")
+        if not is_json:
+            print_model_parameter_table(summaries, title="Object Detection Models")
         return summaries
     if action in {"infer-camera", "infer-video"}:
         stream_request = StreamObjectDetectionRequest.from_config(
@@ -102,9 +107,13 @@ def run_object_detection(config: dict[str, Any]) -> Any:
             camera_index=stream_request.camera_index,
             file_path=stream_request.file_path,
         )
-        sink = OpenCVFrameSink(
-            title=f"MLX Object Detection ({stream_request.source.title()})",
-            delay_ms=1 if stream_request.source == "camera" else 10,
+        sink = (
+            NullFrameSink()
+            if is_json
+            else OpenCVFrameSink(
+                title=f"MLX Object Detection ({stream_request.source.title()})",
+                delay_ms=1 if stream_request.source == "camera" else 10,
+            )
         )
         return RunObjectDetectionStream(
             detector=detector,

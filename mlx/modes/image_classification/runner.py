@@ -5,13 +5,13 @@ from typing import Any
 
 from mlx.core.datasets import (
     TrainWithDatasetSource,
-    classification_dataset_root,
     validate_dataset_source_options,
 )
+from mlx.core.commands import NullWorkflowReporter
 from mlx.core.exceptions import MLXUserError
 from mlx.core.ui import print_model_parameter_table
 from mlx.modes.image_classification.cam import GenerateImageClassificationCams
-from mlx.modes.image_classification.data import BuildImageClassificationDataset
+from mlx.modes.image_classification.data import BuildImageClassificationDataset, classification_dataset_root
 from mlx.modes.image_classification.evaluation import BenchmarkImageClassification
 from mlx.modes.image_classification.inference import InferImageClassification
 from mlx.modes.image_classification.list_models import ListImageClassificationModels
@@ -26,7 +26,12 @@ from mlx.modes.image_classification.presentation import (
 )
 from mlx.modes.image_classification.requests import (
     BuildImageClassificationDatasetRequest,
+    BenchmarkImageClassificationRequest,
+    GenerateImageClassificationCamsRequest,
     ImageClassificationRequest,
+    InferImageClassificationRequest,
+    SmokeTestImageClassificationRequest,
+    TrainImageClassificationRequest,
 )
 from mlx.modes.image_classification.train import (
     SmokeTestImageClassificationModel,
@@ -59,18 +64,23 @@ DEFAULT_CONFIG = {
 }
 
 
+def _reporter(config: dict[str, Any]):
+    return NullWorkflowReporter() if config.get("output_format") == "json" else RichImageClassificationReporter()
+
+
 def _list_models(config: dict[str, Any]):
     summaries = ListImageClassificationModels(config).execute()
-    print_model_parameter_table(summaries, title="Image Classification Models")
+    if config.get("output_format") != "json":
+        print_model_parameter_table(summaries, title="Image Classification Models")
     return summaries
 
 
 def _infer_image(config: dict[str, Any]):
     result = InferImageClassification(
-        ImageClassificationRequest.from_config(config),
-        reporter=RichImageClassificationReporter(),
+        InferImageClassificationRequest.from_config(config),
+        reporter=_reporter(config),
     ).execute()
-    if config.get("display", True):
+    if config.get("output_format") != "json" and config.get("display", True):
         if "top_matches" in result:
             display_similarity_matches(result)
         else:
@@ -80,17 +90,17 @@ def _infer_image(config: dict[str, Any]):
 
 def _generate_cams(config: dict[str, Any]):
     results = GenerateImageClassificationCams(
-        ImageClassificationRequest.from_config(config),
-        reporter=RichImageClassificationReporter(),
+        GenerateImageClassificationCamsRequest.from_config(config),
+        reporter=_reporter(config),
     ).execute()
-    if config.get("display", True):
+    if config.get("output_format") != "json" and config.get("display", True):
         display_cam_results(results, delay=int(config.get("window_delay", 0)))
     return results
 
 
 def _train(config: dict[str, Any]):
-    request = ImageClassificationRequest.from_config(config)
-    reporter = RichImageClassificationReporter()
+    request = TrainImageClassificationRequest.from_config(config)
+    reporter = _reporter(config)
     return TrainWithDatasetSource(
         request,
         trainer_factory=lambda resolved: TrainImageClassificationModel(
@@ -105,20 +115,20 @@ def _train(config: dict[str, Any]):
 
 ACTION_HANDLERS = {
     "benchmark": lambda config: BenchmarkImageClassification(
-        ImageClassificationRequest.from_config(config),
-        reporter=RichImageClassificationReporter(),
+        BenchmarkImageClassificationRequest.from_config(config),
+        reporter=_reporter(config),
     ).execute(),
     "build-dataset": lambda config: BuildImageClassificationDataset(
         BuildImageClassificationDatasetRequest.from_config(config),
-        reporter=RichImageClassificationReporter(),
+        reporter=_reporter(config),
         input_resolver=resolve_image_dataset_build_request,
     ).execute(),
     "infer-image": _infer_image,
     "ls-models": _list_models,
     "cam": _generate_cams,
     "test": lambda config: SmokeTestImageClassificationModel(
-        ImageClassificationRequest.from_config(config),
-        reporter=RichImageClassificationReporter(),
+        SmokeTestImageClassificationRequest.from_config(config),
+        reporter=_reporter(config),
     ).execute(),
     "train": _train,
 }
@@ -131,7 +141,8 @@ def run_image_classification(mode_config: dict[str, Any]) -> Any:
         return run_aws_image_classification(mode_config)
 
     config = {**DEFAULT_CONFIG, **mode_config}
-    action = config["action"]
+    action = config.get("action") or DEFAULT_CONFIG["action"]
+    config["action"] = action
     validate_dataset_source_options(config, action=action)
     if action == "ls-models":
         return ACTION_HANDLERS[action](config)
@@ -151,7 +162,8 @@ def run_image_classification(mode_config: dict[str, Any]) -> Any:
         config["input_size"] = tuple(config.get("input_size", (config["width"], config["height"])))
     config["model"] = model_name
 
-    print_config_summary(model_name, family, config)
+    if config.get("output_format") != "json":
+        print_config_summary(model_name, family, config)
 
     handler = ACTION_HANDLERS.get(action)
     if handler is None:

@@ -42,6 +42,40 @@ class ImageClassificationRequest(ConfigRequest):
 
 
 @dataclass(frozen=True)
+class TrainImageClassificationRequest(ImageClassificationRequest):
+    action: str = "train"
+
+
+@dataclass(frozen=True)
+class BenchmarkImageClassificationRequest(ImageClassificationRequest):
+    action: str = "benchmark"
+    plots: bool = True
+
+
+@dataclass(frozen=True)
+class InferImageClassificationRequest(ImageClassificationRequest):
+    action: str = "infer-image"
+
+
+@dataclass(frozen=True)
+class GenerateImageClassificationCamsRequest(ImageClassificationRequest):
+    action: str = "cam"
+    cam_method: str = "gradcam"
+    target_layer: Optional[str] = None
+    target_index: Optional[int] = None
+    max_samples: Optional[int] = None
+    save_images: bool = True
+    window_delay: int = 0
+    aug_smooth: bool = False
+    eigen_smooth: bool = False
+
+
+@dataclass(frozen=True)
+class SmokeTestImageClassificationRequest(ImageClassificationRequest):
+    action: str = "test"
+
+
+@dataclass(frozen=True)
 class BuildImageClassificationDatasetRequest(ConfigRequest):
     dataset_path: str = ""
     train_count: Optional[int] = None

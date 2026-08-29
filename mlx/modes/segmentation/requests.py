@@ -37,6 +37,30 @@ class SegmentationRequest(ConfigRequest):
 
 
 @dataclass(frozen=True)
+class TrainSegmentationRequest(SegmentationRequest):
+    action: str = "train"
+
+
+@dataclass(frozen=True)
+class BenchmarkSegmentationRequest(SegmentationRequest):
+    action: str = "benchmark"
+    boundary_tolerance: int = 2
+    calibration_bins: int = 15
+    threshold_steps: int = 101
+    plots: bool = True
+
+
+@dataclass(frozen=True)
+class InferSegmentationRequest(SegmentationRequest):
+    action: str = "infer-image"
+
+
+@dataclass(frozen=True)
+class SmokeTestSegmentationRequest(SegmentationRequest):
+    action: str = "test"
+
+
+@dataclass(frozen=True)
 class BuildSegmentationDatasetRequest(ConfigRequest):
     dataset_path: str = ""
     output_path: Optional[str] = None

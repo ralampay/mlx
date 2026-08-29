@@ -1,4 +1,5 @@
 import argparse
+from contextlib import redirect_stdout
 import json
 import sys
 from pathlib import Path
@@ -9,13 +10,16 @@ from rich.table import Table
 
 from mlx.cli_config import build_runtime_config, explicit_option_destinations
 from mlx.cli_routing import (
+    MODE_DESCRIPTORS,
     MODE_REGISTRY,
     ModeRunner,
     UnknownModeError,
     resolve_mode_runner,
+    resolve_mode_descriptor,
 )
+from mlx.core.artifacts import json_safe
 from mlx.core.exceptions import MLXAbort, MLXUserError
-from mlx.core.random import apply_global_seed
+from mlx.core.random import apply_global_seed, seed_everything
 from mlx.core.ui import console, print_error, print_startup, print_warning
 
 try:
@@ -299,14 +303,22 @@ def _render_help() -> None:
     options.add_column("Flag", style="cyan", no_wrap=True)
     options.add_column("Default", style="magenta")
     options.add_column("Description", style="white")
-    options.add_row("--mode", "None", "Mode to run: object_detection, track, image_classification, segmentation, video_anomaly_detection, or nlp.")
+    options.add_row(
+        "--mode",
+        "None",
+        "Mode to run: " + ", ".join(item.name for item in MODE_DESCRIPTORS) + ".",
+    )
     options.add_row("--platform", "local", "Execution platform. AWS supports object-detection and image-classification training lifecycle actions.")
     options.add_row("--config", "None", "AWS YAML job configuration. Local execution does not read this file.")
     options.add_row("--profile", "YAML/default", "AWS shared-credentials profile. An explicit value overrides aws.profile in YAML.")
     options.add_row("--job-name", "None", "SageMaker job name used by status, stop, and resume.")
     options.add_row("--instance-type", "YAML", "Explicit AWS instance-type override for train or resume.")
     options.add_row("--watch", "False", "Poll AWS job status until it reaches a terminal state.")
-    options.add_row("--format", "table", "Render AWS lifecycle results as a table or JSON.")
+    options.add_row(
+        "--format",
+        "table",
+        "Render interactive/Rich output or emit one structured JSON result.",
+    )
     options.add_row("--rebuild-image", "False", "Force a new content-tagged SageMaker image build and ECR push.")
     options.add_row("--provider", "ultralytics", "Object-detection provider: ultralytics or libreyolo.")
     options.add_row("--model", "None", "Provider-specific model identifier, YAML path, or architecture name.")
@@ -420,12 +432,8 @@ def _render_help() -> None:
     available = Table(title="Available Modes", show_header=True)
     available.add_column("Mode", style="cyan", no_wrap=True)
     available.add_column("Actions", style="white")
-    available.add_row("object_detection", "train, benchmark, resume, status, stop, infer-camera, infer-video, convert, ls-models")
-    available.add_row("track", "run, export-mot, ls-trackers")
-    available.add_row("image_classification", "train, test, benchmark, AWS resume/status/stop, infer-image, cam, build-dataset, ls-models")
-    available.add_row("segmentation", "train, test, benchmark, infer-image, infer-camera, infer-video, build-dataset, ls-models")
-    available.add_row("video_anomaly_detection", "train, benchmark, infer-video, ls-models")
-    available.add_row("nlp", "embed")
+    for descriptor in MODE_DESCRIPTORS:
+        available.add_row(descriptor.name, ", ".join(descriptor.actions))
     console.print(available)
 
 
@@ -448,12 +456,8 @@ def _render_unknown_mode() -> None:
     table = Table(title="Available Modes", show_header=True)
     table.add_column("Mode", style="cyan", no_wrap=True)
     table.add_column("Purpose", style="white")
-    table.add_row("object_detection", "Provider-backed detection training and inference")
-    table.add_row("track", "Provider-neutral video tracking and MOT benchmarking")
-    table.add_row("image_classification", "Image classification workflows for both one-shot and standard classifiers")
-    table.add_row("segmentation", "Semantic segmentation workflows for U-Net style models")
-    table.add_row("video_anomaly_detection", "Normal-only clip-native 3D CNN and Deep SVDD workflows")
-    table.add_row("nlp", "Text embedding workflows for GGUF models and CSV data")
+    for descriptor in MODE_DESCRIPTORS:
+        table.add_row(descriptor.name, descriptor.purpose)
     console.print(table)
 
 
@@ -478,17 +482,33 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
 
     config = _build_config(namespace)
     config["_explicit_options"] = _explicit_option_destinations(parser, args)
-    apply_global_seed(config.get("random_seed"))
-    if config.get("output_format") != "json":
-        print_startup(
-            config["mode"],
-            config.get("action"),
-            config.get("model") or config.get("model_file"),
-        )
 
     try:
+        descriptor = resolve_mode_descriptor(config["mode"])
+        if config.get("action") is None:
+            config["action"] = descriptor.default_action
+        if config.get("output_format") == "json":
+            seed_everything(config.get("random_seed"))
+        else:
+            apply_global_seed(config.get("random_seed"))
+        if config.get("output_format") != "json":
+            print_startup(
+                config["mode"],
+                config.get("action"),
+                config.get("model") or config.get("model_file"),
+            )
         runner = _resolve_mode_runner(config["mode"])
-        runner(config)
+        local_json = (
+            config.get("output_format") == "json"
+            and config.get("platform", "local") == "local"
+        )
+        if local_json:
+            with redirect_stdout(sys.stderr):
+                result = runner(config)
+        else:
+            result = runner(config)
+        if local_json:
+            print(json.dumps(json_safe(result), sort_keys=True))
     except UnknownModeError as exc:
         if config.get("output_format") == "json":
             print(json.dumps({"error": str(exc)}), file=sys.stderr)

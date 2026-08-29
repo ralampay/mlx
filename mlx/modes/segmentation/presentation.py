@@ -9,6 +9,7 @@ import numpy as np
 from rich.table import Table
 
 from mlx.core.commands import WorkflowEvent
+from mlx.core.presentation import RichInfrastructureEventRenderer
 from mlx.core.ui import (
     confirm_action,
     console,
@@ -27,7 +28,17 @@ from mlx.modes.segmentation.visualization import (
 
 
 class RichSegmentationReporter:
+    def __init__(
+        self,
+        infrastructure_events: RichInfrastructureEventRenderer | None = None,
+    ) -> None:
+        self._infrastructure_events = (
+            infrastructure_events or RichInfrastructureEventRenderer()
+        )
+
     def emit(self, event: WorkflowEvent) -> None:
+        if self._infrastructure_events.handle(event):
+            return
         payload = event.payload if isinstance(event.payload, dict) else {}
         event_name = payload.get("event")
         if event_name == "segmentation_tensor_output":

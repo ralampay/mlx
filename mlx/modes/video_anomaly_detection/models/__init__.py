@@ -18,13 +18,16 @@ from mlx.modes.video_anomaly_detection.models.model import (
 )
 from mlx.modes.video_anomaly_detection.models.svdd import DeepSVDDHead
 from mlx.modes.video_anomaly_detection.models.temporal import (
+    DEFAULT_TEMPORAL_ENCODER_REGISTRY,
     TEMPORAL_ENCODERS,
+    TemporalEncoderRegistry,
     TemporalConvEncoder,
     build_temporal_encoder,
 )
 
 __all__ = [
     "DeepSVDDHead",
+    "DEFAULT_TEMPORAL_ENCODER_REGISTRY",
     "BACKBONE_3D_REGISTRY",
     "ConvNeXt3DBackbone",
     "DenseNet1213DBackbone",
@@ -36,6 +39,7 @@ __all__ = [
     "ResNet3DBackbone",
     "TEMPORAL_ENCODERS",
     "TemporalConvEncoder",
+    "TemporalEncoderRegistry",
     "VideoAnomaly3DModel",
     "VideoAnomalyModel",
     "VideoAnomalyOutput",

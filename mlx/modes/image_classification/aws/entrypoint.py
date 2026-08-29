@@ -10,7 +10,8 @@ from pathlib import Path
 from typing import Any, Mapping, Optional
 
 from mlx.core.commands import CallbackWorkflowReporter, WorkflowEvent
-from mlx.core.datasets import classification_dataset_root, extract_zip_safely
+from mlx.core.datasets import extract_zip_safely
+from mlx.modes.image_classification.data import classification_dataset_root
 from mlx.core.exceptions import MLXUserError
 from mlx.core.random import apply_global_seed
 from mlx.modes.image_classification.aws.checkpoints import (

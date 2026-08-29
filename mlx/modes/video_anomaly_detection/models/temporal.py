@@ -1,7 +1,9 @@
 from __future__ import annotations
 
 from collections.abc import Callable
-from typing import Protocol
+from dataclasses import dataclass, field
+from types import MappingProxyType
+from typing import Mapping, Protocol
 
 import torch
 from torch import nn
@@ -54,7 +56,26 @@ class TemporalConvEncoder(nn.Module):
 
 
 TemporalBuilder = Callable[..., nn.Module]
-TEMPORAL_ENCODERS: dict[str, TemporalBuilder] = {"tcn": TemporalConvEncoder}
+
+
+@dataclass(frozen=True)
+class TemporalEncoderRegistry:
+    entries: Mapping[str, TemporalBuilder] = field(default_factory=dict)
+
+    def __post_init__(self) -> None:
+        object.__setattr__(self, "entries", MappingProxyType(dict(self.entries)))
+
+    def register(self, name: str, builder: TemporalBuilder) -> "TemporalEncoderRegistry":
+        normalized = name.strip().lower()
+        if not normalized:
+            raise ValueError("Temporal encoder name cannot be empty.")
+        entries = dict(self.entries)
+        entries[normalized] = builder
+        return TemporalEncoderRegistry(entries)
+
+
+DEFAULT_TEMPORAL_ENCODER_REGISTRY = TemporalEncoderRegistry({"tcn": TemporalConvEncoder})
+TEMPORAL_ENCODERS = DEFAULT_TEMPORAL_ENCODER_REGISTRY.entries
 
 
 def build_temporal_encoder(
@@ -65,10 +86,12 @@ def build_temporal_encoder(
     embedding_dim: int,
     kernel_size: int,
     dropout: float,
+    registry: TemporalEncoderRegistry | None = None,
 ) -> nn.Module:
-    builder = TEMPORAL_ENCODERS.get(name)
+    entries = (registry or DEFAULT_TEMPORAL_ENCODER_REGISTRY).entries
+    builder = entries.get(name)
     if builder is None:
-        available = ", ".join(sorted(TEMPORAL_ENCODERS))
+        available = ", ".join(sorted(entries))
         raise MLXUserError(
             f"Unsupported temporal model '{name}'. Available models: {available}."
         )
@@ -83,6 +106,8 @@ def build_temporal_encoder(
 
 __all__ = [
     "TEMPORAL_ENCODERS",
+    "DEFAULT_TEMPORAL_ENCODER_REGISTRY",
+    "TemporalEncoderRegistry",
     "TemporalConvEncoder",
     "TemporalEncoder",
     "build_temporal_encoder",

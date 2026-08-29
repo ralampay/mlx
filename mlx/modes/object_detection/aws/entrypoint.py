@@ -10,7 +10,8 @@ from pathlib import Path
 from typing import Any, Mapping, Optional
 
 from mlx.core.commands import CallbackWorkflowReporter, WorkflowEvent
-from mlx.core.datasets import extract_zip_safely, resolve_object_detection_dataset_root
+from mlx.core.datasets import extract_zip_safely
+from mlx.modes.object_detection.data import object_detection_dataset_root
 from mlx.core.exceptions import MLXUserError
 from mlx.modes.object_detection.aws.checkpoints import (
     RotatingCheckpointPublisher,
@@ -174,7 +175,7 @@ class RunSageMakerObjectDetectionTraining:
             self.dataset_dir,
             max_uncompressed_bytes=max_uncompressed_bytes,
         )
-        return resolve_object_detection_dataset_root(self.dataset_dir)
+        return object_detection_dataset_root(self.dataset_dir)
 
     @staticmethod
     def _resolve_device(value: str) -> str:

@@ -11,21 +11,22 @@ from pathlib import Path
 
 import pytest
 
+from mlx.core.commands import CallbackWorkflowReporter
 from mlx.core.datasets import (
     StageS3Dataset,
     TrainWithDatasetSource,
-    classification_dataset_root,
     extract_zip_safely,
     parse_s3_zip_uri,
-    resolve_object_detection_dataset_root,
-    segmentation_dataset_root,
     validate_dataset_source_options,
-    video_anomaly_dataset_root,
 )
 from mlx.core.exceptions import MLXUserError
+from mlx.modes.image_classification.data import classification_dataset_root
 from mlx.modes.image_classification.requests import ImageClassificationRequest
+from mlx.modes.object_detection.data import object_detection_dataset_root
 from mlx.modes.object_detection.requests import TrainObjectDetectionRequest
+from mlx.modes.segmentation.data import segmentation_dataset_root
 from mlx.modes.segmentation.requests import SegmentationRequest
+from mlx.modes.video_anomaly_detection.data import video_anomaly_dataset_root
 from mlx.modes.video_anomaly_detection.requests import TrainVideoAnomalyRequest
 
 
@@ -96,6 +97,32 @@ def test_stage_s3_dataset_caches_by_remote_identity(tmp_path):
     assert client.get_calls == 2
 
 
+def test_stage_s3_dataset_emits_one_download_progress_lifecycle(tmp_path):
+    client = FakeS3(_zip_bytes({"train/a/x": b"x", "val/a/y": b"y"}))
+    events = []
+    StageS3Dataset(
+        "s3://datasets/data.zip",
+        root_resolver=classification_dataset_root,
+        cache_dir=tmp_path / "cache",
+        s3_client=client,
+        reporter=CallbackWorkflowReporter(events.append),
+    ).execute()
+
+    download_events = [
+        event
+        for event in events
+        if isinstance(event.payload, dict)
+        and event.payload.get("event") == "dataset_download"
+    ]
+    statuses = [event.payload["status"] for event in download_events]
+    assert statuses[0] == "start"
+    assert statuses[-1] == "complete"
+    assert statuses.count("start") == 1
+    assert statuses.count("complete") == 1
+    assert all(event.level == "progress" for event in download_events)
+    assert download_events[-1].current == download_events[-1].total
+
+
 def test_stage_s3_dataset_rebuilds_incomplete_cache(tmp_path):
     client = FakeS3(_zip_bytes({"train/a/x": b"x", "val/a/y": b"y"}))
     command = StageS3Dataset(
@@ -155,7 +182,7 @@ def test_dataset_root_resolvers_support_wrapped_archives(tmp_path):
     detection = tmp_path / "detection" / "wrapper"
     detection.mkdir(parents=True)
     (detection / "data.yaml").write_text("names: [object]", encoding="utf-8")
-    assert resolve_object_detection_dataset_root(tmp_path / "detection") == detection
+    assert object_detection_dataset_root(tmp_path / "detection") == detection
 
     classification = tmp_path / "classification" / "wrapper"
     for child in ("train", "val"):
@@ -254,7 +281,7 @@ def test_train_with_dataset_source_preserves_local_training_and_requires_s3_outp
         (
             TrainObjectDetectionRequest,
             {"wrapper/data.yaml": b"names: [object]"},
-            resolve_object_detection_dataset_root,
+            object_detection_dataset_root,
         ),
         (
             ImageClassificationRequest,

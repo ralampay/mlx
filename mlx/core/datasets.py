@@ -8,12 +8,13 @@ import shutil
 import stat
 import tempfile
 import zipfile
-from dataclasses import dataclass, replace
+from dataclasses import MISSING, dataclass, fields, replace
 from pathlib import Path, PurePosixPath
 from typing import Any, Callable, Generic, Mapping, Optional, Protocol, TypeVar
 from urllib.parse import urlparse
 
 from mlx.core.commands import NullWorkflowReporter, WorkflowReporter, emit
+from mlx.core.artifacts import write_json_atomic
 from mlx.core.exceptions import MLXUserError
 
 
@@ -53,6 +54,28 @@ class StagedDataset:
     dataset_path: Path
     cache_path: Path
     source: Mapping[str, Any]
+
+
+@dataclass(frozen=True)
+class DatasetSourceSpec:
+    """Storage-neutral selection made before dataset staging starts."""
+
+    local_path: Optional[str]
+    s3_uri: Optional[str]
+    cache_dir: str | Path = DEFAULT_DATASET_CACHE
+
+    @classmethod
+    def from_request(cls, request: Any) -> "DatasetSourceSpec":
+        s3_uri = str(getattr(request, "dataset_s3_uri", None) or "").strip() or None
+        local_path = str(getattr(request, "dataset_path", None) or "").strip() or None
+        cache_dir = getattr(request, "dataset_cache_dir", DEFAULT_DATASET_CACHE)
+        if s3_uri and _request_has_explicit_dataset_path(request, local_path):
+            raise MLXUserError("Provide either a local dataset path or an S3 dataset URI, not both.")
+        return cls(
+            local_path=None if s3_uri else local_path,
+            s3_uri=s3_uri,
+            cache_dir=cache_dir,
+        )
 
 
 def parse_s3_zip_uri(uri: str) -> S3Location:
@@ -181,16 +204,6 @@ def extract_zip_safely(
         raise MLXUserError(f"Unable to extract dataset ZIP '{archive_path}': {exc}") from exc
 
 
-def resolve_object_detection_dataset_root(extracted_path: Path) -> Path:
-    candidates = sorted(path for path in extracted_path.rglob("data.yaml") if path.is_file())
-    if len(candidates) != 1:
-        raise MLXUserError(
-            "The extracted object-detection dataset must contain exactly one data.yaml; "
-            f"found {len(candidates)}."
-        )
-    return candidates[0].parent
-
-
 def resolve_split_dataset_root(
     extracted_path: Path,
     *,
@@ -208,29 +221,6 @@ def resolve_split_dataset_root(
             f"found {len(candidates)}."
         )
     return candidates[0]
-
-
-def classification_dataset_root(extracted_path: Path) -> Path:
-    return resolve_split_dataset_root(
-        extracted_path,
-        dataset_label="image-classification dataset",
-    )
-
-
-def segmentation_dataset_root(extracted_path: Path) -> Path:
-    return resolve_split_dataset_root(
-        extracted_path,
-        required_paths=("train/images", "train/masks", "val/images", "val/masks"),
-        dataset_label="segmentation dataset",
-    )
-
-
-def video_anomaly_dataset_root(extracted_path: Path) -> Path:
-    return resolve_split_dataset_root(
-        extracted_path,
-        required_paths=("train/normal", "val/normal"),
-        dataset_label="video-anomaly dataset",
-    )
 
 
 class StageS3Dataset:
@@ -285,7 +275,7 @@ class StageS3Dataset:
                 "cache_identity": cache_key,
                 "dataset_root": root_relative,
             }
-            _write_json_atomic(build / _CACHE_MANIFEST, source)
+            write_json_atomic(build / _CACHE_MANIFEST, source)
             self._publish_cache(build, target, identity)
             result = self._load_cached(target, identity)
             if result is None:  # pragma: no cover - defensive filesystem guard
@@ -324,6 +314,24 @@ class StageS3Dataset:
         params: dict[str, Any] = {"Bucket": identity["bucket"], "Key": identity["key"]}
         if identity.get("version_id"):
             params["VersionId"] = identity["version_id"]
+        downloaded = 0
+        total = int(identity["content_length"])
+        progress_started = False
+
+        def report_progress(status: str) -> None:
+            emit(
+                self.reporter,
+                "progress",
+                f"Downloading {PurePosixPath(self.location.key).name}",
+                current=downloaded,
+                total=total,
+                payload={
+                    "event": "dataset_download",
+                    "status": status,
+                    "uri": identity["uri"],
+                },
+            )
+
         try:
             response = client.get_object(**params)
             body = response["Body"]
@@ -338,9 +346,8 @@ class StageS3Dataset:
             ):
                 raise MLXUserError("The S3 dataset version changed during download; retry training.")
             digest = hashlib.sha256()
-            downloaded = 0
-            total = int(identity["content_length"])
-            emit(self.reporter, "info", f"Downloading {identity['uri']}", current=0, total=total)
+            report_progress("start")
+            progress_started = True
             with target.open("xb") as output:
                 while True:
                     chunk = body.read(1024 * 1024)
@@ -349,27 +356,25 @@ class StageS3Dataset:
                     output.write(chunk)
                     digest.update(chunk)
                     downloaded += len(chunk)
-                    emit(
-                        self.reporter,
-                        "progress",
-                        "Downloading S3 dataset",
-                        current=downloaded,
-                        total=total,
-                        payload={"event": "dataset_download"},
-                    )
+                    report_progress("update")
+            if downloaded != total:
+                raise MLXUserError(
+                    f"S3 dataset download was incomplete: expected {total} bytes, received {downloaded}."
+                )
+            report_progress("complete")
+            return digest.hexdigest()
         except MLXUserError:
+            if progress_started:
+                report_progress("failed")
             raise
         except Exception as exc:
+            if progress_started:
+                report_progress("failed")
             raise MLXUserError(f"Unable to download S3 dataset '{identity['uri']}': {exc}") from exc
         finally:
             close = getattr(locals().get("body"), "close", None)
             if callable(close):
                 close()
-        if downloaded != total:
-            raise MLXUserError(
-                f"S3 dataset download was incomplete: expected {total} bytes, received {downloaded}."
-            )
-        return digest.hexdigest()
 
     @staticmethod
     def _load_cached(target: Path, identity: Mapping[str, Any]) -> Optional[StagedDataset]:
@@ -414,6 +419,7 @@ class TrainWithDatasetSource(Generic[RequestT, ResultT]):
         trainer_factory: Callable[[RequestT], Executable[ResultT]],
         root_resolver: DatasetRootResolver,
         artifact_dir_resolver: Callable[[RequestT], Path],
+        dataset_source: Optional[DatasetSourceSpec] = None,
         s3_client: Optional[S3Client] = None,
         profile: Optional[str] = None,
         reporter: Optional[WorkflowReporter] = None,
@@ -422,26 +428,22 @@ class TrainWithDatasetSource(Generic[RequestT, ResultT]):
         self.trainer_factory = trainer_factory
         self.root_resolver = root_resolver
         self.artifact_dir_resolver = artifact_dir_resolver
+        self.dataset_source = dataset_source or DatasetSourceSpec.from_request(request)
         self.s3_client = s3_client
         self.profile = profile
         self.reporter = reporter or NullWorkflowReporter()
 
     def execute(self) -> ResultT:
-        uri = str(getattr(self.request, "dataset_s3_uri", None) or "").strip()
+        uri = self.dataset_source.s3_uri
         if not uri:
             return self.trainer_factory(self.request).execute()
-        local_path = str(getattr(self.request, "dataset_path", "") or "").strip()
-        if local_path not in {"", "./tmp/dataset"}:
-            raise MLXUserError("Provide either a local dataset path or an S3 dataset URI, not both.")
         output_path = str(getattr(self.request, "output_path", None) or "").strip()
         if not output_path:
             raise MLXUserError("S3 dataset training requires --output for persistent artifacts.")
         staged = StageS3Dataset(
             uri,
             root_resolver=self.root_resolver,
-            cache_dir=_validated_cache_dir(
-                getattr(self.request, "dataset_cache_dir", DEFAULT_DATASET_CACHE)
-            ),
+            cache_dir=_validated_cache_dir(self.dataset_source.cache_dir),
             s3_client=self.s3_client,
             profile=self.profile,
             reporter=self.reporter,
@@ -449,9 +451,9 @@ class TrainWithDatasetSource(Generic[RequestT, ResultT]):
         resolved_request = replace(self.request, dataset_path=str(staged.dataset_path))
         artifact_dir = self.artifact_dir_resolver(resolved_request).expanduser()
         artifact_dir.mkdir(parents=True, exist_ok=True)
-        _write_json_atomic(artifact_dir / "dataset_source.json", dict(staged.source))
+        write_json_atomic(artifact_dir / "dataset_source.json", dict(staged.source))
         result = self.trainer_factory(resolved_request).execute()
-        _write_json_atomic(artifact_dir / "dataset_source.json", dict(staged.source))
+        write_json_atomic(artifact_dir / "dataset_source.json", dict(staged.source))
         return result
 
 
@@ -466,17 +468,20 @@ def validate_dataset_source_options(config: Mapping[str, Any], *, action: str) -
         raise MLXUserError("Use either --dataset or --dataset-s3-uri for training, not both.")
 
 
-def _write_json_atomic(path: Path, value: Mapping[str, Any]) -> None:
-    path.parent.mkdir(parents=True, exist_ok=True)
-    temporary = path.with_name(f".{path.name}.{os.getpid()}.tmp")
+def _request_has_explicit_dataset_path(request: Any, local_path: Optional[str]) -> bool:
+    if local_path is None:
+        return False
+    extras = getattr(request, "extras", {})
+    if "dataset_path" in set(extras.get("_explicit_options") or ()):
+        return True
     try:
-        temporary.write_text(json.dumps(value, indent=2, sort_keys=True) + "\n", encoding="utf-8")
-        temporary.replace(path)
-    except OSError as exc:
-        raise MLXUserError(f"Unable to write dataset provenance '{path}': {exc}") from exc
-    finally:
-        if temporary.exists():
-            temporary.unlink()
+        dataset_field = next(item for item in fields(request) if item.name == "dataset_path")
+    except (TypeError, StopIteration):
+        return True
+    if dataset_field.default is not MISSING:
+        default = str(dataset_field.default or "").strip() or None
+        return local_path != default
+    return True
 
 
 def _validated_cache_dir(value: str | Path) -> Path:
@@ -487,16 +492,13 @@ def _validated_cache_dir(value: str | Path) -> Path:
 
 __all__ = [
     "DEFAULT_DATASET_CACHE",
+    "DatasetSourceSpec",
     "StageS3Dataset",
     "StagedDataset",
     "TrainWithDatasetSource",
-    "classification_dataset_root",
     "create_s3_client",
     "extract_zip_safely",
     "parse_s3_zip_uri",
-    "resolve_object_detection_dataset_root",
     "resolve_split_dataset_root",
-    "segmentation_dataset_root",
     "validate_dataset_source_options",
-    "video_anomaly_dataset_root",
 ]

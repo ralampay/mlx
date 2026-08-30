@@ -15,6 +15,7 @@ from mlx.modes.object_detection.commands import (
     BenchmarkObjectDetectionModel,
     ConvertObjectDetectionModel,
     CreateObjectDetector,
+    FineTuneObjectDetectionModel,
     ListObjectDetectionModels,
     RunObjectDetectionStream,
     TrainObjectDetectionModel,
@@ -27,6 +28,7 @@ from mlx.modes.object_detection.presentation import (
 from mlx.modes.object_detection.requests import (
     BenchmarkObjectDetectionRequest,
     ConvertObjectDetectionRequest,
+    FineTuneObjectDetectionRequest,
     ListObjectDetectionModelsRequest,
     ObjectDetectionRequest,
     StreamObjectDetectionRequest,
@@ -42,16 +44,32 @@ def run_object_detection(config: dict[str, Any]) -> Any:
 
         return run_aws_object_detection(config)
 
+    if config.get("model_s3_uri"):
+        raise MLXUserError(
+            "--model-s3-uri is supported only for AWS object-detection fine-tuning. "
+            "Use --model-path for local workflows."
+        )
+
     action = config.get("action") or "train"
     is_json = config.get("output_format") == "json"
     reporter = NullWorkflowReporter() if is_json else RichWorkflowReporter()
 
-    if action == "train":
+    if action in {"train", "fine-tune"}:
         validate_dataset_source_options(config, action=action)
-        request = TrainObjectDetectionRequest.from_config(config)
+        request_type = (
+            FineTuneObjectDetectionRequest
+            if action == "fine-tune"
+            else TrainObjectDetectionRequest
+        )
+        command_type = (
+            FineTuneObjectDetectionModel
+            if action == "fine-tune"
+            else TrainObjectDetectionModel
+        )
+        request = request_type.from_config(config)
         result = TrainWithDatasetSource(
             request,
-            trainer_factory=lambda resolved: TrainObjectDetectionModel(
+            trainer_factory=lambda resolved: command_type(
                 resolved, reporter=reporter
             ),
             root_resolver=object_detection_dataset_root,
@@ -123,7 +141,7 @@ def run_object_detection(config: dict[str, Any]) -> Any:
             reporter=reporter,
         ).execute()
 
-    available = "benchmark, convert, infer-camera, infer-video, ls-models, train"
+    available = "benchmark, convert, fine-tune, infer-camera, infer-video, ls-models, train"
     raise MLXUserError(
         f"Unsupported action '{action}' for object-detection. Available actions: {available}."
     )

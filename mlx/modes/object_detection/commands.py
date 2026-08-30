@@ -16,6 +16,7 @@ from mlx.modes.object_detection.providers import ObjectDetectionProvider, get_pr
 from mlx.modes.object_detection.requests import (
     BenchmarkObjectDetectionRequest,
     ConvertObjectDetectionRequest,
+    FineTuneObjectDetectionRequest,
     ListObjectDetectionModelsRequest,
     ObjectDetectionRequest,
     TrainObjectDetectionRequest,
@@ -76,6 +77,41 @@ class TrainObjectDetectionModel:
             checkpoint_path=str(checkpoint_path),
             benchmark_result=benchmark_result,
         )
+
+
+class FineTuneObjectDetectionModel:
+    def __init__(
+        self,
+        request: FineTuneObjectDetectionRequest,
+        *,
+        provider: Optional[ObjectDetectionProvider] = None,
+        reporter: Optional[WorkflowReporter] = None,
+    ) -> None:
+        self.request = request
+        self.provider = provider
+        self.reporter = reporter or NullWorkflowReporter()
+
+    def execute(self) -> Any:
+        if not self.request.model_path:
+            raise MLXUserError(
+                "Object-detection fine-tuning requires --model-path pointing to the "
+                "initial PyTorch checkpoint."
+            )
+        checkpoint = Path(self.request.model_path).expanduser()
+        if checkpoint.suffix.lower() != ".pt":
+            raise MLXUserError(
+                "Object-detection fine-tuning requires a PyTorch checkpoint ending in .pt."
+            )
+        if not checkpoint.is_file():
+            raise MLXUserError(f"Fine-tuning checkpoint not found: {checkpoint}")
+        request = FineTuneObjectDetectionRequest.from_config(
+            {**self.request.to_config(), "model_path": str(checkpoint.resolve())}
+        )
+        return TrainObjectDetectionModel(
+            request,
+            provider=self.provider,
+            reporter=self.reporter,
+        ).execute()
 
 
 class BenchmarkObjectDetectionModel:

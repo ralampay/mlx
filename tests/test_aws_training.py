@@ -96,6 +96,41 @@ def test_local_detection_training_does_not_read_aws_config(monkeypatch) -> None:
     assert len(calls) == 1
 
 
+def test_local_detection_fine_tune_routes_explicit_checkpoint(monkeypatch) -> None:
+    calls = []
+
+    class FakeCommand:
+        def __init__(self, request, *, reporter=None):
+            calls.append(request)
+
+        def execute(self):
+            return "fine-tuned"
+
+    monkeypatch.setattr(detection_runner, "FineTuneObjectDetectionModel", FakeCommand)
+
+    result = detection_runner.run_object_detection(
+        {
+            "platform": "local",
+            "action": "fine-tune",
+            "provider": "libreyolo",
+            "model": "yolo9-s-drax-b5",
+            "model_path": "./tmp/initial.pt",
+        }
+    )
+
+    assert result == "fine-tuned"
+    assert calls[0].model_path == "./tmp/initial.pt"
+
+    with pytest.raises(MLXUserError, match="only for AWS"):
+        detection_runner.run_object_detection(
+            {
+                "platform": "local",
+                "action": "fine-tune",
+                "model_s3_uri": "s3://models/initial.pt",
+            }
+        )
+
+
 def test_only_explicit_cli_training_values_override_yaml(tmp_path: Path) -> None:
     path = tmp_path / "aws.yaml"
     _write_config(path)
@@ -160,7 +195,7 @@ def test_aws_dataset_cli_override_rejects_explicit_local_dataset(tmp_path: Path)
             },
         )
 
-    with pytest.raises(MLXUserError, match="AWS train or resume"):
+    with pytest.raises(MLXUserError, match="AWS train, fine-tune, or resume"):
         load_aws_training_config(
             str(path),
             {
@@ -189,6 +224,79 @@ training:
 
     with pytest.raises(MLXUserError, match="max_wait_seconds"):
         load_aws_training_config(str(path), {"_explicit_options": set()})
+
+
+def test_aws_fine_tune_config_requires_exact_pt_model_uri(tmp_path: Path) -> None:
+    path = tmp_path / "aws.yaml"
+    _write_config(path)
+
+    with pytest.raises(MLXUserError, match="requires 'aws.model_s3_uri'"):
+        load_aws_training_config(
+            str(path),
+            {"action": "fine-tune", "_explicit_options": set()},
+        )
+
+    original = path.read_text(encoding="utf-8")
+    path.write_text(
+        original.replace(
+            "aws:\n",
+            "aws:\n  model_s3_uri: s3://models/yolo9-s-drax-b5-best.pt\n",
+        ),
+        encoding="utf-8",
+    )
+    config = load_aws_training_config(
+        str(path),
+        {"action": "fine-tune", "_explicit_options": set()},
+    )
+
+    assert config.model_s3_uri == "s3://models/yolo9-s-drax-b5-best.pt"
+
+    with pytest.raises(MLXUserError, match="model-path is local-only"):
+        load_aws_training_config(
+            str(path),
+            {
+                "action": "fine-tune",
+                "model_path": "./initial.pt",
+                "_explicit_options": {"model_path"},
+            },
+        )
+
+
+def test_aws_model_s3_cli_override_is_fine_tune_only(tmp_path: Path) -> None:
+    path = tmp_path / "aws.yaml"
+    _write_config(path)
+    model_uri = "s3://models/override.pt"
+
+    config = load_aws_training_config(
+        str(path),
+        {
+            "action": "fine-tune",
+            "model_s3_uri": model_uri,
+            "_explicit_options": {"model_s3_uri"},
+        },
+    )
+    assert config.model_s3_uri == model_uri
+
+    config = load_aws_training_config(
+        str(path),
+        {
+            "action": "fine-tune",
+            "dataset_s3_uri": "s3://datasets/override.zip",
+            "model_s3_uri": model_uri,
+            "_explicit_options": {"dataset_s3_uri", "model_s3_uri"},
+        },
+    )
+    assert config.dataset_s3_uri == "s3://datasets/override.zip"
+
+    with pytest.raises(MLXUserError, match="fine-tune or resume"):
+        load_aws_training_config(
+            str(path),
+            {
+                "action": "train",
+                "model_s3_uri": model_uri,
+                "_explicit_options": {"model_s3_uri"},
+            },
+        )
 
 
 def _write_checkpoint(path: Path, epoch: int, epochs: int = 10) -> None:
@@ -832,6 +940,187 @@ def test_submit_payload_uses_spot_and_shared_run_prefix() -> None:
     )
 
 
+def test_fine_tune_submit_adds_model_channel_and_manifest_identity() -> None:
+    class FakeS3:
+        def __init__(self):
+            self.objects = []
+
+        def put_object(self, **kwargs):
+            self.objects.append(kwargs)
+
+    class FakeSageMaker:
+        def create_training_job(self, **kwargs):
+            self.request = kwargs
+            return {"TrainingJobArn": "arn:aws:sagemaker:us-east-1:123:training-job/job"}
+
+    model_uri = "s3://models/yolo9-s-drax-b5-best.pt"
+    config = AwsTrainingConfig(
+        dataset_s3_uri="s3://datasets/data.zip",
+        checkpoint_s3_uri="s3://shared/checkpoints",
+        instance_type="ml.g4dn.xlarge",
+        training=TrainObjectDetectionRequest(
+            provider="libreyolo",
+            model="yolo9-s-drax-b5",
+            device="auto",
+        ),
+        model_s3_uri=model_uri,
+    )
+    service = object.__new__(SageMakerTrainingService)
+    service.config = config
+    service.region = "us-east-1"
+    service.s3 = FakeS3()
+    service.sagemaker = FakeSageMaker()
+    infrastructure = AwsInfrastructure(
+        region="us-east-1",
+        account_id="123",
+        role_arn="arn:aws:iam::123:role/mlx",
+        image_uri="123.dkr.ecr.us-east-1.amazonaws.com/mlx@sha256:abc",
+    )
+
+    service.submit(infrastructure, run_id="c" * 32, fine_tune=True)
+
+    request = service.sagemaker.request
+    channels = {item["ChannelName"]: item for item in request["InputDataConfig"]}
+    assert channels["model"]["DataSource"]["S3DataSource"]["S3Uri"] == model_uri
+    assert request["HyperParameters"]["mlx_fine_tune"] == "true"
+    manifests = [
+        json.loads(item["Body"])
+        for item in service.s3.objects
+        if item["Key"].endswith("run-spec.json")
+    ]
+    assert manifests[0]["model_s3_uri"] == model_uri
+
+    service.submit(
+        infrastructure,
+        run_id="c" * 32,
+        fine_tune=True,
+        resume=True,
+    )
+    assert [
+        item["ChannelName"] for item in service.sagemaker.request["InputDataConfig"]
+    ] == ["training"]
+
+
+def test_sagemaker_fine_tune_model_channel_requires_one_pt(tmp_path: Path) -> None:
+    model_input = tmp_path / "model"
+    model_input.mkdir()
+    command = RunSageMakerObjectDetectionTraining(model_input_dir=model_input)
+
+    with pytest.raises(MLXUserError, match="exactly one .pt"):
+        command._resolve_initial_model()
+
+    checkpoint = model_input / "best.pt"
+    checkpoint.touch()
+    assert command._resolve_initial_model() == checkpoint.resolve()
+
+    (model_input / "other.pt").touch()
+    with pytest.raises(MLXUserError, match="found 2"):
+        command._resolve_initial_model()
+
+
+def test_sagemaker_fine_tune_uses_initial_model_only_before_recovery(
+    monkeypatch,
+    tmp_path: Path,
+) -> None:
+    from mlx.modes.object_detection.aws import entrypoint
+
+    hyperparameters = tmp_path / "hyperparameters.json"
+    hyperparameters.write_text(
+        json.dumps(
+            {
+                "mlx_training": json.dumps(
+                    {
+                        "provider": "libreyolo",
+                        "model": "yolo9-s-drax-b5",
+                        "epochs": 2,
+                    }
+                ),
+                "mlx_fine_tune": "true",
+                "mlx_model_s3_uri": "s3://models/initial.pt",
+            }
+        ),
+        encoding="utf-8",
+    )
+    input_dir = tmp_path / "input"
+    input_dir.mkdir()
+    with zipfile.ZipFile(input_dir / "dataset.zip", "w") as archive:
+        archive.writestr("dataset/data.yaml", "names: {0: person}\n")
+    model_input = tmp_path / "model-input"
+    model_input.mkdir()
+    initial_model = model_input / "initial.pt"
+    initial_model.touch()
+    captured = []
+
+    class FakeFineTune:
+        def __init__(self, request, *, reporter=None):
+            captured.append(("fine-tune", request))
+
+        def execute(self):
+            return {}
+
+    class FakeTrain:
+        def __init__(self, request, *, reporter=None):
+            captured.append(("train", request))
+
+        def execute(self):
+            return {}
+
+    class FakePublisher:
+        def __init__(self, **kwargs):
+            pass
+
+        def start(self):
+            pass
+
+        def stop(self):
+            pass
+
+        def publish_now(self):
+            return None
+
+        def publish_path(self, path):
+            return None
+
+    monkeypatch.setattr(entrypoint, "FineTuneObjectDetectionModel", FakeFineTune)
+    monkeypatch.setattr(entrypoint, "TrainObjectDetectionModel", FakeTrain)
+    monkeypatch.setattr(entrypoint, "RotatingCheckpointPublisher", FakePublisher)
+
+    command_kwargs = {
+        "hyperparameters_path": hyperparameters,
+        "input_dir": input_dir,
+        "model_input_dir": model_input,
+        "checkpoint_dir": tmp_path / "checkpoints",
+        "model_dir": tmp_path / "artifacts",
+        "work_dir": tmp_path / "work",
+        "dataset_dir": tmp_path / "dataset",
+    }
+    entrypoint.RunSageMakerObjectDetectionTraining(**command_kwargs).execute()
+
+    assert captured[0][0] == "fine-tune"
+    assert captured[0][1].model_path == str(initial_model.resolve())
+
+    recovery = type("Recovery", (), {"epoch": 1})()
+    monkeypatch.setattr(
+        entrypoint,
+        "find_valid_recovery_checkpoint",
+        lambda *args, **kwargs: recovery,
+    )
+    monkeypatch.setattr(
+        entrypoint,
+        "prepare_working_resume_checkpoint",
+        lambda *args, **kwargs: None,
+    )
+    values = json.loads(hyperparameters.read_text(encoding="utf-8"))
+    values["mlx_resume"] = "true"
+    hyperparameters.write_text(json.dumps(values), encoding="utf-8")
+    initial_model.unlink()
+
+    entrypoint.RunSageMakerObjectDetectionTraining(**command_kwargs).execute()
+
+    assert captured[1][0] == "train"
+    assert captured[1][1].model_path is None
+
+
 def test_resume_preserves_original_training_payload_for_immutable_image() -> None:
     original_payload = TrainObjectDetectionRequest(
         provider="libreyolo",
@@ -897,6 +1186,38 @@ def test_resume_preserves_original_training_payload_for_immutable_image() -> Non
     ) == RunSageMakerObjectDetectionTraining._compatibility_fingerprint(original_payload)
 
 
+def test_fine_tune_resume_rejects_a_different_initial_model_uri() -> None:
+    config = AwsTrainingConfig(
+        dataset_s3_uri="s3://datasets/data.zip",
+        checkpoint_s3_uri="s3://shared/checkpoints",
+        instance_type="ml.g4dn.xlarge",
+        training=TrainObjectDetectionRequest(
+            provider="libreyolo",
+            model="yolo9-s-drax-b5",
+            epochs=120,
+        ),
+        model_s3_uri="s3://models/replacement.pt",
+    )
+    service = object.__new__(SageMakerTrainingService)
+    service.config = config
+    service._describe = lambda _: {
+        "TrainingJobStatus": "Stopped",
+        "HyperParameters": {
+            "mlx_run_id": "run-id",
+            "mlx_run_spec_s3_uri": "s3://shared/checkpoints/run-spec.json",
+        },
+    }
+    service._ensure_no_active_attempt = lambda *args, **kwargs: None
+    service._get_json = lambda _: {
+        "dataset_s3_uri": config.dataset_s3_uri,
+        "checkpoint_base_s3_uri": config.checkpoint_s3_uri,
+        "model_s3_uri": "s3://models/original.pt",
+    }
+
+    with pytest.raises(MLXUserError, match="original model_s3_uri"):
+        service.resume("old-job")
+
+
 def test_generated_execution_role_includes_vpc_network_permissions() -> None:
     class FakeIam:
         def __init__(self):
@@ -933,6 +1254,43 @@ def test_generated_execution_role_includes_vpc_network_permissions() -> None:
     )
     assert "ec2:CreateNetworkInterface" in statement["Action"]
     assert "ec2:DeleteNetworkInterface" in statement["Action"]
+
+
+def test_generated_execution_role_scopes_fine_tune_model_access() -> None:
+    class FakeIam:
+        def __init__(self):
+            self.policy = None
+
+        def get_role(self, **kwargs):
+            return {"Role": {"Arn": "arn:aws:iam::123:role/mlx"}}
+
+        def put_role_policy(self, **kwargs):
+            self.policy = json.loads(kwargs["PolicyDocument"])
+
+    model_uri = "s3://models/path/yolo9-best.pt"
+    config = AwsTrainingConfig(
+        dataset_s3_uri="s3://datasets/data.zip",
+        checkpoint_s3_uri="s3://shared/checkpoints",
+        instance_type="ml.g4dn.xlarge",
+        training=TrainObjectDetectionRequest(model="yolo9-s-drax-b5"),
+        model_s3_uri=model_uri,
+    )
+    service = object.__new__(SageMakerTrainingService)
+    service.config = config
+    service.iam = FakeIam()
+
+    service._ensure_execution_role(
+        repository_arn="arn:aws:ecr:us-east-1:123:repository/mlx"
+    )
+
+    statements = {item["Sid"]: item for item in service.iam.policy["Statement"]}
+    assert statements["ReadFineTuneModel"]["Resource"] == [
+        "arn:aws:s3:::models/path/yolo9-best.pt"
+    ]
+    assert statements["ListFineTuneModel"]["Condition"] == {
+        "StringLike": {"s3:prefix": ["path/yolo9-best.pt"]}
+    }
+    assert "arn:aws:s3:::models" in statements["InspectTrainingBuckets"]["Resource"]
 
 
 def test_ultralytics_provider_reports_checkpoint_after_model_save(

@@ -8,6 +8,7 @@ from mlx.core.aws.commands import (
     SubmitAwsTraining,
     WatchAwsTraining,
 )
+from mlx.core.aws.models import AwsTrainingSubmission
 from mlx.modes.object_detection.aws.models import AwsBestModelLocation
 
 
@@ -25,6 +26,17 @@ class LocateBestAwsObjectDetectionModel:
 
 class SubmitAwsObjectDetectionTraining(SubmitAwsTraining):
     pass
+
+
+class SubmitAwsObjectDetectionFineTuning:
+    def __init__(self, service: AwsTrainingService) -> None:
+        self.service = service
+
+    def execute(self) -> AwsTrainingSubmission:
+        return self.service.submit(
+            self.service.prepare_infrastructure(),
+            fine_tune=True,
+        )
 
 
 class ResumeAwsObjectDetectionTraining(ResumeAwsTraining):
@@ -50,6 +62,7 @@ __all__ = [
     "LocateBestAwsObjectDetectionModel",
     "ResumeAwsObjectDetectionTraining",
     "StopAwsObjectDetectionTraining",
+    "SubmitAwsObjectDetectionFineTuning",
     "SubmitAwsObjectDetectionTraining",
     "WatchAwsObjectDetectionTraining",
 ]

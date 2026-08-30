@@ -18,12 +18,19 @@ from mlx.modes.object_detection.aws.checkpoints import (
     find_valid_recovery_checkpoint,
     prepare_working_resume_checkpoint,
 )
-from mlx.modes.object_detection.commands import TrainObjectDetectionModel
-from mlx.modes.object_detection.requests import TrainObjectDetectionRequest
+from mlx.modes.object_detection.commands import (
+    FineTuneObjectDetectionModel,
+    TrainObjectDetectionModel,
+)
+from mlx.modes.object_detection.requests import (
+    FineTuneObjectDetectionRequest,
+    TrainObjectDetectionRequest,
+)
 
 
 SAGEMAKER_HYPERPARAMETERS = Path("/opt/ml/input/config/hyperparameters.json")
 SAGEMAKER_INPUT = Path("/opt/ml/input/data/training")
+SAGEMAKER_MODEL_INPUT = Path("/opt/ml/input/data/model")
 SAGEMAKER_CHECKPOINTS = Path("/opt/ml/checkpoints")
 SAGEMAKER_MODEL = Path("/opt/ml/model")
 WORK_DIR = Path("/tmp/mlx-training")
@@ -36,6 +43,7 @@ class RunSageMakerObjectDetectionTraining:
         *,
         hyperparameters_path: Path = SAGEMAKER_HYPERPARAMETERS,
         input_dir: Path = SAGEMAKER_INPUT,
+        model_input_dir: Path = SAGEMAKER_MODEL_INPUT,
         checkpoint_dir: Path = SAGEMAKER_CHECKPOINTS,
         model_dir: Path = SAGEMAKER_MODEL,
         work_dir: Path = WORK_DIR,
@@ -43,6 +51,7 @@ class RunSageMakerObjectDetectionTraining:
     ) -> None:
         self.hyperparameters_path = hyperparameters_path
         self.input_dir = input_dir
+        self.model_input_dir = model_input_dir
         self.checkpoint_dir = checkpoint_dir
         self.model_dir = model_dir
         self.work_dir = work_dir
@@ -56,7 +65,16 @@ class RunSageMakerObjectDetectionTraining:
         total_epochs = int(training.get("epochs", 100))
         volume_size_gb = int(hyperparameters.get("mlx_volume_size_gb", 100))
         run_name = str(training.get("run_name") or f"mlx-{provider}")
-        compatibility_fingerprint = self._compatibility_fingerprint(training)
+        fine_tune = str(hyperparameters.get("mlx_fine_tune", "false")).lower() == "true"
+        model_s3_uri = str(hyperparameters.get("mlx_model_s3_uri") or "") or None
+        if fine_tune and model_s3_uri is None:
+            raise MLXUserError(
+                "SageMaker fine-tuning hyperparameters are missing mlx_model_s3_uri."
+            )
+        compatibility_fingerprint = self._compatibility_fingerprint(
+            training,
+            model_s3_uri=model_s3_uri,
+        )
         image_uri = str(hyperparameters.get("mlx_image_uri") or "") or None
         required_resume = str(hyperparameters.get("mlx_resume", "false")).lower() == "true"
         recovery = find_valid_recovery_checkpoint(
@@ -78,6 +96,8 @@ class RunSageMakerObjectDetectionTraining:
                 provider=provider,
                 total_epochs=total_epochs,
             )
+        elif fine_tune:
+            training["model_path"] = str(self._resolve_initial_model())
 
         training.update(
             {
@@ -88,7 +108,12 @@ class RunSageMakerObjectDetectionTraining:
                 "save_period": -1,
             }
         )
-        request = TrainObjectDetectionRequest.from_config(training)
+        if fine_tune and recovery is None:
+            request = FineTuneObjectDetectionRequest.from_config(training)
+            training_command = FineTuneObjectDetectionModel
+        else:
+            request = TrainObjectDetectionRequest.from_config(training)
+            training_command = TrainObjectDetectionModel
         self._publisher = RotatingCheckpointPublisher(
             work_dir=self.work_dir,
             recovery_dir=self.checkpoint_dir,
@@ -103,7 +128,7 @@ class RunSageMakerObjectDetectionTraining:
         previous_handler = signal.signal(signal.SIGTERM, self._handle_sigterm)
         try:
             reporter = CallbackWorkflowReporter(self._handle_workflow_event)
-            result = TrainObjectDetectionModel(request, reporter=reporter).execute()
+            result = training_command(request, reporter=reporter).execute()
             self._publisher.publish_now()
             self._stage_model_artifacts(result, training)
             return result
@@ -177,6 +202,17 @@ class RunSageMakerObjectDetectionTraining:
         )
         return object_detection_dataset_root(self.dataset_dir)
 
+    def _resolve_initial_model(self) -> Path:
+        candidates = sorted(
+            path for path in self.model_input_dir.rglob("*.pt") if path.is_file()
+        )
+        if len(candidates) != 1:
+            raise MLXUserError(
+                "Expected exactly one .pt fine-tuning model in SageMaker's model "
+                f"input channel; found {len(candidates)}."
+            )
+        return candidates[0].resolve()
+
     @staticmethod
     def _resolve_device(value: str) -> str:
         if value != "auto":
@@ -184,13 +220,21 @@ class RunSageMakerObjectDetectionTraining:
         return "0" if int(os.environ.get("SM_NUM_GPUS", "0")) > 0 else "cpu"
 
     @staticmethod
-    def _compatibility_fingerprint(training: Mapping[str, Any]) -> str:
+    def _compatibility_fingerprint(
+        training: Mapping[str, Any],
+        *,
+        model_s3_uri: Optional[str] = None,
+    ) -> str:
         immutable = {
             key: value
             for key, value in training.items()
             if key not in {"device", "epochs", "run_name", "save_period"}
         }
-        payload = json.dumps(immutable, sort_keys=True, separators=(",", ":"))
+        payload = json.dumps(
+            {"training": immutable, "model_s3_uri": model_s3_uri},
+            sort_keys=True,
+            separators=(",", ":"),
+        )
         return hashlib.sha256(payload.encode("utf-8")).hexdigest()
 
     def _stage_model_artifacts(self, result: Any, training: Mapping[str, Any]) -> None:

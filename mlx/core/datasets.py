@@ -462,7 +462,7 @@ def validate_dataset_source_options(config: Mapping[str, Any], *, action: str) -
     has_s3 = bool(str(config.get("dataset_s3_uri") or "").strip())
     if not has_s3:
         return
-    if action != "train":
+    if action not in {"train", "fine-tune"}:
         raise MLXUserError("--dataset-s3-uri is supported only for training actions.")
     if "dataset_path" in explicit:
         raise MLXUserError("Use either --dataset or --dataset-s3-uri for training, not both.")

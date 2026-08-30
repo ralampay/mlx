@@ -5,6 +5,7 @@ from mlx.modes.object_detection.aws.commands import (
     LocateBestAwsObjectDetectionModel,
     ResumeAwsObjectDetectionTraining,
     StopAwsObjectDetectionTraining,
+    SubmitAwsObjectDetectionFineTuning,
     SubmitAwsObjectDetectionTraining,
 )
 from mlx.modes.object_detection.aws.config import AwsTrainingConfig, load_aws_training_config
@@ -25,6 +26,7 @@ __all__ = [
     "LocateBestAwsObjectDetectionModel",
     "ResumeAwsObjectDetectionTraining",
     "StopAwsObjectDetectionTraining",
+    "SubmitAwsObjectDetectionFineTuning",
     "SubmitAwsObjectDetectionTraining",
     "load_aws_training_config",
 ]

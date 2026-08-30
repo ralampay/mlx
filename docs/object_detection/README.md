@@ -38,7 +38,7 @@ LibreYOLO from PyPI or the upstream repository.
 The neutral source is split by responsibility:
 
 - `runner.py`: action dispatch and CLI presentation wiring.
-- `commands.py`: provider-neutral training, benchmarking, model creation, conversion, listing, and streaming.
+- `commands.py`: provider-neutral training, fine-tuning, benchmarking, model creation, conversion, listing, and streaming.
 - `evaluation.py`: normalized research metrics and shared benchmark artifact serialization.
 - `models.py`: normalized detection records, benchmark results, and the detector protocol.
 - `providers.py`: lazy provider registry and provider protocol.
@@ -96,7 +96,8 @@ python -m mlx --mode object-detection --action resume \
 SageMaker automatically restores checkpoints when Spot capacity is interrupted. Manual resume
 creates a new SageMaker attempt for the same logical run and reuses the original image and shared
 recovery prefix. A resumed configuration may select another instance type, change runtime/wait
-limits, or raise the total epoch target; dataset, provider, and model must remain unchanged.
+limits, or raise the total epoch target; dataset, provider, model, and initial fine-tuning model
+must remain unchanged.
 
 MLX retains two alternating validated resume snapshots plus the best model. Recovery is at an
 epoch boundary, so an interruption can repeat work from the incomplete epoch but not earlier
@@ -393,6 +394,33 @@ message instead of being ignored.
 Use `--model yolo9-s-drax-b5` to train the Drax-enabled configuration documented by
 the fork. MLX passes the same Drax configuration used by `ls-models`, so the listed
 parameter count represents the architecture selected for scratch training.
+
+### Fine-tuning from a checkpoint
+
+Use the explicit `fine-tune` action when a checkpoint is required as the initialization source:
+
+```bash
+python -m mlx \
+    --mode object-detection \
+    --provider libreyolo \
+    --action fine-tune \
+    --dataset ~/Desktop/mot17-object-detection \
+    --model yolo9-s-drax-b5 \
+    --model-path ./tmp/yolo9-s-drax-b5-best.pt \
+    --epochs 100 \
+    --batch-size 16 \
+    --device cuda:0 \
+    --output ./runs/mot17-fine-tune
+```
+
+The checkpoint and dataset must use compatible class indices. For the documented six-class
+checkpoint, MOT17's `person` labels remain class `0` and `data.yaml` retains the complete order:
+`person`, `bicycle`, `motorcycle`, `car`, `bus`, `truck`. Because this MOT17 export supervises
+only people, fine-tuning can reduce performance on the other five classes when they are absent or
+unlabelled. Combining representative data for all retained classes is safer when preserving
+their accuracy is required. This export also has no separate validation directory, so its
+training-ready YAML uses `test/images` for both `val` and `test`; reported validation and test
+metrics are therefore not independent.
 
 ### Ultralytics
 

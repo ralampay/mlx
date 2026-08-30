@@ -13,6 +13,7 @@ _AWS_KEYS = {
     "region",
     "profile",
     "dataset_s3_uri",
+    "model_s3_uri",
     "checkpoint_s3_uri",
     "instance_type",
     "volume_size_gb",
@@ -53,6 +54,7 @@ class AwsTrainingConfig:
     checkpoint_s3_uri: str
     instance_type: str
     training: TrainObjectDetectionRequest
+    model_s3_uri: Optional[str] = None
     region: Optional[str] = None
     profile: Optional[str] = None
     volume_size_gb: int = 100
@@ -82,6 +84,7 @@ class AwsTrainingConfig:
         return {
             "version": 1,
             "dataset_s3_uri": self.dataset_s3_uri,
+            "model_s3_uri": self.model_s3_uri,
             "checkpoint_s3_uri": self.checkpoint_s3_uri,
             "training": self.training.to_config(),
         }
@@ -171,13 +174,21 @@ def load_aws_training_config(
         aws = {**aws, "profile": cli_config.get("profile")}
     if "dataset_s3_uri" in explicit:
         action = str(cli_config.get("action") or "train")
-        if action not in {"train", "resume"}:
+        if action not in {"train", "fine-tune", "resume"}:
             raise MLXUserError(
-                "--dataset-s3-uri is supported only for AWS train or resume actions."
+                "--dataset-s3-uri is supported only for AWS train, fine-tune, or "
+                "resume actions."
             )
         if "dataset_path" in explicit:
             raise MLXUserError("Use either --dataset or --dataset-s3-uri, not both.")
         aws = {**aws, "dataset_s3_uri": cli_config.get("dataset_s3_uri")}
+    if "model_s3_uri" in explicit:
+        action = str(cli_config.get("action") or "train")
+        if action not in {"fine-tune", "resume"}:
+            raise MLXUserError(
+                "--model-s3-uri is supported only for AWS fine-tune or resume actions."
+            )
+        aws = {**aws, "model_s3_uri": cli_config.get("model_s3_uri")}
 
     training.setdefault("provider", "ultralytics")
     training.setdefault("device", "auto")
@@ -195,6 +206,28 @@ def load_aws_training_config(
         "aws.checkpoint_s3_uri",
         allow_bucket_root=True,
     )
+    action = str(cli_config.get("action") or "train")
+    if action == "fine-tune" and "model_path" in explicit:
+        raise MLXUserError(
+            "AWS fine-tuning requires --model-s3-uri; --model-path is local-only."
+        )
+    raw_model_uri = str(aws.get("model_s3_uri") or "").strip()
+    model_uri = (
+        _validate_s3_uri(raw_model_uri, "aws.model_s3_uri")
+        if raw_model_uri
+        else None
+    )
+    if model_uri is not None and not model_uri.lower().endswith(".pt"):
+        raise MLXUserError("'aws.model_s3_uri' must point to a .pt checkpoint object.")
+    if action == "fine-tune" and model_uri is None:
+        raise MLXUserError(
+            "AWS object-detection fine-tuning requires 'aws.model_s3_uri' or "
+            "--model-s3-uri."
+        )
+    if action == "train" and model_uri is not None:
+        raise MLXUserError(
+            "aws.model_s3_uri is a fine-tuning input; use --action fine-tune."
+        )
     instance_type = str(aws.get("instance_type") or "").strip()
     if not instance_type:
         raise MLXUserError("AWS configuration requires 'aws.instance_type'.")
@@ -224,6 +257,7 @@ def load_aws_training_config(
         checkpoint_s3_uri=checkpoint_uri,
         instance_type=instance_type,
         training=request,
+        model_s3_uri=model_uri,
         region=str(aws["region"]) if aws.get("region") else None,
         profile=str(aws["profile"]) if aws.get("profile") else None,
         volume_size_gb=volume_size_gb,

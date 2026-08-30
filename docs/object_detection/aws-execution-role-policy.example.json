@@ -8,12 +8,19 @@
       "Resource": "arn:aws:s3:::<DATASET_BUCKET>/<DATASET_OBJECT_KEY>.zip"
     },
     {
+      "Sid": "ReadFineTuneModel",
+      "Effect": "Allow",
+      "Action": "s3:GetObject",
+      "Resource": "arn:aws:s3:::<MODEL_BUCKET>/<MODEL_OBJECT_KEY>.pt"
+    },
+    {
       "Sid": "InspectTrainingBuckets",
       "Effect": "Allow",
       "Action": "s3:GetBucketLocation",
       "Resource": [
         "arn:aws:s3:::<DATASET_BUCKET>",
-        "arn:aws:s3:::<CHECKPOINT_BUCKET>"
+        "arn:aws:s3:::<CHECKPOINT_BUCKET>",
+        "arn:aws:s3:::<MODEL_BUCKET>"
       ]
     },
     {
@@ -24,6 +31,17 @@
       "Condition": {
         "StringLike": {
           "s3:prefix": "<DATASET_OBJECT_KEY>.zip"
+        }
+      }
+    },
+    {
+      "Sid": "ListFineTuneModel",
+      "Effect": "Allow",
+      "Action": "s3:ListBucket",
+      "Resource": "arn:aws:s3:::<MODEL_BUCKET>",
+      "Condition": {
+        "StringLike": {
+          "s3:prefix": "<MODEL_OBJECT_KEY>.pt"
         }
       }
     },

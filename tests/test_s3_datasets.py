@@ -353,3 +353,7 @@ def test_dataset_source_cli_validation_rejects_ambiguity_and_non_training_action
         },
         action="train",
     )
+    validate_dataset_source_options(
+        {"dataset_s3_uri": "s3://bucket/data.zip"},
+        action="fine-tune",
+    )

@@ -11,6 +11,7 @@ local MLX CLI + selected AWS profile
     -> ECR image build/push
     -> SageMaker CreateTrainingJob
         -> dataset ZIP from user-owned S3
+        -> optional initial .pt model from user-owned S3 for fine-tuning
         -> Managed Spot compute
         -> checkpoints and artifacts in user-owned S3
     -> local status / stop / resume commands
@@ -23,6 +24,7 @@ local MLX CLI + selected AWS profile
 - AWS CLI v2 for configuring and testing local credentials
 - an AWS identity with the caller permissions below
 - a dataset ZIP already uploaded to S3
+- for fine-tuning, an exact `.pt` checkpoint object already uploaded to S3
 - a checkpoint bucket or prefix already created in the same Region as the dataset and job
 - an available SageMaker quota for the selected instance type
 
@@ -89,6 +91,17 @@ compares against the original run specification and rejects a different dataset 
 The shared [S3 dataset training guide](../s3-dataset-training.md) documents the archive contract,
 safe extractor, and differences between local caching and SageMaker managed input.
 
+For a new fine-tuning submission, set `aws.model_s3_uri` or override it explicitly:
+
+```bash
+python -m mlx --mode object-detection --platform aws --action fine-tune \
+    --config ./aws-fine-tune.yaml \
+    --model-s3-uri s3://my-model-bucket/models/yolo9-s-drax-b5-best.pt
+```
+
+The URI must identify a `.pt` checkpoint in the job Region. MLX stages it through a separate
+SageMaker input channel; credentials and S3 clients do not enter provider training code.
+
 The same profile option is accepted by `status`, `stop`, and `resume`. MLX passes the selected
 name to `boto3.Session`; credentials remain in the standard AWS files and are never copied into a
 training job, Docker image, run manifest, or checkpoint.
@@ -124,6 +137,8 @@ the profile's IAM user or role. Replace every `<PLACEHOLDER>` before creating th
 | `<DATASET_OBJECT_KEY>.zip` | complete key below the bucket, without a leading slash |
 | `<CHECKPOINT_BUCKET>` | shared checkpoint bucket name |
 | `<CHECKPOINT_PREFIX>` | configured prefix without leading/trailing slashes |
+| `<MODEL_BUCKET>` | initial fine-tuning checkpoint bucket; remove its model statements and bucket ARN for ordinary training |
+| `<MODEL_OBJECT_KEY>.pt` | exact initial checkpoint key; remove its model statements for ordinary training |
 | `<RESOURCE_PREFIX>` | `aws.resource_prefix`, default `mlx-od` |
 | `<ECR_REPOSITORY>` | `aws.ecr_repository`, default `<RESOURCE_PREFIX>-training` |
 | `<EXECUTION_ROLE_NAME_OR_PREFIX_WILDCARD>` | exact configured role name, or `<RESOURCE_PREFIX>-sagemaker-*` |
@@ -284,6 +299,8 @@ aws:
   region: ap-southeast-1
   profile: mlx-training
   dataset_s3_uri: s3://my-dataset-bucket/datasets/object-detection.zip
+  # Required for --action fine-tune; omit for ordinary training.
+  # model_s3_uri: s3://my-model-bucket/models/yolo9-s-drax-b5-best.pt
   checkpoint_s3_uri: s3://my-training-bucket/mlx-checkpoints
   instance_type: ml.g4dn.xlarge
   volume_size_gb: 100
@@ -335,6 +352,14 @@ python -m mlx --mode object-detection --platform aws --action train \
     --config ./aws-training.yaml --profile mlx-training
 ```
 
+Fine-tuning submits the same asynchronous lifecycle and artifact pipeline with a required initial
+checkpoint:
+
+```bash
+python -m mlx --mode object-detection --platform aws --action fine-tune \
+    --config ./aws-fine-tune.yaml --profile mlx-training
+```
+
 Check once, continuously watch, or emit machine-readable JSON Lines:
 
 ```bash
@@ -362,7 +387,8 @@ python -m mlx --mode object-detection --platform aws --action best-model \
 
 No `--job-name` is required. MLX scans completed jobs newest-first and returns the first valid
 `recovery/best.pt` whose run manifest matches the YAML dataset, checkpoint base, resource prefix,
-provider, and model. Table output includes the S3 URI, checkpoint size, completed epoch, recorded
+provider, model, and optional initial-model URI. Table output includes the S3 URI, checkpoint
+size, completed epoch, recorded
 SHA-256, and a ready-to-run `aws s3 cp` command. Use `--format json` for the same fields as a JSON
 object. This action only reports the location; it does not download the model.
 
@@ -379,7 +405,8 @@ python -m mlx --mode object-detection --platform aws --action resume \
 Wait until the stopped job reaches `Stopped` before resuming. Resume creates a new SageMaker job
 attempt for the same logical run, image, and recovery prefix. It can use a different instance type,
 runtime/wait limit, or a higher total epoch target. Dataset URI, checkpoint base, provider, and
-model cannot change.
+model cannot change. Fine-tuned runs also require the original `model_s3_uri`; recovered state is
+continued instead of loading that initial model again.
 
 Managed Spot interruption inside an active job is automatic: SageMaker restores
 `/opt/ml/checkpoints`, and MLX selects the newest valid full-state snapshot. Recovery guarantees
@@ -404,7 +431,7 @@ completed epochs; an interrupted incomplete epoch may be repeated.
 | Error | Check |
 | --- | --- |
 | profile not found or expired | `aws sts get-caller-identity --profile PROFILE`; renew SSO login |
-| S3 validation denied | caller `GetObject`, `GetBucketLocation`, and checkpoint `ListBucket`; bucket policy denies |
+| S3 validation denied | caller `GetObject`, `GetBucketLocation`, and checkpoint `ListBucket`; for fine-tuning include the exact model object and bucket |
 | cannot pass role | exact caller `iam:PassRole` resource and `iam:PassedToService` condition |
 | ECR push denied | repository ARN, ECR upload actions, local Docker daemon, and Region/account |
 | SageMaker job fails before training | execution-role trust, S3/ECR permissions, quota, instance availability |

@@ -76,17 +76,35 @@ class SageMakerTrainingService:
     def validate_storage(self) -> None:
         dataset_bucket, dataset_key = _parse_s3_uri(self.config.dataset_s3_uri)
         checkpoint_bucket, _ = _parse_s3_uri(self.config.checkpoint_s3_uri)
+        model_location = (
+            _parse_s3_uri(self.config.model_s3_uri)
+            if self.config.model_s3_uri
+            else None
+        )
         try:
             self.s3.head_object(Bucket=dataset_bucket, Key=dataset_key)
             self.s3.head_bucket(Bucket=checkpoint_bucket)
+            if model_location is not None:
+                self.s3.head_object(
+                    Bucket=model_location[0],
+                    Key=model_location[1],
+                )
             dataset_region = self._bucket_region(dataset_bucket)
             checkpoint_region = self._bucket_region(checkpoint_bucket)
+            model_region = (
+                self._bucket_region(model_location[0])
+                if model_location is not None
+                else None
+            )
         except (self._client_error, self._boto_error) as exc:
             raise self._translate("S3 validation", exc) from exc
-        for label, bucket_region in (
+        storage_regions = [
             ("dataset", dataset_region),
             ("checkpoint", checkpoint_region),
-        ):
+        ]
+        if model_region is not None:
+            storage_regions.append(("fine-tuning model", model_region))
+        for label, bucket_region in storage_regions:
             if bucket_region != self.region:
                 raise MLXUserError(
                     f"The {label} S3 location is in region '{bucket_region}', but the "
@@ -177,6 +195,7 @@ class SageMakerTrainingService:
                 (
                     self.config.dataset_s3_uri,
                     self.config.checkpoint_s3_uri,
+                    self.config.model_s3_uri or "",
                     repository_arn,
                 )
             ).encode("utf-8")
@@ -206,6 +225,11 @@ class SageMakerTrainingService:
 
         dataset_bucket, dataset_key = _parse_s3_uri(self.config.dataset_s3_uri)
         checkpoint_bucket, checkpoint_key = _parse_s3_uri(self.config.checkpoint_s3_uri)
+        model_location = (
+            _parse_s3_uri(self.config.model_s3_uri)
+            if self.config.model_s3_uri
+            else None
+        )
         checkpoint_prefix = checkpoint_key.rstrip("/")
         checkpoint_object_arn = (
             f"arn:aws:s3:::{checkpoint_bucket}/{checkpoint_prefix}/*"
@@ -213,6 +237,12 @@ class SageMakerTrainingService:
             else f"arn:aws:s3:::{checkpoint_bucket}/*"
         )
         checkpoint_list_prefix = f"{checkpoint_prefix}/*" if checkpoint_prefix else "*"
+        inspected_buckets = {
+            f"arn:aws:s3:::{dataset_bucket}",
+            f"arn:aws:s3:::{checkpoint_bucket}",
+        }
+        if model_location is not None:
+            inspected_buckets.add(f"arn:aws:s3:::{model_location[0]}")
         policy = {
             "Version": "2012-10-17",
             "Statement": [
@@ -226,10 +256,7 @@ class SageMakerTrainingService:
                     "Sid": "InspectTrainingBuckets",
                     "Effect": "Allow",
                     "Action": ["s3:GetBucketLocation"],
-                    "Resource": [
-                        f"arn:aws:s3:::{dataset_bucket}",
-                        f"arn:aws:s3:::{checkpoint_bucket}",
-                    ],
+                    "Resource": sorted(inspected_buckets),
                 },
                 {
                     "Sid": "ListDataset",
@@ -285,6 +312,25 @@ class SageMakerTrainingService:
                 },
             ],
         }
+        if model_location is not None:
+            model_bucket, model_key = model_location
+            policy["Statement"].extend(
+                [
+                    {
+                        "Sid": "ReadFineTuneModel",
+                        "Effect": "Allow",
+                        "Action": ["s3:GetObject"],
+                        "Resource": [f"arn:aws:s3:::{model_bucket}/{model_key}"],
+                    },
+                    {
+                        "Sid": "ListFineTuneModel",
+                        "Effect": "Allow",
+                        "Action": ["s3:ListBucket"],
+                        "Resource": [f"arn:aws:s3:::{model_bucket}"],
+                        "Condition": {"StringLike": {"s3:prefix": [model_key]}},
+                    },
+                ]
+            )
         if self.config.kms_key_arn:
             policy["Statement"].append(
                 {
@@ -335,6 +381,7 @@ class SageMakerTrainingService:
         image_uri: Optional[str] = None,
         role_arn: Optional[str] = None,
         resume: bool = False,
+        fine_tune: Optional[bool] = None,
     ) -> AwsTrainingSubmission:
         run_id = run_id or uuid4().hex
         request = training or self.config.training
@@ -358,11 +405,19 @@ class SageMakerTrainingService:
         run_spec_uri = _join_s3(run_base, "run-spec.json")
         effective_image = image_uri or infrastructure.image_uri
         effective_role = role_arn or infrastructure.role_arn
+        is_fine_tune = (
+            self.config.model_s3_uri is not None
+            if fine_tune is None
+            else fine_tune
+        )
+        if is_fine_tune and not self.config.model_s3_uri:
+            raise MLXUserError("AWS fine-tuning requires an initial model S3 URI.")
         run_spec = {
             "version": 1,
             "run_id": run_id,
             "run_base_s3_uri": run_base,
             "dataset_s3_uri": self.config.dataset_s3_uri,
+            "model_s3_uri": self.config.model_s3_uri if is_fine_tune else None,
             "checkpoint_base_s3_uri": self.config.checkpoint_s3_uri,
             "resource_prefix": self.config.resource_prefix,
             "image_uri": effective_image,
@@ -391,11 +446,8 @@ class SageMakerTrainingService:
         if self.config.managed_spot:
             stopping["MaxWaitTimeInSeconds"] = self.config.effective_max_wait_seconds
 
-        create_request: dict[str, Any] = {
-            "TrainingJobName": job_name,
-            "RoleArn": effective_role,
-            "AlgorithmSpecification": algorithm,
-            "InputDataConfig": [{
+        input_channels: list[dict[str, Any]] = [
+            {
                 "ChannelName": "training",
                 "ContentType": "application/zip",
                 "InputMode": "File",
@@ -405,8 +457,30 @@ class SageMakerTrainingService:
                         "S3Uri": self.config.dataset_s3_uri,
                         "S3DataDistributionType": "FullyReplicated",
                     }
-                },
-            }],
+                }
+            }
+        ]
+        if is_fine_tune and not resume:
+            input_channels.append(
+                {
+                    "ChannelName": "model",
+                    "ContentType": "application/x-pytorch",
+                    "InputMode": "File",
+                    "DataSource": {
+                        "S3DataSource": {
+                            "S3DataType": "S3Prefix",
+                            "S3Uri": self.config.model_s3_uri,
+                            "S3DataDistributionType": "FullyReplicated",
+                        }
+                    },
+                }
+            )
+
+        create_request: dict[str, Any] = {
+            "TrainingJobName": job_name,
+            "RoleArn": effective_role,
+            "AlgorithmSpecification": algorithm,
+            "InputDataConfig": input_channels,
             "OutputDataConfig": {"S3OutputPath": output_uri},
             "ResourceConfig": {
                 "InstanceType": self.config.instance_type,
@@ -426,6 +500,8 @@ class SageMakerTrainingService:
                 "mlx_attempt_spec_s3_uri": attempt_spec_uri,
                 "mlx_training": json.dumps(request_config, separators=(",", ":")),
                 "mlx_resume": str(resume).lower(),
+                "mlx_fine_tune": str(is_fine_tune).lower(),
+                "mlx_model_s3_uri": self.config.model_s3_uri or "",
                 "mlx_image_uri": effective_image,
                 "mlx_volume_size_gb": str(self.config.volume_size_gb),
             },
@@ -478,6 +554,8 @@ class SageMakerTrainingService:
             raise MLXUserError("The resume configuration must use the original dataset_s3_uri.")
         if spec.get("checkpoint_base_s3_uri") != self.config.checkpoint_s3_uri:
             raise MLXUserError("The resume configuration must use the original checkpoint_s3_uri.")
+        if spec.get("model_s3_uri") != self.config.model_s3_uri:
+            raise MLXUserError("The resume configuration must use the original model_s3_uri.")
         original_payload = spec.get("training")
         if not isinstance(original_payload, Mapping):
             raise MLXUserError(
@@ -516,6 +594,7 @@ class SageMakerTrainingService:
             image_uri=spec["image_uri"],
             role_arn=spec["role_arn"],
             resume=True,
+            fine_tune=spec.get("model_s3_uri") is not None,
         )
 
     def _latest_recovery_epoch(self, run_base_uri: str, provider: str) -> int:
@@ -673,6 +752,7 @@ class SageMakerTrainingService:
         expected_values = (
             (spec.get("run_base_s3_uri"), expected_run_base),
             (spec.get("dataset_s3_uri"), self.config.dataset_s3_uri),
+            (spec.get("model_s3_uri"), self.config.model_s3_uri),
             (spec.get("checkpoint_base_s3_uri"), self.config.checkpoint_s3_uri),
             (spec.get("resource_prefix"), self.config.resource_prefix),
             (training.get("provider"), self.config.training.provider),

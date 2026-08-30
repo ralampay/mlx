@@ -8,6 +8,7 @@ from mlx.modes.object_detection.aws.commands import (
     LocateBestAwsObjectDetectionModel,
     ResumeAwsObjectDetectionTraining,
     StopAwsObjectDetectionTraining,
+    SubmitAwsObjectDetectionFineTuning,
     SubmitAwsObjectDetectionTraining,
     WatchAwsObjectDetectionTraining,
 )
@@ -27,6 +28,8 @@ def run_aws_object_detection(config: dict[str, Any]) -> Any:
 
     if action == "train":
         result = SubmitAwsObjectDetectionTraining(service).execute()
+    elif action == "fine-tune":
+        result = SubmitAwsObjectDetectionFineTuning(service).execute()
     elif action == "best-model":
         result = LocateBestAwsObjectDetectionModel(service).execute()
     elif action == "resume":
@@ -56,7 +59,7 @@ def run_aws_object_detection(config: dict[str, Any]) -> Any:
     else:
         raise MLXUserError(
             f"Unsupported AWS object-detection action '{action}'. "
-            "Available actions: best-model, resume, status, stop, train."
+            "Available actions: best-model, fine-tune, resume, status, stop, train."
         )
 
     render_aws_result(result, output_format=output_format)

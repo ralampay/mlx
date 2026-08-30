@@ -5,6 +5,8 @@ aws:
   # Optional. An explicit CLI --profile overrides this value.
   profile: mlx-training
   dataset_s3_uri: s3://my-dataset-bucket/datasets/object-detection.zip
+  # Required only with --action fine-tune; must be an exact .pt object.
+  # model_s3_uri: s3://my-model-bucket/models/yolo9-s-drax-b5-best.pt
   checkpoint_s3_uri: s3://my-training-bucket/mlx-checkpoints
   instance_type: ml.g4dn.xlarge
   managed_spot: true

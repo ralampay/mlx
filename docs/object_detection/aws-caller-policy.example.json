@@ -13,7 +13,8 @@
       "Action": "s3:GetBucketLocation",
       "Resource": [
         "arn:aws:s3:::<DATASET_BUCKET>",
-        "arn:aws:s3:::<CHECKPOINT_BUCKET>"
+        "arn:aws:s3:::<CHECKPOINT_BUCKET>",
+        "arn:aws:s3:::<MODEL_BUCKET>"
       ]
     },
     {
@@ -21,6 +22,12 @@
       "Effect": "Allow",
       "Action": "s3:GetObject",
       "Resource": "arn:aws:s3:::<DATASET_BUCKET>/<DATASET_OBJECT_KEY>.zip"
+    },
+    {
+      "Sid": "ValidateFineTuneModelObject",
+      "Effect": "Allow",
+      "Action": "s3:GetObject",
+      "Resource": "arn:aws:s3:::<MODEL_BUCKET>/<MODEL_OBJECT_KEY>.pt"
     },
     {
       "Sid": "ValidateCheckpointBucket",

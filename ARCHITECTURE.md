@@ -89,7 +89,7 @@ The primary workflow commands are:
 | Image classification | `TrainImageClassificationModel`, `SmokeTestImageClassificationModel`, `BenchmarkImageClassification`, `InferImageClassification`, `GenerateImageClassificationCams`, `BuildImageClassificationDataset`, `ListImageClassificationModels`, AWS submit/status/stop/resume commands |
 | Segmentation | `TrainSegmentationModel`, `SmokeTestSegmentationModel`, `BenchmarkSegmentation`, `InferSegmentationImage`, `RunSegmentationStreamInference`, `BuildSegmentationDataset`, `ListSegmentationModels` |
 | Video anomaly detection | `TrainVideoAnomalyModel`, `BenchmarkVideoAnomalyModel`, `InferVideoAnomaly`, `ListVideoAnomalyModels`, AWS all-model submit/status/resume commands |
-| Object detection | `TrainObjectDetectionModel`, `BenchmarkObjectDetectionModel`, `CreateObjectDetector`, `ConvertObjectDetectionModel`, `ListObjectDetectionModels`, `RunObjectDetectionStream`, AWS submit/status/stop/resume and best-model locator commands |
+| Object detection | `TrainObjectDetectionModel`, `FineTuneObjectDetectionModel`, `BenchmarkObjectDetectionModel`, `CreateObjectDetector`, `ConvertObjectDetectionModel`, `ListObjectDetectionModels`, `RunObjectDetectionStream`, AWS submit/status/stop/resume and best-model locator commands |
 | Tracking | `CreateTrackingAlgorithm`, `RunObjectDetectionTrackingCommand`, `RunTrackByDetectionCommand`, `RunTrackingVideo`, `ExportMOTFromClassAwareTracking`, `BenchmarkMOTTracking`, `ExportTrackingReplay` |
 | NLP | `EmbedCsvCommand` (`EmbedCsv` is the legacy path-returning API) |
 
@@ -325,6 +325,15 @@ reuses the original immutable image reference, and permits only capacity/runtime
 higher total epoch target. It also preserves the original serialized training payload, changing
 only the epoch target, so a newer local CLI cannot introduce default fields that are unknown to
 the immutable training image. Provider/model/dataset changes are rejected at that boundary.
+
+Object-detection fine-tuning is an explicit training use case rather than provider-specific
+branching. Local callers supply a required `.pt` checkpoint to
+`FineTuneObjectDetectionModel`; the command validates the initialization contract and delegates
+the common provider-neutral training flow. AWS callers supply an exact S3 model URI. SageMaker
+stages it through a separate managed input channel, and the container passes the staged file to
+the same fine-tuning command only on the first attempt. Recovery checkpoints take precedence on
+Spot or manual resume, preventing the initial model from being reapplied. Run manifests and
+compatibility matching treat the initial-model URI as immutable run identity.
 
 Users own the dataset ZIP and shared checkpoint S3 bucket or prefix. MLX never creates, deletes,
 empties, or attaches lifecycle policies to those buckets. Logical runs and attempts receive

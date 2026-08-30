@@ -44,6 +44,11 @@ class TrainObjectDetectionRequest(ObjectDetectionRequest):
 
 
 @dataclass(frozen=True)
+class FineTuneObjectDetectionRequest(TrainObjectDetectionRequest):
+    """Train an object detector from an explicitly supplied checkpoint."""
+
+
+@dataclass(frozen=True)
 class BenchmarkObjectDetectionRequest(ObjectDetectionRequest):
     confidence: float = 0.001
     dataset_path: str = "./tmp/dataset"

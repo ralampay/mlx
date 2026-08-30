@@ -15,6 +15,7 @@ from mlx.modes.object_detection.commands import (
     BenchmarkObjectDetectionModel,
     ConvertObjectDetectionModel,
     CreateObjectDetector,
+    FineTuneObjectDetectionModel,
     ListObjectDetectionModels,
     RunObjectDetectionStream,
     TrainObjectDetectionModel,
@@ -23,6 +24,7 @@ from mlx.modes.object_detection.models import Detection, DetectionResult
 from mlx.modes.object_detection.requests import (
     BenchmarkObjectDetectionRequest,
     ConvertObjectDetectionRequest,
+    FineTuneObjectDetectionRequest,
     ListObjectDetectionModelsRequest,
     ObjectDetectionRequest,
     TrainObjectDetectionRequest,
@@ -122,6 +124,14 @@ def test_cli_parses_s3_dataset_staging_options() -> None:
     assert namespace.dataset_cache_dir == "/tmp/mlx-cache"
 
 
+def test_cli_parses_fine_tuning_model_s3_uri() -> None:
+    namespace = build_parser().parse_args(
+        ["--model-s3-uri", "s3://models/yolo9-best.pt"]
+    )
+
+    assert namespace.model_s3_uri == "s3://models/yolo9-best.pt"
+
+
 def test_mode_descriptors_supply_defaults_and_alias_metadata() -> None:
     canonical = resolve_mode_descriptor("video_anomaly_detection")
     alias = resolve_mode_descriptor("video-anomaly-detection")
@@ -130,6 +140,7 @@ def test_mode_descriptors_supply_defaults_and_alias_metadata() -> None:
     assert canonical.default_action == "ls-models"
     assert "benchmark" in canonical.actions
     assert "best-model" in resolve_mode_descriptor("object_detection").actions
+    assert "fine-tune" in resolve_mode_descriptor("object_detection").actions
 
 
 def test_cli_applies_mode_default_before_dispatch_and_emits_clean_json(
@@ -187,6 +198,31 @@ def test_detection_commands_delegate_to_injected_provider() -> None:
         "convert",
         "list",
     ]
+
+
+def test_fine_tune_command_requires_and_normalizes_checkpoint(
+    tmp_path: Path,
+) -> None:
+    provider = FakeProvider()
+    checkpoint = tmp_path / "initial.pt"
+    checkpoint.touch()
+
+    result = FineTuneObjectDetectionModel(
+        FineTuneObjectDetectionRequest(
+            provider="fake",
+            model_path=str(checkpoint),
+        ),
+        provider=provider,
+    ).execute()
+
+    assert result == "trained"
+    assert provider.calls[0][1].model_path == str(checkpoint.resolve())
+
+    with pytest.raises(MLXUserError, match="requires --model-path"):
+        FineTuneObjectDetectionModel(
+            FineTuneObjectDetectionRequest(provider="fake"),
+            provider=provider,
+        ).execute()
 
 
 def test_unknown_detection_provider_is_user_facing() -> None:

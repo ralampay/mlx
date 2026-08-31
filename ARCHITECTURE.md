@@ -57,11 +57,13 @@ mlx/
 │   ├── datasets.py              S3 ZIP staging, safe extraction, cache, resolver protocol
 │   ├── presentation.py          shared Rich rendering for core infrastructure events
 │   ├── image_backbones.py        neutral penultimate-image-feature contracts
+│   ├── binary_metrics.py         shared higher-is-positive binary score evaluation
 │   ├── deep_svdd.py              shared Deep-SVDD score/calibration semantics
 │   └── streaming.py              neutral frame I/O contracts and lazy OpenCV adapters
 └── modes/
     ├── image_classification/     classification data, models, OOD, training, inference, CAM
     │   └── aws/                  SageMaker Spot lifecycle and native checkpoint recovery
+    ├── image_recognition_oc/     normal-only image recognition algorithms and research artifacts
     ├── segmentation/             paired-mask data, U-Net models, metrics, research artifacts
     │   ├── streaming.py          injected frame source/sink contracts and OpenCV adapters
     │   ├── visualization.py      pure mask coloring, blending, and view composition
@@ -87,6 +89,7 @@ The primary workflow commands are:
 | Mode | Commands |
 | --- | --- |
 | Image classification | `TrainImageClassificationModel`, `SmokeTestImageClassificationModel`, `BenchmarkImageClassification`, `InferImageClassification`, `GenerateImageClassificationCams`, `BuildImageClassificationDataset`, `ListImageClassificationModels`, AWS submit/status/stop/resume commands |
+| One-class image recognition | `TrainImageOneClassModel`, `BenchmarkImageOneClass`, `InferImageOneClass`, `ListImageOneClassModels` |
 | Segmentation | `TrainSegmentationModel`, `SmokeTestSegmentationModel`, `BenchmarkSegmentation`, `InferSegmentationImage`, `RunSegmentationStreamInference`, `BuildSegmentationDataset`, `ListSegmentationModels` |
 | Video anomaly detection | `TrainVideoAnomalyModel`, `BenchmarkVideoAnomalyModel`, `InferVideoAnomaly`, `ListVideoAnomalyModels`, AWS all-model submit/status/resume commands |
 | Object detection | `TrainObjectDetectionModel`, `FineTuneObjectDetectionModel`, `BenchmarkObjectDetectionModel`, `CreateObjectDetector`, `ConvertObjectDetectionModel`, `ListObjectDetectionModels`, `RunObjectDetectionStream`, AWS submit/status/stop/resume and best-model locator commands |
@@ -235,6 +238,33 @@ conversion adapters may accept other axis-aligned detection checkpoints supporte
 but non-detection tasks and cross-provider checkpoint loading are outside the neutral provider
 contract.
 
+## One-Class Image Recognition
+
+`image_recognition_oc` owns normal-only still-image training, single-image inference, binary
+benchmarking, and model/backbone listing. `--model` selects the one-class algorithm and `--backbone`
+selects a standard image-classification feature model. The mode's immutable, injectable
+`OneClassAlgorithmRegistry` initially contains `deep-svdd`; its provider owns construction,
+initialization, loss, scoring, calibration, and algorithm checkpoint metadata so future algorithms
+do not enter command branching.
+
+The image-classification registry remains authoritative for backbone aliases and pretrained
+weights. All cross-mode imports are isolated in `image_recognition_oc.backbones`, which exposes the
+neutral `ImageFeatureBackbone` contract and excludes Siamese families. Other one-class modules do
+not depend on classifier internals.
+
+Training and validation datasets recursively index `<split>/normal` and reject anomaly leakage.
+The Deep-SVDD center is initialized from unaugmented normal training embeddings and remains fixed;
+the full backbone and projection are optimized. Best selection uses mean normal-validation score,
+then best and resumable checkpoints are independently calibrated from the configured validation
+quantile. Versioned checkpoints store algorithm/backbone identity, preprocessing, center,
+threshold, dimensions, and state; resumable checkpoints additionally preserve optimizer, history,
+best objective, completed epoch, and RNG state.
+
+Benchmarking requires `test/{normal,anomaly}`, treats anomaly as the positive class, never
+recalibrates, and writes image-level metrics, predictions, ROC/PR data, plots, provenance, and a
+Markdown report. Higher-is-positive binary metric calculation is shared in
+`mlx.core.binary_metrics`; mode-specific artifact and presentation policies remain mode owned.
+
 ## Video Anomaly Detection
 
 `video_anomaly_detection` is a first-class normal-only workflow. Its runner constructs typed
@@ -278,8 +308,9 @@ registered `TEMPORAL_ENCODERS` path. New requests default to `3d`; the legacy pa
 explicit compatibility boundary rather than being folded into the 3D contract.
 
 Deep-SVDD squared-distance and quantile semantics are shared in `mlx.core.deep_svdd`; image
-classification and video anomaly models retain mode-owned projection/checkpoint structures. The
-video center is initialized once from normal training embeddings and stored as a fixed buffer.
+classification, one-class image recognition, and video anomaly models retain mode-owned
+projection/checkpoint structures. The video center is initialized once from normal training
+embeddings and stored as a fixed buffer.
 Optimization consumes only normal clips. The deployment threshold is calibrated from normal
 validation scores and persisted. Resume restores the exact center, optimizer, history, and RNG
 state; benchmark and inference reject checkpoints without a stored center or finite threshold and
@@ -391,7 +422,9 @@ checkpoint input. Local single-model training and the reusable trainer remain AW
 `mlx.core.artifacts` contains only behavior that is identical across modes: JSON-safe value
 normalization, atomic JSON/PyTorch writes, CSV serialization, and SHA-256 hashing. RNG capture and
 restore live in `mlx.core.random`. Checkpoint schemas, compatibility checks, naming, plots, and
-reports remain mode owned. Deep-SVDD sharing remains similarly narrow in `mlx.core.deep_svdd`.
+reports remain mode owned. Deep-SVDD sharing remains similarly narrow in `mlx.core.deep_svdd`;
+higher-is-positive binary score metrics shared by image and video anomaly workflows live in
+`mlx.core.binary_metrics`.
 
 Image classification and segmentation expose action-specific request subclasses while retaining
 their former umbrella request types for Python compatibility. `ConfigRequest` keeps unknown

@@ -2,7 +2,8 @@
 
 MLX is a command-line toolkit for machine-learning workflows. It provides a shared
 CLI and project conventions while keeping object detection, image classification,
-video anomaly detection, segmentation, NLP, and tracking logic in focused modules.
+one-class image recognition, video anomaly detection, segmentation, NLP, and tracking logic in
+focused modules.
 
 ## Contents
 
@@ -12,6 +13,7 @@ video anomaly detection, segmentation, NLP, and tracking logic in focused module
 - [Training from an S3 dataset ZIP](#training-from-an-s3-dataset-zip)
 - [Object detection and tracking](#object-detection-and-tracking)
 - [Image classification](#image-classification)
+- [One-class image recognition](#one-class-image-recognition)
 - [Video anomaly detection](#video-anomaly-detection)
 - [Segmentation](#segmentation)
 - [NLP embeddings](#nlp-embeddings)
@@ -107,13 +109,14 @@ Available CLI modes are:
 | `object_detection` | `train`, `benchmark`, AWS `best-model`/`resume`/`status`/`stop`, `infer-camera`, `infer-video`, `convert`, `ls-models` |
 | `track` | `run`, `export-mot`, `ls-trackers` |
 | `image_classification` | `train`, `test`, `benchmark`, AWS `resume`/`status`/`stop`, `infer-image`, `cam`, `build-dataset`, `ls-models` |
+| `image_recognition_oc` | `train`, `infer-image`, `benchmark`, `ls-models` |
 | `video_anomaly_detection` | `train`, AWS `train-all`/`status`/`resume`, `benchmark`, `infer-video`, `ls-models` |
 | `segmentation` | `train`, `test`, `benchmark`, `infer-image`, `infer-camera`, `infer-video`, `build-dataset`, `ls-models` |
 | `nlp` | `embed` |
 
-Hyphenated mode names such as `object-detection`, `image-classification`, and
-`video-anomaly-detection` are also accepted. Run the following command for the complete option
-reference:
+Hyphenated mode names such as `object-detection`, `image-classification`,
+`image-recognition-oc`, and `video-anomaly-detection` are also accepted. Run the following command
+for the complete option reference:
 
 ```bash
 python -m mlx --help
@@ -125,8 +128,8 @@ suppressed; errors are emitted as JSON on standard error.
 
 ### Training from an S3 dataset ZIP
 
-All train-capable modes—object detection, image classification, segmentation, and video anomaly
-detection—can stage a dataset ZIP directly from S3 for local training:
+All train-capable modes—including one-class image recognition—can stage a dataset ZIP directly
+from S3 for local training:
 
 ```bash
 python -m mlx --mode video_anomaly_detection --action train \
@@ -151,7 +154,7 @@ For SageMaker object-detection or image-classification training, the existing YA
 `aws.dataset_s3_uri` remains supported. An explicit `--dataset-s3-uri` overrides it for a new
 training submission; resumed runs must retain their original dataset URI.
 
-See [Training from an S3 Dataset ZIP](docs/s3-dataset-training.md) for all four archive layouts,
+See [Training from an S3 Dataset ZIP](docs/s3-dataset-training.md) for all archive layouts,
 AWS credentials and IAM, cache behavior, provenance schema, safe-extraction rules, SageMaker
 differences, resume guidance, and troubleshooting.
 
@@ -319,6 +322,34 @@ explainability workflows.
 Image-classification training can run asynchronously on SageMaker with Managed Spot
 recovery. See the [AWS image-classification guide](./docs/image_classification/aws-sagemaker-training.md).
 
+## One-class image recognition
+
+Package: `mlx.modes.image_recognition_oc`
+
+This mode trains a normal-only still-image recognizer. The initial `deep-svdd` algorithm uses every
+standard image-classification model as a replaceable feature backbone; Siamese variants are
+excluded. Training and validation contain normal images only, while benchmark data contains both
+normal and anomalous images.
+
+```bash
+python -m mlx --mode image_recognition_oc --action ls-models
+
+python -m mlx --mode image_recognition_oc --action train \
+    --model deep-svdd --backbone resnet18 \
+    --dataset ./one-class-dataset --output ./artifacts/one-class
+
+python -m mlx --mode image_recognition_oc --action infer-image \
+    --model-path ./artifacts/one-class/resnet18-deep-svdd.pth \
+    --input-img ./sample.jpg
+
+python -m mlx --mode image_recognition_oc --action benchmark \
+    --model-path ./artifacts/one-class/resnet18-deep-svdd.pth \
+    --dataset ./one-class-dataset --output ./benchmark
+```
+
+See the [one-class image recognition guide](./docs/image_recognition_oc/README.md) for dataset,
+checkpoint, inference, resume, and benchmark contracts.
+
 ## Video anomaly detection
 
 Package: `mlx.modes.video_anomaly_detection`
@@ -418,4 +449,5 @@ MLX derives an output name beside the input CSV.
 - [Object detection](./docs/object_detection/README.md)
 - [Tracking by detection](./TRACKING.md)
 - [Image classification](./docs/image_classification/README.md)
+- [One-class image recognition](./docs/image_recognition_oc/README.md)
 - [Segmentation](./docs/segmentation/README.md)

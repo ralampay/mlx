@@ -36,6 +36,7 @@ The repository documentation is split by CLI mode and backing package:
 | --- | --- | --- |
 | `mlx.modes.object_detection` | Provider-neutral detection, Ultralytics/LibreYOLO integrations, and tracking | [Object detection](./object_detection/README.md) |
 | `mlx.modes.image_classification` | Image-classification workflows for one-shot and standard classifiers | [Image classification](./image_classification/README.md) |
+| `mlx.modes.image_recognition_oc` | Normal-only still-image one-class recognition with replaceable backbones | [One-class image recognition](./image_recognition_oc/README.md) |
 | `mlx.modes.video_anomaly_detection` | Normal-only clip-native 3D CNN, Deep SVDD, and sequential SageMaker workflows | [Video anomaly detection](./video_anomaly_detection/README.md), [AWS training](./video_anomaly_detection/aws-sagemaker-training.md) |
 | `mlx.modes.segmentation` | Semantic segmentation workflows for U-Net style models | [Segmentation](./segmentation/README.md) |
 | `mlx.core` | Shared commands, requests, errors, dataset staging, feature/streaming contracts, and UI helpers | [S3 dataset training](./s3-dataset-training.md) and [ARCHITECTURE.md](../ARCHITECTURE.md) |
@@ -47,5 +48,6 @@ The repository documentation is split by CLI mode and backing package:
 | `object_detection` | `mlx.modes.object_detection` |
 | `track` | `mlx.modes.object_detection.tracking` |
 | `image_classification` | `mlx.modes.image_classification` |
+| `image_recognition_oc`, `image-recognition-oc` | `mlx.modes.image_recognition_oc` |
 | `video_anomaly_detection`, `video-anomaly-detection` | `mlx.modes.video_anomaly_detection` |
 | `segmentation` | `mlx.modes.segmentation` |

@@ -89,6 +89,20 @@ def test_video_classification_dependency_is_isolated_to_compatibility_adapter() 
     assert violations == []
 
 
+def test_one_class_image_dependency_is_isolated_to_backbone_gateway() -> None:
+    package = MODES / "image_recognition_oc"
+    gateway = (package / "backbones.py").resolve()
+    violations = []
+    for path in package.rglob("*.py"):
+        if path.resolve() == gateway:
+            continue
+        for module in _imports(path):
+            if module.startswith("mlx.modes.image_classification"):
+                violations.append(f"{path.relative_to(ROOT)} imports {module}")
+
+    assert violations == []
+
+
 def test_shared_dataset_module_contains_no_mode_specific_root_policy() -> None:
     source = (ROOT / "mlx" / "core" / "datasets.py").read_text(encoding="utf-8")
     for symbol in (

@@ -50,6 +50,14 @@ MODE_DESCRIPTORS: tuple[ModeDescriptor, ...] = (
         purpose="One-shot and standard image-classification workflows",
     ),
     ModeDescriptor(
+        name="image_recognition_oc",
+        aliases=("image-recognition-oc",),
+        runner="mlx.modes.image_recognition_oc.runner:run_image_recognition_oc",
+        default_action="ls-models",
+        actions=("train", "infer-image", "benchmark", "ls-models"),
+        purpose="Normal-only still-image one-class recognition",
+    ),
+    ModeDescriptor(
         name="segmentation",
         aliases=(),
         runner="mlx.modes.segmentation.runner:run_segmentation",

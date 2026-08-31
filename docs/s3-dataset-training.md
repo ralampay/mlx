@@ -4,6 +4,7 @@ MLX can train every train-capable mode from a dataset ZIP stored in Amazon S3. T
 
 - object detection;
 - image classification, including standard and one-shot models;
+- one-class image recognition;
 - semantic segmentation;
 - video anomaly detection.
 
@@ -91,6 +92,15 @@ python -m mlx --mode image_classification --action train \
   --output ./artifacts/resnet18-s3 --profile mlx-training
 ```
 
+One-class image recognition:
+
+```bash
+python -m mlx --mode image_recognition_oc --action train \
+  --model deep-svdd --backbone resnet18 \
+  --dataset-s3-uri s3://my-datasets/one-class-images.zip \
+  --output ./artifacts/one-class-s3 --profile mlx-training
+```
+
 Segmentation:
 
 ```bash
@@ -150,6 +160,23 @@ classification-dataset/
 
 The ordinary mode rules still apply. In particular, one-shot label directories need enough
 images to construct positive and negative pairs.
+
+### One-class image recognition
+
+The archive must contain normal-only training and validation images:
+
+```text
+one-class-image-dataset/
+├── train/
+│   └── normal/
+├── val/
+│   └── normal/
+└── test/                 # optional for training
+    ├── normal/
+    └── anomaly/
+```
+
+Anomaly images under `train/` or `val/` remain an error after staging.
 
 ### Segmentation
 
@@ -307,8 +334,8 @@ python -m mlx --mode image_classification --platform aws --action train \
 
 An AWS resume continues to validate the dataset URI against the original run specification. A
 different override is rejected. `--dataset-cache-dir` has no effect on SageMaker managed input.
-Segmentation and video anomaly detection currently support S3 ZIP staging for local training,
-not SageMaker lifecycle execution.
+One-class image recognition, segmentation, and video anomaly detection currently support S3 ZIP
+staging for local training, not SageMaker lifecycle execution.
 
 ## Troubleshooting
 

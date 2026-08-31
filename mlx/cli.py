@@ -60,6 +60,7 @@ def build_parser() -> RichArgumentParser:
     )
     parser.add_argument("--provider", default="ultralytics")
     parser.add_argument("--model", default=None)
+    parser.add_argument("--backbone", default=None)
     parser.add_argument("--height", type=int, default=256)
     parser.add_argument("--width", type=int, default=256)
     parser.add_argument("--device", default="cpu")
@@ -162,6 +163,7 @@ def build_parser() -> RichArgumentParser:
     )
     parser.add_argument("--camera-index", type=int, default=0, dest="camera_index")
     parser.add_argument("--pretrained", action=argparse.BooleanOptionalAction, default=False)
+    parser.add_argument("--colored", action=argparse.BooleanOptionalAction, default=True)
     parser.add_argument("--plots", action=argparse.BooleanOptionalAction, default=True)
     parser.add_argument("--verbose", action=argparse.BooleanOptionalAction, default=False)
     parser.add_argument("--use-best", action=argparse.BooleanOptionalAction, default=True, dest="use_best")
@@ -284,6 +286,9 @@ def _render_help() -> None:
     usage.add_row("python -m mlx --mode image_classification --platform aws --action train --config ./aws-classification.yaml")
     usage.add_row("python -m mlx --mode image_classification --platform aws --action status --config ./aws-classification.yaml --job-name JOB_NAME --watch")
     usage.add_row("python -m mlx --mode image_classification --action ls-models")
+    usage.add_row("python -m mlx --mode image_recognition_oc --action train --model deep-svdd --backbone resnet18 --dataset ./dataset --output ./artifacts/one-class")
+    usage.add_row("python -m mlx --mode image_recognition_oc --action infer-image --model-path ./artifacts/one-class/resnet18-deep-svdd.pth --input-img ./sample.jpg")
+    usage.add_row("python -m mlx --mode image_recognition_oc --action benchmark --model-path ./artifacts/one-class/resnet18-deep-svdd.pth --dataset ./dataset --output ./benchmark")
     usage.add_row("python -m mlx --mode image_classification --action train --output ./artifacts/siamese --dataset ./omniglot --model siamese-le-net")
     usage.add_row("python -m mlx --mode image_classification --action train --output ./artifacts/siamese-resnet --dataset ./omniglot --model siamese-resnet18 --pretrained")
     usage.add_row("python -m mlx --mode image_classification --action build-dataset --dataset ./raw-dataset")
@@ -328,6 +333,7 @@ def _render_help() -> None:
     options.add_row("--rebuild-image", "False", "Force a new content-tagged SageMaker image build and ECR push.")
     options.add_row("--provider", "ultralytics", "Object-detection provider: ultralytics or libreyolo.")
     options.add_row("--model", "None", "Provider-specific model identifier, YAML path, or architecture name.")
+    options.add_row("--backbone", "mode-specific", "Feature backbone used by one-class image recognition.")
     options.add_row("--action", "mode-specific", "Sub-action such as train, ls-models, infer-video, convert, benchmark, or build-dataset.")
     options.add_row("--dataset", "./tmp/dataset", "Local dataset source. Its layout and supported aliases are mode-specific.")
     options.add_row("--dataset-s3-uri", "None", "Training-only S3 URI of a ZIP dataset. Local training caches and extracts it before training; AWS training uses the managed input channel.")
@@ -348,7 +354,7 @@ def _render_help() -> None:
     options.add_row("--output-file", "derived", "Output CSV used by NLP embed; defaults beside the input file.")
     options.add_row("--column-name", "content", "CSV text column used by NLP embed.")
     options.add_row("--file-path", "None", "Video path for file-based inference.")
-    options.add_row("--input-img", "/tmp/image.jpg", "Input image for classification inference.")
+    options.add_row("--input-img", "/tmp/image.jpg", "Input image for classification or one-class recognition inference.")
     options.add_row("--device", "cpu", "Execution device such as cpu or cuda:0.")
     options.add_row("--height / --width", "256 / 256", "Image size controls.")
     options.add_row("--batch-size", "1", "Training or evaluation batch size.")
@@ -375,6 +381,7 @@ def _render_help() -> None:
     options.add_row("--benchmark-iou", "0.5", "Minimum box IoU used for MOT benchmark matching.")
     options.add_row("--camera-index", "0", "Camera index for webcam inference.")
     options.add_row("--pretrained / --no-pretrained", "False", "Toggle supported pretrained model initialization.")
+    options.add_row("--colored / --no-colored", "True", "Use RGB input; disable for supported grayscale workflows.")
     options.add_row("--plots / --no-plots", "True", "Write supported provider-native training or benchmark plots.")
     options.add_row("--verbose / --no-verbose", "False", "Show per-epoch live progress bars when supported.")
     options.add_row(
@@ -385,9 +392,9 @@ def _render_help() -> None:
     options.add_row(
         "--apply-transformations / --no-apply-transformations",
         "False",
-        "Apply image-classification training augmentations: RandomHorizontalFlip and RandomRotation(10).",
+        "Apply supported image-training augmentations: RandomHorizontalFlip and RandomRotation(10).",
     )
-    options.add_row("--lr", "None", "Learning rate for image-classification training.")
+    options.add_row("--lr", "None", "Learning rate for supported training workflows.")
     options.add_row("--amp / --no-amp", "True", "Toggle mixed precision for supported training providers.")
     options.add_row("--lr0", "None", "Override initial learning rate.")
     options.add_row("--optimizer", "auto", "Provider optimizer selection; auto uses the provider default.")
@@ -398,7 +405,7 @@ def _render_help() -> None:
     options.add_row("--svdd-weight", "0.05", "Weight applied to the joint Deep SVDD loss.")
     options.add_row("--svdd-dim", "128", "Deep SVDD embedding width.")
     options.add_row("--svdd-hidden-dim", "256", "Deep SVDD projection hidden width.")
-    options.add_row("--svdd-quantile", "0.95", "Validation-score quantile used for rejection calibration.")
+    options.add_row("--svdd-quantile", "0.95", "Normal-validation score quantile used for rejection calibration.")
     options.add_row("--svdd-warmup-epochs", "0", "Classification-only epochs before applying the SVDD loss.")
     options.add_row("--clip-length", "16", "Frames per video-anomaly clip window.")
     options.add_row("--frame-stride", "1", "Sampling stride between frames in a video-anomaly clip.")

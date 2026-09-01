@@ -125,8 +125,10 @@ ACTION_HANDLERS = {
 
 
 def run_image_recognition_oc(mode_config: dict[str, Any]):
-    if mode_config.get("platform", "local") != "local":
-        raise MLXUserError("image-recognition-oc currently supports local execution only.")
+    if mode_config.get("platform", "local") == "aws":
+        from mlx.modes.image_recognition_oc.aws.runner import run_aws_image_one_class
+
+        return run_aws_image_one_class(mode_config)
     explicit = set(mode_config.get("_explicit_options") or ())
     config = dict(mode_config)
     for name, default in DEFAULT_CONFIG.items():

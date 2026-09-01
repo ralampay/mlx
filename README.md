@@ -93,6 +93,8 @@ For local AWS credentials, least-privilege IAM policies, S3 preparation, and Sag
 commands, see the [AWS object-detection training guide](docs/object_detection/aws-sagemaker-training.md).
 For sequential SageMaker training across every video-anomaly 3D configuration, see the
 [AWS video-anomaly training guide](docs/video_anomaly_detection/aws-sagemaker-training.md).
+For single/all-backbone Deep SVDD training and benchmarking, see the
+[AWS one-class image guide](docs/image_recognition_oc/aws-sagemaker.md).
 
 ## Command-line interface
 
@@ -109,7 +111,7 @@ Available CLI modes are:
 | `object_detection` | `train`, `benchmark`, AWS `best-model`/`resume`/`status`/`stop`, `infer-camera`, `infer-video`, `convert`, `ls-models` |
 | `track` | `run`, `export-mot`, `ls-trackers` |
 | `image_classification` | `train`, `test`, `benchmark`, AWS `resume`/`status`/`stop`, `infer-image`, `cam`, `build-dataset`, `ls-models` |
-| `image_recognition_oc` | `train`, `infer-image`, `benchmark`, `ls-models` |
+| `image_recognition_oc` | `train`, AWS `train-all`/`benchmark`/`resume`/`status`/`stop`, `infer-image`, `benchmark`, `ls-models` |
 | `video_anomaly_detection` | `train`, AWS `train-all`/`status`/`resume`, `benchmark`, `infer-video`, `ls-models` |
 | `segmentation` | `train`, `test`, `benchmark`, `infer-image`, `infer-camera`, `infer-video`, `build-dataset`, `ls-models` |
 | `nlp` | `embed` |
@@ -345,10 +347,14 @@ python -m mlx --mode image_recognition_oc --action infer-image \
 python -m mlx --mode image_recognition_oc --action benchmark \
     --model-path ./artifacts/one-class/resnet18-deep-svdd.pth \
     --dataset ./one-class-dataset --output ./benchmark
+
+python -m mlx --mode image_recognition_oc --platform aws --action train-all \
+    --config ./aws-svdd.yaml
 ```
 
 See the [one-class image recognition guide](./docs/image_recognition_oc/README.md) for dataset,
-checkpoint, inference, resume, and benchmark contracts.
+checkpoint, inference, resume, and benchmark contracts, and the
+[AWS guide](./docs/image_recognition_oc/aws-sagemaker.md) for SageMaker execution.
 
 ## Video anomaly detection
 

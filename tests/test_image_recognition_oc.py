@@ -69,7 +69,16 @@ def test_mode_descriptor_and_backbone_cli_option() -> None:
     descriptor = resolve_mode_descriptor("image-recognition-oc")
     assert descriptor.name == "image_recognition_oc"
     assert descriptor.default_action == "ls-models"
-    assert descriptor.actions == ("train", "infer-image", "benchmark", "ls-models")
+    assert descriptor.actions == (
+        "train",
+        "train-all",
+        "infer-image",
+        "benchmark",
+        "resume",
+        "status",
+        "stop",
+        "ls-models",
+    )
     assert build_parser().parse_args(["--backbone", "resnet18"]).backbone == "resnet18"
     assert build_parser().parse_args(["--no-colored"]).colored is False
 

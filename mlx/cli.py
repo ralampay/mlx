@@ -289,6 +289,8 @@ def _render_help() -> None:
     usage.add_row("python -m mlx --mode image_recognition_oc --action train --model deep-svdd --backbone resnet18 --dataset ./dataset --output ./artifacts/one-class")
     usage.add_row("python -m mlx --mode image_recognition_oc --action infer-image --model-path ./artifacts/one-class/resnet18-deep-svdd.pth --input-img ./sample.jpg")
     usage.add_row("python -m mlx --mode image_recognition_oc --action benchmark --model-path ./artifacts/one-class/resnet18-deep-svdd.pth --dataset ./dataset --output ./benchmark")
+    usage.add_row("python -m mlx --mode image_recognition_oc --platform aws --action train-all --config ./aws-svdd.yaml")
+    usage.add_row("python -m mlx --mode image_recognition_oc --platform aws --action benchmark --config ./aws-svdd.yaml")
     usage.add_row("python -m mlx --mode image_classification --action train --output ./artifacts/siamese --dataset ./omniglot --model siamese-le-net")
     usage.add_row("python -m mlx --mode image_classification --action train --output ./artifacts/siamese-resnet --dataset ./omniglot --model siamese-resnet18 --pretrained")
     usage.add_row("python -m mlx --mode image_classification --action build-dataset --dataset ./raw-dataset")
@@ -319,7 +321,7 @@ def _render_help() -> None:
         "None",
         "Mode to run: " + ", ".join(item.name for item in MODE_DESCRIPTORS) + ".",
     )
-    options.add_row("--platform", "local", "Execution platform. AWS supports object detection, image classification, and sequential video-anomaly training.")
+    options.add_row("--platform", "local", "Execution platform. AWS supports object detection, image classification, one-class image recognition, and sequential video-anomaly training.")
     options.add_row("--config", "None", "AWS YAML job configuration. Local execution does not read this file.")
     options.add_row("--profile", "YAML/default", "AWS shared-credentials profile. An explicit value overrides aws.profile in YAML.")
     options.add_row("--job-name", "None", "SageMaker job name used by status, stop, and resume.")

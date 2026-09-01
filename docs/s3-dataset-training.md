@@ -313,7 +313,8 @@ creates a new cache entry.
 
 ## SageMaker behavior
 
-Object detection and image classification also support `--platform aws`. In this path SageMaker
+Object detection, image classification, one-class image recognition, and video anomaly detection
+also support `--platform aws`. In this path SageMaker
 uses its managed training input channel to fetch the configured ZIP; the local staging cache is
 not used. The container uses the same safe extractor and applicable root resolver.
 
@@ -334,8 +335,9 @@ python -m mlx --mode image_classification --platform aws --action train \
 
 An AWS resume continues to validate the dataset URI against the original run specification. A
 different override is rejected. `--dataset-cache-dir` has no effect on SageMaker managed input.
-One-class image recognition, segmentation, and video anomaly detection currently support S3 ZIP
-staging for local training, not SageMaker lifecycle execution.
+One-class image recognition can run single or all-backbone training and benchmarking in
+SageMaker. Video anomaly detection can run its sequential all-model lifecycle. Segmentation
+continues to use S3 ZIP staging only for local training.
 
 ## Troubleshooting
 

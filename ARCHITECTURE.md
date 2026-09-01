@@ -64,6 +64,7 @@ mlx/
     ├── image_classification/     classification data, models, OOD, training, inference, CAM
     │   └── aws/                  SageMaker Spot lifecycle and native checkpoint recovery
     ├── image_recognition_oc/     normal-only image recognition algorithms and research artifacts
+    │   └── aws/                  single/all-backbone SageMaker training and benchmarking
     ├── segmentation/             paired-mask data, U-Net models, metrics, research artifacts
     │   ├── streaming.py          injected frame source/sink contracts and OpenCV adapters
     │   ├── visualization.py      pure mask coloring, blending, and view composition
@@ -89,7 +90,7 @@ The primary workflow commands are:
 | Mode | Commands |
 | --- | --- |
 | Image classification | `TrainImageClassificationModel`, `SmokeTestImageClassificationModel`, `BenchmarkImageClassification`, `InferImageClassification`, `GenerateImageClassificationCams`, `BuildImageClassificationDataset`, `ListImageClassificationModels`, AWS submit/status/stop/resume commands |
-| One-class image recognition | `TrainImageOneClassModel`, `BenchmarkImageOneClass`, `InferImageOneClass`, `ListImageOneClassModels` |
+| One-class image recognition | `TrainImageOneClassModel`, `BenchmarkImageOneClass`, `InferImageOneClass`, `ListImageOneClassModels`, AWS submit/status/stop/resume commands |
 | Segmentation | `TrainSegmentationModel`, `SmokeTestSegmentationModel`, `BenchmarkSegmentation`, `InferSegmentationImage`, `RunSegmentationStreamInference`, `BuildSegmentationDataset`, `ListSegmentationModels` |
 | Video anomaly detection | `TrainVideoAnomalyModel`, `BenchmarkVideoAnomalyModel`, `InferVideoAnomaly`, `ListVideoAnomalyModels`, AWS all-model submit/status/resume commands |
 | Object detection | `TrainObjectDetectionModel`, `FineTuneObjectDetectionModel`, `BenchmarkObjectDetectionModel`, `CreateObjectDetector`, `ConvertObjectDetectionModel`, `ListObjectDetectionModels`, `RunObjectDetectionStream`, AWS submit/status/stop/resume and best-model locator commands |
@@ -265,6 +266,13 @@ recalibrates, and writes image-level metrics, predictions, ROC/PR data, plots, p
 Markdown report. Higher-is-positive binary metric calculation is shared in
 `mlx.core.binary_metrics`; mode-specific artifact and presentation policies remain mode owned.
 
+The mode-owned AWS boundary runs the same training and benchmark commands inside SageMaker.
+Single training freezes one algorithm/backbone variant; `train-all` freezes every standard
+backbone for `deep-svdd`, expanding both Drax fusion modes, then executes them sequentially after
+one dataset extraction. Per-variant state distinguishes completed training from completed
+benchmarking so a failed optional benchmark can resume without retraining a verified model.
+Standalone AWS benchmarking stages an exact checkpoint through a separate managed input channel.
+
 ## Video Anomaly Detection
 
 `video_anomaly_detection` is a first-class normal-only workflow. Its runner constructs typed
@@ -407,6 +415,14 @@ through SageMaker's checkpoint directory. Manual resume retains the original tra
 and immutable image, allowing only a higher total epoch target plus capacity/runtime changes.
 Final model artifacts include the best checkpoint, resumable checkpoint, training CSV, and a
 sanitized summary.
+
+One-class image recognition exposes AWS `train`, `train-all`, `benchmark`, `status`, `stop`, and
+`resume`. Its YAML separates common training values from optional benchmark values and combines
+`aws.output_s3_uri` with `aws.resource_prefix` before adding logical run or benchmark IDs.
+Training checkpoints, research artifacts, benchmark outputs, frozen specs, and attempt outputs
+therefore remain grouped without requiring callers to construct per-run paths. Standalone
+benchmark jobs are restarted rather than resumed; training jobs use per-variant rotating
+full-state checkpoints and hash-verified completed artifact manifests.
 
 Video anomaly detection exposes `train-all`, `status`, and `resume` through its mode-owned AWS
 package. One SageMaker attempt extracts the dataset once and trains the frozen live 3D variant

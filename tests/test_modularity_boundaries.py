@@ -55,7 +55,12 @@ def test_segmentation_encoder_uses_an_explicit_backbone_adapter() -> None:
 
 
 def test_aws_integration_has_separate_client_image_and_status_boundaries() -> None:
-    for mode in ("object_detection", "image_classification"):
+    for mode in (
+        "object_detection",
+        "image_classification",
+        "image_recognition_oc",
+        "video_anomaly_detection",
+    ):
         aws_package = MODES / mode / "aws"
         assert (aws_package / "clients.py").is_file()
         assert (aws_package / "image.py").is_file()

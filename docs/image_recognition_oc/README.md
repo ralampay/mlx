@@ -35,7 +35,7 @@ dataset/
 Images may be nested recursively below each label directory. Supported extensions are PNG, JPEG,
 BMP, TIFF, and TIF. A non-empty `train/anomaly` or `val/anomaly` directory is rejected instead of
 being silently ignored. The same layout can be supplied as an S3 ZIP for local training through
-`--dataset-s3-uri`.
+`--dataset-s3-uri`, or as the SageMaker input configured by `aws.dataset_s3_uri`.
 
 ## Models and training
 
@@ -116,7 +116,9 @@ and a Markdown report. Use `--no-plots` to retain machine-readable artifacts wit
 
 ## Current boundaries
 
-- Execution is local only; SageMaker lifecycle actions are not yet implemented.
+- AWS supports single-backbone training, sequential all-backbone training, optional post-training
+  benchmarking, standalone benchmarking, status/watch, stop, and resume. See the
+  [SageMaker guide](./aws-sagemaker.md).
 - Inference accepts one image at a time.
 - Deep SVDD is the only registered one-class algorithm in this release.
 - Checkpoints are mode-specific and cannot be loaded as image-classification or video-anomaly

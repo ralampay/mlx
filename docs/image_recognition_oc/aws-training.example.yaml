@@ -1,0 +1,46 @@
+version: 1
+
+aws:
+  region: ap-southeast-1
+  profile: mlx-training
+  dataset_s3_uri: s3://my-datasets/occ-bottle.zip
+  output_s3_uri: s3://my-results/one-class
+  resource_prefix: mvtec-bottle-svdd
+  instance_type: ml.g5.xlarge
+  volume_size_gb: 100
+  managed_spot: true
+  max_runtime_seconds: 86400
+  max_wait_seconds: 172800
+  # Optional pre-provisioned infrastructure:
+  # execution_role_arn: arn:aws:iam::111122223333:role/mlx-oc-sagemaker
+  # image_uri: 111122223333.dkr.ecr.ap-southeast-1.amazonaws.com/mlx-oc-training@sha256:...
+  network_isolation: false
+  tags:
+    dataset: mvtec-bottle
+    project: mlx-one-class
+
+training:
+  model: deep-svdd
+  # Required for train; remove for train-all.
+  backbone: resnet18
+  pretrained: true
+  height: 224
+  width: 224
+  batch_size: 16
+  workers: 4
+  epochs: 50
+  lr: 0.001
+  svdd_dim: 128
+  svdd_hidden_dim: 256
+  svdd_quantile: 0.95
+  use_best: true
+  random_seed: 42
+  device: auto
+
+benchmark:
+  enabled: false
+  batch_size: 16
+  workers: 4
+  plots: true
+  # Required only for standalone --action benchmark:
+  # model_s3_uri: s3://my-results/checkpoints/resnet18-deep-svdd.pth

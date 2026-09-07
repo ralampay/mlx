@@ -93,6 +93,8 @@ def run_object_detection(config: dict[str, Any]) -> Any:
             benchmark_config["height"] = 640
         if "width" not in explicit:
             benchmark_config["width"] = 640
+        if "verbose" not in explicit:
+            benchmark_config["verbose"] = True
         result = BenchmarkObjectDetectionModel(
             BenchmarkObjectDetectionRequest.from_config(benchmark_config),
             reporter=reporter,

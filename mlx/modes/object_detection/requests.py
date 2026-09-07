@@ -60,6 +60,7 @@ class BenchmarkObjectDetectionRequest(ObjectDetectionRequest):
     workers: int = 4
     save_predictions: bool = True
     plots: bool = True
+    verbose: bool = True
 
 
 @dataclass(frozen=True)

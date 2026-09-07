@@ -142,8 +142,9 @@ def test_invalid_post_training_benchmark_is_rejected_before_training(tmp_path: P
     assert provider.training_requests == []
 
 
+@pytest.mark.parametrize("verbose", [True, False])
 def test_libreyolo_benchmark_writes_normalized_research_artifacts(
-    monkeypatch, tmp_path: Path
+    monkeypatch, tmp_path: Path, verbose: bool
 ) -> None:
     from mlx.modes.object_detection.libreyolo.evaluation import (
         BenchmarkLibreYOLOObjectDetection,
@@ -180,12 +181,14 @@ def test_libreyolo_benchmark_writes_normalized_research_artifacts(
             output_path=str(output_dir),
             confidence=0.001,
             split="test",
+            verbose=verbose,
         )
     ).execute()
 
     assert result.metrics == pytest.approx(STANDARD_METRICS)
     assert result.evaluation_backend == "pycocotools 2.0"
     assert calls[0]["split"] == "test"
+    assert calls[0]["verbose"] is verbose
     assert calls[0]["save_dir"] == str(output_dir.resolve())
     assert json.loads((output_dir / "metrics.json").read_text()) == pytest.approx(
         STANDARD_METRICS
@@ -241,6 +244,7 @@ def test_ultralytics_benchmark_uses_same_normalized_artifact_contract(
     ).execute()
 
     assert result.metrics == pytest.approx(STANDARD_METRICS)
+    assert calls[0]["verbose"] is True
     assert calls[0]["project"] == str(output_dir.resolve().parent)
     assert calls[0]["name"] == output_dir.name
     assert json.loads((output_dir / "metrics.json").read_text()) == pytest.approx(
@@ -331,7 +335,51 @@ def test_detection_runner_exposes_benchmark_with_research_defaults(
     assert captured[0].confidence == pytest.approx(0.001)
     assert captured[0].batch_size == 16
     assert (captured[0].height, captured[0].width) == (640, 640)
+    assert captured[0].verbose is True
     assert rendered == [expected]
+
+
+def test_detection_runner_honors_explicit_quiet_benchmark(
+    monkeypatch, tmp_path: Path
+) -> None:
+    captured = []
+    checkpoint = tmp_path / "best.pt"
+    checkpoint.touch()
+    dataset = _dataset(tmp_path)
+    expected = ObjectDetectionBenchmarkResult(
+        provider="fake",
+        model_path=str(checkpoint),
+        dataset=str(dataset),
+        split="test",
+        metrics=STANDARD_METRICS,
+        output_dir=tmp_path / "out",
+        evaluation_backend="fake",
+        native_metrics=STANDARD_METRICS,
+    )
+
+    class FakeCommand:
+        def __init__(self, request, *, reporter=None):
+            captured.append(request)
+
+        def execute(self):
+            return expected
+
+    monkeypatch.setattr(runner, "BenchmarkObjectDetectionModel", FakeCommand)
+    monkeypatch.setattr(runner, "print_benchmark_result", lambda result: None)
+
+    runner.run_object_detection(
+        {
+            "action": "benchmark",
+            "platform": "local",
+            "provider": "fake",
+            "model_path": str(checkpoint),
+            "dataset_path": str(dataset),
+            "verbose": False,
+            "_explicit_options": {"verbose"},
+        }
+    )
+
+    assert captured[0].verbose is False
 
 
 def test_sagemaker_stages_post_training_benchmark_artifacts(tmp_path: Path) -> None:

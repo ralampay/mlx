@@ -276,14 +276,22 @@ def test_libreyolo_training_rejects_non_pt_warm_start(
         ).execute()
 
 
+@pytest.mark.parametrize("cross_device", [False, True])
 def test_libreyolo_conversion_moves_export_to_requested_target(
-    monkeypatch, tmp_path: Path
+    monkeypatch, cross_device, tmp_path: Path
 ) -> None:
     checkpoint = tmp_path / "best.pt"
     checkpoint.touch()
     generated = tmp_path / "generated.onnx"
     destination = tmp_path / "exports" / "detector.onnx"
     export_calls = []
+    if cross_device:
+        import errno
+
+        def fail_rename(*args, **kwargs):
+            raise OSError(errno.EXDEV, "Invalid cross-device link")
+
+        monkeypatch.setattr("shutil.os.rename", fail_rename)
 
     class FakeModel:
         def export(self, **kwargs):
@@ -311,7 +319,7 @@ def test_libreyolo_conversion_moves_export_to_requested_target(
     assert export_calls == [{"format": "onnx", "imgsz": 640, "device": "cpu"}]
 
 
-def test_libreyolo_listing_builds_canonical_yolo9_configurations(monkeypatch) -> None:
+def test_libreyolo_listing_builds_canonical_configurations(monkeypatch) -> None:
     calls = []
 
     class FakeYOLO9:
@@ -325,18 +333,26 @@ def test_libreyolo_listing_builds_canonical_yolo9_configurations(monkeypatch) ->
         LibreYOLO9=FakeYOLO9,
     )
 
+    for constructor in (
+        "LibreYOLOX", "LibreYOLO9DraxMobileNetV3Large", "LibreYOLOXDraxMobileNetV3Large"
+    ):
+        setattr(sys.modules["libreyolo"], constructor, FakeYOLO9)
     summaries = ListLibreYOLOModels().execute()
 
-    assert summaries == [
+    assert summaries[:5] == [
         ModelParameterSummary("yolo9-t", 8),
         ModelParameterSummary("yolo9-s", 8),
         ModelParameterSummary("yolo9-m", 8),
         ModelParameterSummary("yolo9-c", 8),
         ModelParameterSummary("yolo9-s-drax-b5", 8),
     ]
-    assert [call["size"] for call in calls] == ["t", "s", "m", "c", "s"]
-    assert all("drax_config" not in call for call in calls[:-1])
-    drax_config = calls[-1]["drax_config"]
+    assert len(summaries) == 21
+    assert {summary.model_name for summary in summaries} == {case[0] for case in _MODEL_CASES}
+    assert all(summary.parameter_count == 8 for summary in summaries)
+    assert [call["size"] for call in calls[:5]] == ["t", "s", "m", "c", "s"]
+    assert all(call["device"] == "cpu" and call["model_path"] is None for call in calls)
+    assert all("drax_config" not in call for call in calls[:4] + calls[5:])
+    drax_config = calls[4]["drax_config"]
     assert drax_config.enabled is True
     assert drax_config.stages == ("b5",)
     assert drax_config.use_attention is True
@@ -398,3 +414,118 @@ def test_installed_libreyolo_can_construct_scratch_yolo9_t() -> None:
     )
 
     assert sum(parameter.numel() for parameter in model.model.parameters()) > 0
+
+
+_MODEL_CASES = [
+    (f"{alias}-{size}", constructor, size)
+    for alias, constructor, sizes in (
+        ("yolo9", "LibreYOLO9", "tsmc"),
+        ("yolox", "LibreYOLOX", "ntsmlx"),
+        ("yolo9-drax-mobilenet-v3-large", "LibreYOLO9DraxMobileNetV3Large", "tsmc"),
+        ("yolox-drax-mobilenet-v3-large", "LibreYOLOXDraxMobileNetV3Large", "ntsmlx"),
+    )
+    for size in sizes
+] + [("yolo9-s-drax-b5", "LibreYOLO9", "s")]
+
+
+@pytest.mark.parametrize("alias,constructor,size", _MODEL_CASES)
+@pytest.mark.parametrize("pretrained", [False, True])
+def test_model_alias_selects_public_constructor(
+    monkeypatch, tmp_path, alias, constructor, size, pretrained
+):
+    calls = []
+    training = []
+
+    class FakeModel:
+        def __init__(self, **kwargs):
+            calls.append(kwargs)
+            self.model = nn.Linear(3, 2)
+
+        def train(self, **kwargs):
+            training.append(kwargs)
+            return {}
+
+    _install_fake_libreyolo(monkeypatch, LibreYOLO=lambda **kw: pytest.fail("unexpected load"))
+    setattr(sys.modules["libreyolo"], constructor, FakeModel)
+    TrainLibreYOLOObjectDetection({
+        "model": alias.upper(), "dataset_path": "coco8", "device": "cpu",
+        "output_path": str(tmp_path), "pretrained": pretrained,
+    }).execute()
+    assert calls[0]["size"] == size
+    assert calls[0]["model_path"] is None
+    assert calls[0]["task"] == "detect"
+    assert calls[0]["device"] == "cpu"
+    assert ("drax_config" in calls[0]) == (alias == "yolo9-s-drax-b5")
+    assert training[0]["pretrained"] is pretrained
+    assert training[0]["resume"] is False
+
+
+@pytest.mark.parametrize("alias", [None, "yolox-z", "yolo9-drax-mobilenet-v3-large-x"])
+def test_invalid_libreyolo_alias_is_actionable(alias):
+    from mlx.modes.object_detection.libreyolo.utils import resolve_model_spec
+
+    with pytest.raises(MLXUserError, match="Available models:"):
+        resolve_model_spec(alias)
+
+
+def test_missing_variant_class_requests_release_update(monkeypatch, tmp_path):
+    _install_fake_libreyolo(monkeypatch, LibreYOLO=lambda **kw: None)
+    with pytest.raises(MLXUserError, match="LibreYOLOXDraxMobileNetV3Large.*release"):
+        TrainLibreYOLOObjectDetection({
+            "model": "yolox-drax-mobilenet-v3-large-s", "dataset_path": "coco8",
+            "output_path": str(tmp_path),
+        }).execute()
+
+
+@pytest.mark.parametrize("alias,constructor,size", _MODEL_CASES)
+def test_installed_libreyolo_constructs_supported_alias(alias, constructor, size):
+    libreyolo = pytest.importorskip("libreyolo")
+    from mlx.modes.object_detection.libreyolo.model_factory import build_scratch_model
+    from mlx.modes.object_detection.libreyolo.utils import resolve_model_spec
+
+    model = build_scratch_model(resolve_model_spec(alias), device="cpu")
+    assert isinstance(model, getattr(libreyolo, constructor))
+    assert model.size == size
+    assert sum(parameter.numel() for parameter in model.model.parameters()) > 0
+
+
+@pytest.mark.parametrize("alias,constructor,size", _MODEL_CASES[4:-1])
+@pytest.mark.parametrize("resume", [False, True])
+def test_new_models_load_checkpoints_without_scratch_constructor(
+    monkeypatch, tmp_path, alias, constructor, size, resume
+):
+    checkpoint = tmp_path / "checkpoint.pt"
+    checkpoint.touch()
+    loads, training = [], []
+
+    class FakeLoadedModel:
+        def train(self, **kwargs):
+            training.append(kwargs)
+            return {}
+
+    def load(path, **kwargs):
+        loads.append(path)
+        return FakeLoadedModel()
+
+    _install_fake_libreyolo(monkeypatch, LibreYOLO=load)
+    monkeypatch.setattr(
+        "mlx.modes.object_detection.libreyolo.training.detect_existing_training_artifacts",
+        lambda **kw: (checkpoint, None) if resume else (None, None),
+    )
+    TrainLibreYOLOObjectDetection({
+        "model": alias, "dataset_path": "coco8", "output_path": str(tmp_path),
+        "model_path": str(checkpoint), "pretrained": True,
+    }).execute()
+    assert loads == [str(checkpoint)]
+    assert training[0]["resume"] is resume
+    assert "pretrained" not in training[0]
+
+
+def test_listing_constructor_failure_identifies_model(monkeypatch):
+    def fail(**kwargs):
+        raise RuntimeError("construction failed")
+
+    _install_fake_libreyolo(monkeypatch, LibreYOLO=lambda **kw: None, LibreYOLO9=fail)
+    with pytest.raises(MLXUserError, match="yolo9-t.*construction failed") as error:
+        ListLibreYOLOModels().execute()
+    assert isinstance(error.value.__cause__, RuntimeError)

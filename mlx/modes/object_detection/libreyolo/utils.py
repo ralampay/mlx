@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from pathlib import Path
+from types import MappingProxyType
 from typing import Any, Optional, Union
 
 from mlx.core.exceptions import MLXUserError
@@ -11,19 +12,29 @@ from mlx.core.exceptions import MLXUserError
 class LibreYOLOModelSpec:
     size: str
     drax_stages: tuple[str, ...] = ()
+    constructor_name: str = "LibreYOLO9"
 
     @property
     def uses_drax(self) -> bool:
         return bool(self.drax_stages)
 
 
-MODEL_SPECS = {
+MODEL_SPECS = MappingProxyType({
     "yolo9-t": LibreYOLOModelSpec(size="t"),
     "yolo9-s": LibreYOLOModelSpec(size="s"),
     "yolo9-m": LibreYOLOModelSpec(size="m"),
     "yolo9-c": LibreYOLOModelSpec(size="c"),
     "yolo9-s-drax-b5": LibreYOLOModelSpec(size="s", drax_stages=("b5",)),
-}
+    **{
+        f"{family}-{size}": LibreYOLOModelSpec(size=size, constructor_name=constructor)
+        for family, constructor, sizes in (
+            ("yolox", "LibreYOLOX", "ntsmlx"),
+            ("yolo9-drax-mobilenet-v3-large", "LibreYOLO9DraxMobileNetV3Large", "tsmc"),
+            ("yolox-drax-mobilenet-v3-large", "LibreYOLOXDraxMobileNetV3Large", "ntsmlx"),
+        )
+        for size in sizes
+    },
+})
 CANONICAL_MODEL_NAMES = tuple(MODEL_SPECS)
 DATASET_ALIASES = {
     "coco8": "coco8.yaml",

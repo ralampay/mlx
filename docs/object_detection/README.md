@@ -265,6 +265,29 @@ With `--provider libreyolo`, first-class training and listing use these aliases:
 - `yolo9-m`
 - `yolo9-c`
 - `yolo9-s-drax-b5`
+- `yolox-{n,t,s,m,l,x}`
+- `yolo9-drax-mobilenet-v3-large-{t,s,m,c}`
+- `yolox-drax-mobilenet-v3-large-{n,t,s,m,l,x}`
+
+Braces denote supported explicit size suffixes, for example `yolox-n` or
+`yolo9-drax-mobilenet-v3-large-s`. Listing reports all 21 individual aliases.
+The MobileNet variants use LibreYOLO's `LibreYOLO9DraxMobileNetV3Large` and
+`LibreYOLOXDraxMobileNetV3Large` classes. Their fixed Drax MobileNetV3 Large backbone
+retains the selected detector's neck/head. With `--pretrained`, training initializes
+only the MobileNet ImageNet V2 features; Drax, projections, neck, and head start fresh.
+Without it, training starts from scratch. Loading or resuming a detector checkpoint
+preserves its weights. Listing constructs models on CPU without downloading weights.
+
+```bash
+python -m mlx --mode object_detection --provider libreyolo --action train \
+    --model yolox-s --dataset ./dataset --output ./runs/yolox-s
+python -m mlx --mode object_detection --provider libreyolo --action train \
+    --model yolo9-drax-mobilenet-v3-large-s --pretrained \
+    --dataset ./dataset --output ./runs/yolo9-mobile
+python -m mlx --mode object_detection --provider libreyolo --action train \
+    --model yolox-drax-mobilenet-v3-large-s --pretrained \
+    --dataset ./dataset --output ./runs/yolox-mobile
+```
 
 LibreYOLO inference and conversion load the local artifact supplied through
 `--model-path`. Other axis-aligned detection checkpoints understood by the fork may
@@ -502,6 +525,12 @@ python -m mlx --mode object-detection --action benchmark \
     --confidence 0.001 --iou 0.6 --max-detections 300 \
     --output ./benchmarks/libreyolo-test
 ```
+
+Benchmarks show provider-native validation progress by default. In an interactive
+terminal, LibreYOLO reports the completed and total batches, elapsed time, and ETA,
+then logs metric computation and the final native results. Pass `--no-verbose` when
+quiet provider output is required; structured `--format json` output remains on
+stdout while provider diagnostics use stderr.
 
 The normalized outputs are identical for both providers:
 

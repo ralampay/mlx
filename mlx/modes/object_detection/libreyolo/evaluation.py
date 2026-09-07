@@ -52,7 +52,7 @@ class BenchmarkLibreYOLOObjectDetection:
                 save_json=self.request.save_predictions,
                 save_plots=self.request.plots,
                 split=self.request.split,
-                verbose=False,
+                verbose=self.request.verbose,
                 workers=self.request.workers,
             )
         except Exception as exc:

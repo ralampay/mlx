@@ -52,7 +52,7 @@ class BenchmarkUltralyticsObjectDetection:
                 project=str(output_dir.parent),
                 save_json=self.request.save_predictions,
                 split=self.request.split,
-                verbose=False,
+                verbose=self.request.verbose,
                 workers=self.request.workers,
             )
         except Exception as exc:

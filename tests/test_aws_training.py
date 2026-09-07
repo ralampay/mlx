@@ -876,7 +876,16 @@ def test_entrypoint_rejects_zip_traversal(tmp_path: Path) -> None:
         command._extract_dataset()
 
 
-def test_submit_payload_uses_spot_and_shared_run_prefix() -> None:
+@pytest.mark.parametrize("provider,model", [("ultralytics", "yolo26")] + [
+    ("libreyolo", f"{family}-{size}")
+    for family, sizes in (
+        ("yolox", "ntsmlx"),
+        ("yolo9-drax-mobilenet-v3-large", "tsmc"),
+        ("yolox-drax-mobilenet-v3-large", "ntsmlx"),
+    )
+    for size in sizes
+])
+def test_submit_payload_uses_spot_and_shared_run_prefix(provider, model) -> None:
     class FakeS3:
         def __init__(self):
             self.objects = []
@@ -896,7 +905,7 @@ def test_submit_payload_uses_spot_and_shared_run_prefix() -> None:
         dataset_s3_uri="s3://datasets/data.zip",
         checkpoint_s3_uri="s3://shared/checkpoints",
         instance_type="ml.g4dn.xlarge",
-        training=TrainObjectDetectionRequest(model="yolo26", device="auto"),
+        training=TrainObjectDetectionRequest(provider=provider, model=model, device="auto"),
     )
     service = object.__new__(SageMakerTrainingService)
     service.config = config
@@ -913,6 +922,9 @@ def test_submit_payload_uses_spot_and_shared_run_prefix() -> None:
     result = service.submit(infrastructure, run_id="a" * 32)
     request = service.sagemaker.request
 
+    payload = json.loads(request["HyperParameters"]["mlx_training"])
+    assert payload["model"] == model
+    assert payload["provider"] == provider
     assert request["EnableManagedSpotTraining"] is True
     assert request["StoppingCondition"]["MaxWaitTimeInSeconds"] == 172800
     assert request["CheckpointConfig"]["S3Uri"].endswith(

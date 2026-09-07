@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from pathlib import Path
+import shutil
 from typing import Any
 
 from mlx.core.commands import NullWorkflowReporter, WorkflowReporter, emit
@@ -74,12 +75,12 @@ class ConvertLibreYOLOObjectDetectionModel:
             exported_path = exported_path.resolve()
             final_path = output_target.resolve()
             if exported_path != final_path:
-                exported_path.replace(final_path)
+                shutil.move(str(exported_path), str(final_path))
         except MLXUserError:
             raise
         except (
             AttributeError,
-            FileNotFoundError,
+            OSError,
             ImportError,
             TypeError,
             ValueError,

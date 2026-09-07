@@ -10,8 +10,8 @@ from mlx.modes.object_detection.artifacts import (
     find_existing_checkpoint,
     find_latest_checkpoint,
 )
+from mlx.modes.object_detection.libreyolo.model_factory import build_scratch_model
 from mlx.modes.object_detection.libreyolo.utils import (
-    build_drax_config,
     dependency_error,
     resolve_dataset_source,
     resolve_imgsz,
@@ -38,12 +38,12 @@ class TrainLibreYOLOObjectDetection:
     def execute(self) -> dict[str, Any]:
         if self.config.get("loss_clip") is not None:
             raise MLXUserError(
-                "--loss-clip is not supported by LibreYOLO YOLOv9 training. "
+                "--loss-clip is not supported by LibreYOLO training. "
                 "Remove the option or use --provider ultralytics."
             )
 
         try:
-            from libreyolo import LibreYOLO, LibreYOLO9
+            from libreyolo import LibreYOLO
         except ImportError as exc:
             raise dependency_error("training an object-detection model") from exc
 
@@ -83,15 +83,9 @@ class TrainLibreYOLOObjectDetection:
                     task="detect",
                 )
             else:
-                model_kwargs = {
-                    "model_path": None,
-                    "size": model_spec.size,
-                    "device": self.config.get("device", "cpu"),
-                    "task": "detect",
-                }
-                if model_spec.uses_drax:
-                    model_kwargs["drax_config"] = build_drax_config(model_spec)
-                model = LibreYOLO9(**model_kwargs)
+                model = build_scratch_model(
+                    model_spec, device=self.config.get("device", "cpu")
+                )
 
             train_kwargs = self._build_train_kwargs(
                 data=dataset.data,

@@ -169,7 +169,9 @@ dataset integration, prediction JSON, native plots, and exception translation. T
 artifact writer owns `metrics.json`, `metrics.csv`, `native_metrics.json`, and
 `run_metadata.json`, including model hashing and evaluator provenance. This gives standalone
 benchmarks and optional post-training validation the same result schema without leaking either
-provider API into the command.
+provider API into the command. Benchmark requests enable provider-native progress by default;
+the CLI composition boundary applies that action-specific default and preserves an explicit
+`--no-verbose` override.
 
 `TrainObjectDetectionModel` composes the same benchmark capability when
 `validate_after_training` is enabled. It benchmarks the selected best/last checkpoint and returns
@@ -231,13 +233,23 @@ The Ultralytics provider lists `yolo26`, `draxnet-ave-yolo26`, and
 YAML files shipped in the installed provider package so listing and training use the same
 definitions; explicit filesystem paths remain supported for custom architectures.
 
-LibreYOLO training and listing are first-class for `yolo9-t`, `yolo9-s`, `yolo9-m`, `yolo9-c`,
-and `yolo9-s-drax-b5`. A shared model specification keeps listing and scratch training aligned;
-the Drax alias selects the release branch's first supported experiment configuration: YOLOv9-S,
-B5 only, attention and efficient mode enabled, average fusion, and zero drop path. Inference and
-conversion adapters may accept other axis-aligned detection checkpoints supported by the fork,
-but non-detection tasks and cross-provider checkpoint loading are outside the neutral provider
-contract.
+LibreYOLO training and listing share an immutable model specification inventory and a lazy
+provider-local `model_factory.build_scratch_model` construction boundary. The inventory selects
+public library classes: `LibreYOLO9` for `yolo9-{t,s,m,c}` and `yolo9-s-drax-b5`, `LibreYOLOX`
+for `yolox-{n,t,s,m,l,x}`, `LibreYOLO9DraxMobileNetV3Large` for
+`yolo9-drax-mobilenet-v3-large-{t,s,m,c}`, and `LibreYOLOXDraxMobileNetV3Large` for
+`yolox-drax-mobilenet-v3-large-{n,t,s,m,l,x}`. New architectures extend this inventory rather than
+adding selection branches to training or listing commands. Missing public classes raise an
+actionable release-update error; importing MLX does not import the provider library.
+
+Only `yolo9-s-drax-b5` receives `DraxConfig`: B5 only, attention and efficient mode enabled,
+average fusion, and zero drop path. MobileNet variants own their fixed Drax configuration in
+LibreYOLO. Their `pretrained=True` training initializes ImageNet backbone features only;
+construction and listing do not download weights. Warm starts, resume, inference, benchmarking,
+and conversion use the generic `LibreYOLO` checkpoint loader, preserving checkpoint architecture
+and provider-owned preprocessing. Non-detection tasks and cross-provider checkpoint loading
+remain outside the neutral provider contract. ONNX export relocation supports destinations on
+another filesystem and translates file-transfer errors at the conversion boundary.
 
 ## One-Class Image Recognition
 

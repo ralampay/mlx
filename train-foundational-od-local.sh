@@ -1,3 +1,6 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
 python -m mlx \
     --mode object_detection \
     --platform local \

@@ -41,6 +41,18 @@ class TrainLibreYOLOObjectDetection:
                 "--loss-clip is not supported by LibreYOLO training. "
                 "Remove the option or use --provider ultralytics."
             )
+        if self.config.get("incremental_adapter_train_only") and not self.config.get(
+            "incremental_adapter"
+        ):
+            raise MLXUserError(
+                "--incremental-adapter-train-only requires --incremental-adapter."
+            )
+        if self.config.get("incremental_adapter_type") and not self.config.get(
+            "incremental_adapter"
+        ):
+            raise MLXUserError(
+                "--incremental-adapter-type requires --incremental-adapter."
+            )
 
         try:
             from libreyolo import LibreYOLO
@@ -48,6 +60,14 @@ class TrainLibreYOLOObjectDetection:
             raise dependency_error("training an object-detection model") from exc
 
         model_spec = resolve_model_spec(self.config.get("model"))
+        if (
+            self.config.get("incremental_adapter")
+            and model_spec.constructor_name != "LibreYOLOXDraxMobileNetV3Large"
+        ):
+            raise MLXUserError(
+                "--incremental-adapter is supported only for "
+                "yolox-drax-mobilenet-v3-large models."
+            )
         explicit_weights = resolve_model_path(self.config.get("model_path"), required=False)
         if explicit_weights is not None and explicit_weights.suffix.lower() != ".pt":
             raise MLXUserError(
@@ -161,6 +181,15 @@ class TrainLibreYOLOObjectDetection:
             "save_plots": bool(self.config.get("plots", True)),
             "save_period": int(self.config.get("save_period", -1)),
         }
+        if self.config.get("incremental_adapter"):
+            kwargs["incremental_adapter"] = True
+            kwargs["incremental_adapter_train_only"] = bool(
+                self.config.get("incremental_adapter_train_only", False)
+            )
+            if self.config.get("incremental_adapter_type"):
+                kwargs["incremental_adapter_type"] = str(
+                    self.config["incremental_adapter_type"]
+                )
         if allow_pretrained:
             kwargs["pretrained"] = bool(self.config.get("pretrained", False))
         if optimizer != "auto":

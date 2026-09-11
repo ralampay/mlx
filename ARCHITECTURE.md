@@ -251,6 +251,13 @@ and provider-owned preprocessing. Non-detection tasks and cross-provider checkpo
 remain outside the neutral provider contract. ONNX export relocation supports destinations on
 another filesystem and translates file-transfer errors at the conversion boundary.
 
+For `yolox-drax-mobilenet-v3-large`, the training request forwards the optional
+`incremental_adapter`, `incremental_adapter_train_only`, and
+`incremental_adapter_type` controls to the LibreYOLO provider.
+The provider validates their dependency, while LibreYOLO owns adapter attachment, foundation
+freezing, BatchNorm mode handling, and optimizer construction. Other providers do not implement
+this family-specific training behavior.
+
 ## One-Class Image Recognition
 
 `image_recognition_oc` owns normal-only still-image training, single-image inference, binary

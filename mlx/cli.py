@@ -163,6 +163,23 @@ def build_parser() -> RichArgumentParser:
     )
     parser.add_argument("--camera-index", type=int, default=0, dest="camera_index")
     parser.add_argument("--pretrained", action=argparse.BooleanOptionalAction, default=False)
+    parser.add_argument(
+        "--incremental-adapter",
+        action=argparse.BooleanOptionalAction,
+        default=False,
+        dest="incremental_adapter",
+    )
+    parser.add_argument(
+        "--incremental-adapter-train-only",
+        action=argparse.BooleanOptionalAction,
+        default=False,
+        dest="incremental_adapter_train_only",
+    )
+    parser.add_argument(
+        "--incremental-adapter-type",
+        default=None,
+        dest="incremental_adapter_type",
+    )
     parser.add_argument("--colored", action=argparse.BooleanOptionalAction, default=True)
     parser.add_argument("--plots", action=argparse.BooleanOptionalAction, default=True)
     parser.add_argument("--verbose", action=argparse.BooleanOptionalAction, default=False)
@@ -383,6 +400,21 @@ def _render_help() -> None:
     options.add_row("--benchmark-iou", "0.5", "Minimum box IoU used for MOT benchmark matching.")
     options.add_row("--camera-index", "0", "Camera index for webcam inference.")
     options.add_row("--pretrained / --no-pretrained", "False", "Toggle supported pretrained model initialization.")
+    options.add_row(
+        "--incremental-adapter / --no-incremental-adapter",
+        "False",
+        "Enable IncrementalAdapters for LibreYOLO YOLOX-Drax-MobileNetV3 training.",
+    )
+    options.add_row(
+        "--incremental-adapter-train-only / --no-incremental-adapter-train-only",
+        "False",
+        "Freeze the loaded foundation detector and train only its IncrementalAdapters.",
+    )
+    options.add_row(
+        "--incremental-adapter-type",
+        "checkpoint type or conv_bottleneck",
+        "Select a registered YOLOX-Drax-MobileNetV3 IncrementalAdapter architecture.",
+    )
     options.add_row("--colored / --no-colored", "True", "Use RGB input; disable for supported grayscale workflows.")
     options.add_row("--plots / --no-plots", "True", "Write supported provider-native training or benchmark plots.")
     options.add_row("--verbose / --no-verbose", "False", "Show per-epoch live progress bars when supported.")

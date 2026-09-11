@@ -9,6 +9,7 @@ import numpy as np
 import pytest
 from torch import nn
 
+from mlx.cli import build_parser
 from mlx.core.exceptions import MLXUserError
 from mlx.core.model_listing import ModelParameterSummary
 from mlx.modes.object_detection.commands import CreateObjectDetector
@@ -42,6 +43,21 @@ def test_libreyolo_provider_is_registered_lazily() -> None:
     assert PROVIDER_REGISTRY["libreyolo"] == (
         "mlx.modes.object_detection.libreyolo.provider:get_provider"
     )
+
+
+def test_cli_parses_incremental_adapter_training_options() -> None:
+    parsed = build_parser().parse_args(
+        [
+            "--incremental-adapter",
+            "--incremental-adapter-train-only",
+            "--incremental-adapter-type",
+            "conv_bottleneck",
+        ]
+    )
+
+    assert parsed.incremental_adapter is True
+    assert parsed.incremental_adapter_train_only is True
+    assert parsed.incremental_adapter_type == "conv_bottleneck"
 
 
 def test_dependency_metadata_uses_ralampay_release_fork() -> None:
@@ -209,9 +225,69 @@ def test_libreyolo_training_maps_options_and_selects_best(monkeypatch, tmp_path:
     assert results["checkpoint_path"] == results["model_path"]
 
 
+def test_libreyolo_training_forwards_incremental_adapter_options(
+    monkeypatch, tmp_path: Path
+) -> None:
+    dataset = tmp_path / "dataset"
+    dataset.mkdir()
+    (dataset / "data.yaml").write_text("names: {0: thing}\n", encoding="utf-8")
+    foundation = tmp_path / "foundation.pt"
+    foundation.touch()
+    train_calls = []
+
+    class FakeLoadedModel:
+        def train(self, **kwargs):
+            train_calls.append(kwargs)
+            return {}
+
+    _install_fake_libreyolo(
+        monkeypatch,
+        LibreYOLO=lambda *args, **kwargs: FakeLoadedModel(),
+    )
+
+    TrainLibreYOLOObjectDetection(
+        {
+            "model": "yolox-drax-mobilenet-v3-large-s",
+            "model_path": str(foundation),
+            "dataset_path": str(dataset),
+            "incremental_adapter": True,
+            "incremental_adapter_train_only": True,
+            "incremental_adapter_type": "conv_bottleneck",
+        }
+    ).execute()
+
+    assert train_calls[0]["incremental_adapter"] is True
+    assert train_calls[0]["incremental_adapter_train_only"] is True
+    assert train_calls[0]["incremental_adapter_type"] == "conv_bottleneck"
+    assert "pretrained" not in train_calls[0]
+
+
 def test_libreyolo_training_rejects_loss_clip() -> None:
     with pytest.raises(MLXUserError, match="loss-clip is not supported"):
         TrainLibreYOLOObjectDetection({"loss_clip": 1.0}).execute()
+
+
+def test_libreyolo_training_rejects_train_only_without_adapter() -> None:
+    with pytest.raises(MLXUserError, match="requires --incremental-adapter"):
+        TrainLibreYOLOObjectDetection(
+            {"incremental_adapter_train_only": True}
+        ).execute()
+
+
+def test_libreyolo_training_rejects_adapter_type_without_adapter() -> None:
+    with pytest.raises(MLXUserError, match="requires --incremental-adapter"):
+        TrainLibreYOLOObjectDetection(
+            {"incremental_adapter_type": "conv_bottleneck"}
+        ).execute()
+
+
+def test_libreyolo_training_rejects_adapter_for_other_families(monkeypatch) -> None:
+    _install_fake_libreyolo(monkeypatch, LibreYOLO=lambda *args, **kwargs: None)
+
+    with pytest.raises(MLXUserError, match="supported only for"):
+        TrainLibreYOLOObjectDetection(
+            {"model": "yolox-s", "incremental_adapter": True}
+        ).execute()
 
 
 def test_libreyolo_training_auto_resumes_existing_last_checkpoint(
@@ -256,6 +332,9 @@ def test_libreyolo_training_auto_resumes_existing_last_checkpoint(
     assert load_calls == [(str(last.resolve()), {"device": "cpu", "task": "detect"})]
     assert train_calls[0]["resume"] is True
     assert "pretrained" not in train_calls[0]
+    assert "incremental_adapter" not in train_calls[0]
+    assert "incremental_adapter_train_only" not in train_calls[0]
+    assert "incremental_adapter_type" not in train_calls[0]
     assert results["checkpoint_path"] == str(last.resolve())
 
 

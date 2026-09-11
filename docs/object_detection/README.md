@@ -278,6 +278,26 @@ only the MobileNet ImageNet V2 features; Drax, projections, neck, and head start
 Without it, training starts from scratch. Loading or resuming a detector checkpoint
 preserves its weights. Listing constructs models on CPU without downloading weights.
 
+Incremental adapter-only fine-tuning is available for an existing
+`yolox-drax-mobilenet-v3-large` foundation checkpoint. The checkpoint and new
+dataset must use exactly the same class definitions and indices:
+
+```bash
+python -m mlx --mode object_detection --provider libreyolo --action fine-tune \
+    --model yolox-drax-mobilenet-v3-large-s \
+    --model-path ./foundation.pt --dataset ./D1 \
+    --incremental-adapter --incremental-adapter-train-only \
+    --incremental-adapter-type conv_bottleneck \
+    --output ./runs/model-b
+```
+
+Omitting both adapter options performs ordinary full-model fine-tuning. With
+both options enabled, LibreYOLO freezes the foundation detector, including its
+BatchNorm statistics and detection head, and trains only
+`incremental_adapters.*` parameters.
+The type defaults to the checkpoint's recorded adapter type, or
+`conv_bottleneck` when attaching adapters to a legacy foundation checkpoint.
+
 ```bash
 python -m mlx --mode object_detection --provider libreyolo --action train \
     --model yolox-s --dataset ./dataset --output ./runs/yolox-s

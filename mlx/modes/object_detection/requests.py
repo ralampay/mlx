@@ -27,6 +27,9 @@ class TrainObjectDetectionRequest(ObjectDetectionRequest):
     use_best: bool = True
     run_name: Optional[str] = None
     pretrained: bool = False
+    incremental_adapter: bool = False
+    incremental_adapter_train_only: bool = False
+    incremental_adapter_type: Optional[str] = None
     optimizer: str = "auto"
     nbs: int = 64
     warmup_epochs: float = 3.0

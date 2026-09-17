@@ -198,20 +198,35 @@ class TrainSegmentationModel:
             write_csv(self.paths["training_csv_path"], history)
             write_training_curves(self.paths["training_curves_path"], history)
 
-            messages: list[str] = []
-            if val_loss < best_val_loss:
+            previous_metrics = history[-2] if len(history) > 1 else None
+            checkpoint_messages: list[str] = []
+            is_best_val_loss = val_loss < best_val_loss
+            if is_best_val_loss:
                 best_val_loss = val_loss
                 save_checkpoint(
-                    self.paths["checkpoint_path"], model, model_name=self.model_name, config=self.config
+                    self.paths["checkpoint_path"],
+                    model,
+                    model_name=self.model_name,
+                    config=self.config,
                 )
-                messages.append(f"best loss → {self.paths['checkpoint_path']}")
+                checkpoint_messages.append(
+                    f"best loss → {self.paths['checkpoint_path']}"
+                )
             foreground_dice = float(val_metrics["mean_foreground_dice"])
-            if np.isfinite(foreground_dice) and foreground_dice > best_dice:
+            is_best_foreground_dice = (
+                np.isfinite(foreground_dice) and foreground_dice > best_dice
+            )
+            if is_best_foreground_dice:
                 best_dice = foreground_dice
                 save_checkpoint(
-                    self.paths["dice_checkpoint_path"], model, model_name=self.model_name, config=self.config
+                    self.paths["dice_checkpoint_path"],
+                    model,
+                    model_name=self.model_name,
+                    config=self.config,
                 )
-                messages.append(f"best Dice → {self.paths['dice_checkpoint_path']}")
+                checkpoint_messages.append(
+                    f"best Dice → {self.paths['dice_checkpoint_path']}"
+                )
             save_training_checkpoint(
                 self.paths["last_checkpoint_path"],
                 model,
@@ -223,7 +238,7 @@ class TrainSegmentationModel:
                 best_foreground_dice=best_dice,
                 history=history,
             )
-            messages.append(f"last → {self.paths['last_checkpoint_path']}")
+            checkpoint_messages.append(f"last → {self.paths['last_checkpoint_path']}")
             emit(
                 self.reporter,
                 "progress",
@@ -234,8 +249,20 @@ class TrainSegmentationModel:
                     "event": "segmentation_epoch",
                     "train_loss": train_loss,
                     "val_loss": val_loss,
-                    "metrics": val_metrics,
-                    "checkpoints": messages,
+                    "metrics": {
+                        "train_loss": train_loss,
+                        "val_loss": val_loss,
+                        "learning_rate": row["learning_rate"],
+                        "epoch_seconds": row["epoch_seconds"],
+                        **val_metrics,
+                    },
+                    "previous_metrics": previous_metrics,
+                    "is_best_val_loss": is_best_val_loss,
+                    "is_best_foreground_dice": is_best_foreground_dice,
+                    "checkpoints": checkpoint_messages,
+                    "checkpoint_path": str(self.paths["last_checkpoint_path"]),
+                    "best_loss_checkpoint_path": str(self.paths["checkpoint_path"]),
+                    "best_dice_checkpoint_path": str(self.paths["dice_checkpoint_path"]),
                 },
             )
 

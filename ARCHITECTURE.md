@@ -497,6 +497,11 @@ mode-owned `presentation.py` adapters. Rendering for shared infrastructure event
 `mlx.core.presentation` and is composed by those mode adapters. Compatibility functions may
 attach the adapters, while direct
 command construction defaults to a no-op reporter and remains suitable for Python and tests.
+The shared training-metrics renderer consumes mode-configured metric definitions and writes one
+persistent row per epoch, including direction-aware deltas. Commands continue to emit raw metric
+values and checkpoint state; optimization direction, labels, colors, and terminal formatting stay
+in the presentation layer. Segmentation and image classification compose this renderer while
+provider-native object-detection progress remains owned by its provider.
 Detection streaming and
 tracking video execution support headless use through injected presentation boundaries:
 `RunObjectDetectionStream` accepts injected detector, frame source, frame sink, renderer, and

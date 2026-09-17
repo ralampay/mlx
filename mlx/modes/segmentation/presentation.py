@@ -9,7 +9,11 @@ import numpy as np
 from rich.table import Table
 
 from mlx.core.commands import WorkflowEvent
-from mlx.core.presentation import RichInfrastructureEventRenderer
+from mlx.core.presentation import (
+    RichInfrastructureEventRenderer,
+    RichTrainingMetricsRenderer,
+    TrainingMetricSpec,
+)
 from mlx.core.ui import (
     confirm_action,
     console,
@@ -31,9 +35,34 @@ class RichSegmentationReporter:
     def __init__(
         self,
         infrastructure_events: RichInfrastructureEventRenderer | None = None,
+        training_metrics: RichTrainingMetricsRenderer | None = None,
     ) -> None:
         self._infrastructure_events = (
             infrastructure_events or RichInfrastructureEventRenderer()
+        )
+        self._training_metrics = training_metrics or RichTrainingMetricsRenderer(
+            (
+                TrainingMetricSpec("train_loss", "train", higher_is_better=False),
+                TrainingMetricSpec("val_loss", "val", higher_is_better=False),
+                TrainingMetricSpec(
+                    "mean_foreground_dice", "fg Dice", higher_is_better=True
+                ),
+                TrainingMetricSpec("mean_iou", "mIoU", higher_is_better=True),
+                TrainingMetricSpec(
+                    "pixel_accuracy", "pixel acc", higher_is_better=True
+                ),
+                TrainingMetricSpec(
+                    "learning_rate", "lr", higher_is_better=None, precision=6
+                ),
+                TrainingMetricSpec(
+                    "epoch_seconds", "time(s)", higher_is_better=False, precision=1
+                ),
+            ),
+            event_names=("segmentation_epoch",),
+            highlights=(
+                ("is_best_val_loss", "best loss"),
+                ("is_best_foreground_dice", "best Dice"),
+            ),
         )
 
     def emit(self, event: WorkflowEvent) -> None:
@@ -41,6 +70,8 @@ class RichSegmentationReporter:
             return
         payload = event.payload if isinstance(event.payload, dict) else {}
         event_name = payload.get("event")
+        if self._training_metrics.handle(event):
+            return
         if event_name == "segmentation_tensor_output":
             print_success(event.message)
             print_info(f"Output tensor shape: {payload['shape']}")
@@ -50,28 +81,6 @@ class RichSegmentationReporter:
             for index, value in enumerate(payload["values"]):
                 table.add_row(str(index), f"{float(value):.6f}")
             console.print(table)
-            return
-        if event_name == "segmentation_epoch":
-            metrics = payload["metrics"]
-            table = Table(
-                title=f"Epoch {event.current}/{event.total}",
-                show_lines=True,
-            )
-            table.add_column("Metric", style="cyan")
-            table.add_column("Value", justify="right", style="magenta")
-            for label, value in (
-                ("Train Loss", payload["train_loss"]),
-                ("Validation Loss", payload["val_loss"]),
-                ("Pixel Accuracy", metrics["pixel_accuracy"]),
-                ("Macro Dice", metrics["macro_dice"]),
-                ("Foreground Dice", metrics["mean_foreground_dice"]),
-                ("Mean IoU", metrics["mean_iou"]),
-                ("Foreground IoU", metrics["mean_foreground_iou"]),
-            ):
-                table.add_row(label, f"{float(value):.6f}")
-            console.print(table)
-            for checkpoint in payload["checkpoints"]:
-                print_success(checkpoint)
             return
         if event_name == "segmentation_benchmark":
             metrics = payload["metrics"]

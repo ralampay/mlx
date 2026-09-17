@@ -10,7 +10,11 @@ import numpy as np
 from rich.table import Table
 
 from mlx.core.commands import WorkflowEvent
-from mlx.core.presentation import RichInfrastructureEventRenderer
+from mlx.core.presentation import (
+    RichInfrastructureEventRenderer,
+    RichTrainingMetricsRenderer,
+    TrainingMetricSpec,
+)
 from mlx.core.ui import (
     confirm_action,
     console,
@@ -31,15 +35,28 @@ class RichImageClassificationReporter:
     def __init__(
         self,
         infrastructure_events: RichInfrastructureEventRenderer | None = None,
+        training_metrics: RichTrainingMetricsRenderer | None = None,
     ) -> None:
         self._infrastructure_events = (
             infrastructure_events or RichInfrastructureEventRenderer()
+        )
+        self._training_metrics = training_metrics or RichTrainingMetricsRenderer(
+            (
+                TrainingMetricSpec("train_loss", "train", higher_is_better=False),
+                TrainingMetricSpec("val_loss", "val", higher_is_better=False),
+                TrainingMetricSpec("accuracy", "accuracy", higher_is_better=True),
+                TrainingMetricSpec("precision", "precision", higher_is_better=True),
+                TrainingMetricSpec("recall", "recall", higher_is_better=True),
+                TrainingMetricSpec("f1", "F1", higher_is_better=True),
+            )
         )
 
     def emit(self, event: WorkflowEvent) -> None:
         if self._infrastructure_events.handle(event):
             return
         payload = event.payload if isinstance(event.payload, dict) else {}
+        if self._training_metrics.handle(event):
+            return
         if payload.get("event") == "benchmark_result":
             self._render_benchmark(payload)
             return

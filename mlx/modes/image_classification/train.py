@@ -232,6 +232,7 @@ def _train_one_shot(
             train_loss=avg_train_loss,
             val_loss=avg_val_loss,
             metrics=val_metrics,
+            previous_metrics=history[-2] if len(history) > 1 else None,
             checkpoint_message=checkpoint_message,
             checkpoint_path=last_checkpoint_path,
         )
@@ -389,6 +390,7 @@ def _train_standard(
             train_loss=avg_train_loss,
             val_loss=avg_val_loss,
             metrics=val_metrics,
+            previous_metrics=history[-2] if len(history) > 1 else None,
             checkpoint_message=checkpoint_message,
             checkpoint_path=last_checkpoint_path,
         )
@@ -780,6 +782,7 @@ def _emit_epoch_result(
     train_loss: float,
     val_loss: float,
     metrics: dict[str, float],
+    previous_metrics: dict[str, float | int] | None = None,
     checkpoint_message: str | None = None,
     checkpoint_path: Path | None = None,
 ) -> None:
@@ -801,6 +804,7 @@ def _emit_epoch_result(
         payload={
             "event": "training_epoch",
             "metrics": {"train_loss": train_loss, "val_loss": val_loss, **metrics},
+            "previous_metrics": previous_metrics,
             "checkpoint_message": checkpoint_message,
             "checkpoint_path": str(checkpoint_path) if checkpoint_path else None,
         },

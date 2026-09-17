@@ -1,8 +1,11 @@
 from __future__ import annotations
 
+import math
 from collections.abc import Callable
+from dataclasses import dataclass
 from typing import Any, Protocol
 
+from rich.console import RenderableType
 from rich.progress import (
     BarColumn,
     DownloadColumn,
@@ -13,6 +16,7 @@ from rich.progress import (
     TimeRemainingColumn,
     TransferSpeedColumn,
 )
+from rich.text import Text
 
 from mlx.core.commands import WorkflowEvent
 from mlx.core.ui import console
@@ -110,4 +114,104 @@ class RichInfrastructureEventRenderer:
         return self._dataset_download_progress.handle(event)
 
 
-__all__ = ["RichDatasetDownloadProgress", "RichInfrastructureEventRenderer"]
+@dataclass(frozen=True)
+class TrainingMetricSpec:
+    """Presentation metadata for one value in a training-epoch event."""
+
+    key: str
+    label: str
+    higher_is_better: bool | None
+    precision: int = 4
+
+
+class RichTrainingMetricsRenderer:
+    """Render persistent, comparable metric rows from structured epoch events."""
+
+    def __init__(
+        self,
+        metrics: tuple[TrainingMetricSpec, ...],
+        *,
+        event_names: tuple[str, ...] = ("training_epoch",),
+        highlights: tuple[tuple[str, str], ...] = (),
+        render: Callable[[RenderableType], None] | None = None,
+    ) -> None:
+        self._metrics = metrics
+        self._event_names = frozenset(event_names)
+        self._highlights = highlights
+        self._render = render or console.print
+        self._previous_metrics: dict[str, float] = {}
+        self._last_epoch: int | None = None
+
+    def handle(self, event: WorkflowEvent) -> bool:
+        payload = event.payload if isinstance(event.payload, dict) else {}
+        if payload.get("event") not in self._event_names:
+            return False
+
+        current = int(event.current or 0)
+        total = int(event.total or 0)
+        raw_metrics = payload.get("metrics")
+        current_metrics = dict(raw_metrics) if isinstance(raw_metrics, dict) else {}
+        if self._last_epoch is not None and current <= self._last_epoch:
+            self.reset()
+
+        raw_previous = payload.get("previous_metrics")
+        previous_metrics = (
+            dict(raw_previous)
+            if isinstance(raw_previous, dict)
+            else self._previous_metrics
+        )
+        line = Text()
+        line.append(f"Epoch {current}/{total}", style="bold cyan")
+        for spec in self._metrics:
+            value = _finite_float(current_metrics.get(spec.key))
+            if value is None:
+                continue
+            line.append(f"  {spec.label} ", style="dim")
+            line.append(f"{value:.{spec.precision}f}", style="magenta")
+            previous = _finite_float(previous_metrics.get(spec.key))
+            if previous is None:
+                line.append(" —", style="dim")
+            else:
+                delta = value - previous
+                arrow = "↑" if delta > 0 else "↓" if delta < 0 else "→"
+                if spec.higher_is_better is None:
+                    style = "dim"
+                else:
+                    improved = delta > 0 if spec.higher_is_better else delta < 0
+                    style = "green" if improved else "red" if delta else "dim"
+                line.append(
+                    f" {arrow}{abs(delta):.{spec.precision}f}",
+                    style=style,
+                )
+
+        for key, label in self._highlights:
+            if payload.get(key):
+                line.append(f"  {label}", style="bold green")
+        self._render(line)
+        self._previous_metrics = {
+            key: value
+            for key, raw_value in current_metrics.items()
+            if (value := _finite_float(raw_value)) is not None
+        }
+        self._last_epoch = current
+        return True
+
+    def reset(self) -> None:
+        self._previous_metrics = {}
+        self._last_epoch = None
+
+
+def _finite_float(value: Any) -> float | None:
+    try:
+        numeric = float(value)
+    except (TypeError, ValueError):
+        return None
+    return numeric if math.isfinite(numeric) else None
+
+
+__all__ = [
+    "RichDatasetDownloadProgress",
+    "RichInfrastructureEventRenderer",
+    "RichTrainingMetricsRenderer",
+    "TrainingMetricSpec",
+]

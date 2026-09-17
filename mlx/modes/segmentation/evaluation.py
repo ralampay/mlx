@@ -17,6 +17,7 @@ from mlx.core.artifacts import sha256_file as _sha256
 from mlx.core.exceptions import MLXUserError
 from mlx.modes.segmentation.data import (
     SegmentationEvaluationDataset,
+    load_image_tensor,
     resolve_segmentation_evaluation_split,
 )
 from mlx.modes.segmentation.metrics import (
@@ -80,6 +81,7 @@ class BenchmarkSegmentation:
             input_size=tuple(metadata["input_size"]),
             num_classes=int(metadata["num_classes"]),
             colored=bool(metadata["colored"]),
+            transform=str(metadata.get("transform", "resize")),
         )
         loader = DataLoader(
             dataset,
@@ -342,13 +344,17 @@ class BenchmarkSegmentation:
         mask_dtype = np.uint8 if int(metadata["num_classes"]) <= 256 else np.uint16
         cv2.imwrite(str(masks_dir / f"{image_path.stem}.png"), prediction.astype(mask_dtype))
 
-        original_bgr = cv2.imread(str(image_path), cv2.IMREAD_COLOR)
-        if original_bgr is None:
-            raise MLXUserError(f"Unable to read benchmark image for overlay: {image_path}")
-        original_rgb = cv2.cvtColor(
-            cv2.resize(original_bgr, tuple(metadata["input_size"])),
-            cv2.COLOR_BGR2RGB,
+        original_tensor = load_image_tensor(
+            image_path,
+            input_size=tuple(metadata["input_size"]),
+            colored=True,
+            transform=str(metadata.get("transform", "resize")),
         )
+        original_rgb = np.clip(
+            np.rint(original_tensor.permute(1, 2, 0).numpy() * 255.0),
+            0,
+            255,
+        ).astype(np.uint8)
         color_mask = colorize_mask(prediction.astype(np.uint8), metadata["palette"])
         overlay = blend_overlay(
             original_rgb,
@@ -431,6 +437,7 @@ class BenchmarkSegmentation:
                 "requested_split": self.split,
                 "class_names": class_names,
                 "input_size": metadata["input_size"],
+                "transform": metadata.get("transform", "resize"),
                 "num_classes": metadata["num_classes"],
                 "device": self.device,
                 "device_name": self._device_name(),

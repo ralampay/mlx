@@ -1,21 +1,102 @@
 from __future__ import annotations
 
+import random
+import shutil
 from pathlib import Path
 from typing import Callable, Iterable
 
 import cv2
+import numpy as np
 import torch
 from torch.utils.data import Dataset
 
+from mlx.core.datasets import resolve_split_dataset_root
 from mlx.core.commands import NullWorkflowReporter, WorkflowReporter, emit
 from mlx.core.exceptions import MLXUserError
-from mlx.core.datasets import resolve_split_dataset_root
 from mlx.modes.segmentation.requests import BuildSegmentationDatasetRequest
 
-import random
-import shutil
-
 IMAGE_EXTENSIONS = (".png", ".jpg", ".jpeg", ".bmp", ".tif", ".tiff")
+SEGMENTATION_TRANSFORMS = ("resize", "random-crop", "center-crop")
+
+
+def normalize_segmentation_transform(value: str | None) -> str:
+    transform = str(value or "resize").strip().lower()
+    if transform not in SEGMENTATION_TRANSFORMS:
+        available = ", ".join(SEGMENTATION_TRANSFORMS)
+        raise MLXUserError(
+            f"Unsupported segmentation transform '{transform}'. "
+            f"Available transforms: {available}."
+        )
+    return transform
+
+
+def evaluation_segmentation_transform(value: str | None) -> str:
+    transform = normalize_segmentation_transform(value)
+    return "center-crop" if transform == "random-crop" else transform
+
+
+def transform_segmentation_pair(
+    image: np.ndarray,
+    mask: np.ndarray,
+    *,
+    input_size: tuple[int, int],
+    transform: str,
+    rng: random.Random | None = None,
+) -> tuple[np.ndarray, np.ndarray]:
+    """Apply one spatial transform to an aligned image/mask pair."""
+
+    if image.shape[:2] != mask.shape[:2]:
+        raise MLXUserError(
+            "Segmentation image and mask dimensions must match before transformation: "
+            f"image={image.shape[:2]}, mask={mask.shape[:2]}."
+        )
+    width, height = (int(value) for value in input_size)
+    if width < 1 or height < 1:
+        raise MLXUserError("Segmentation input width and height must be at least 1.")
+
+    transform = normalize_segmentation_transform(transform)
+    if transform == "resize":
+        return (
+            cv2.resize(image, (width, height), interpolation=cv2.INTER_LINEAR),
+            cv2.resize(mask, (width, height), interpolation=cv2.INTER_NEAREST),
+        )
+
+    image, mask = _pad_segmentation_pair(image, mask, width=width, height=height)
+    available_height, available_width = mask.shape[:2]
+    if transform == "random-crop":
+        random_source = rng or random
+        top = random_source.randint(0, available_height - height)
+        left = random_source.randint(0, available_width - width)
+    else:
+        top = (available_height - height) // 2
+        left = (available_width - width) // 2
+    return (
+        np.ascontiguousarray(image[top : top + height, left : left + width]),
+        np.ascontiguousarray(mask[top : top + height, left : left + width]),
+    )
+
+
+def _pad_segmentation_pair(
+    image: np.ndarray,
+    mask: np.ndarray,
+    *,
+    width: int,
+    height: int,
+) -> tuple[np.ndarray, np.ndarray]:
+    source_height, source_width = mask.shape[:2]
+    horizontal = max(0, width - source_width)
+    vertical = max(0, height - source_height)
+    top = vertical // 2
+    bottom = vertical - top
+    left = horizontal // 2
+    right = horizontal - left
+    if not horizontal and not vertical:
+        return image, mask
+    border = (top, bottom, left, right, cv2.BORDER_CONSTANT)
+    return (
+        cv2.copyMakeBorder(image, *border, value=0),
+        cv2.copyMakeBorder(mask, *border, value=0),
+    )
 
 
 def segmentation_dataset_root(extracted_path: Path) -> Path:
@@ -68,6 +149,7 @@ def load_image_tensor(
     *,
     input_size: tuple[int, int],
     colored: bool,
+    transform: str = "resize",
 ) -> torch.Tensor:
     flag = cv2.IMREAD_COLOR if colored else cv2.IMREAD_GRAYSCALE
     image = cv2.imread(str(image_path), flag)
@@ -76,10 +158,16 @@ def load_image_tensor(
 
     if colored:
         image = cv2.cvtColor(image, cv2.COLOR_BGR2RGB)
-    else:
-        image = image[..., None]
 
-    image = cv2.resize(image, input_size, interpolation=cv2.INTER_LINEAR)
+    placeholder_mask = np.zeros(image.shape[:2], dtype=np.uint8)
+    image, _ = transform_segmentation_pair(
+        image,
+        placeholder_mask,
+        input_size=input_size,
+        transform=evaluation_segmentation_transform(transform),
+    )
+    if not colored:
+        image = image[..., None]
     return torch.from_numpy(image.transpose(2, 0, 1)).float() / 255.0
 
 
@@ -108,6 +196,51 @@ def load_mask_tensor(
     return torch.from_numpy(mask).long()
 
 
+def load_segmentation_pair_tensors(
+    image_path: Path,
+    mask_path: Path,
+    *,
+    input_size: tuple[int, int],
+    num_classes: int,
+    colored: bool,
+    transform: str,
+) -> tuple[torch.Tensor, torch.Tensor]:
+    image_flag = cv2.IMREAD_COLOR if colored else cv2.IMREAD_GRAYSCALE
+    image = cv2.imread(str(image_path), image_flag)
+    if image is None:
+        raise MLXUserError(f"Cannot read image: {image_path}")
+    mask = cv2.imread(str(mask_path), cv2.IMREAD_GRAYSCALE)
+    if mask is None:
+        raise MLXUserError(f"Cannot read mask: {mask_path}")
+
+    if colored:
+        image = cv2.cvtColor(image, cv2.COLOR_BGR2RGB)
+    image, mask = transform_segmentation_pair(
+        image,
+        mask,
+        input_size=input_size,
+        transform=transform,
+    )
+    if not colored:
+        image = image[..., None]
+
+    if num_classes <= 2:
+        mask = (mask > 0).astype("int64")
+    else:
+        mask = mask.astype("int64")
+        observed_values = {int(value) for value in np.unique(mask)}
+        invalid_values = sorted(observed_values - set(range(num_classes)))
+        if invalid_values:
+            raise MLXUserError(
+                f"Mask '{mask_path}' contains class ids outside 0..{num_classes - 1}: "
+                f"{invalid_values}"
+            )
+    return (
+        torch.from_numpy(np.ascontiguousarray(image.transpose(2, 0, 1))).float() / 255.0,
+        torch.from_numpy(np.ascontiguousarray(mask)).long(),
+    )
+
+
 class SegmentationDataset(Dataset):
     def __init__(
         self,
@@ -117,12 +250,19 @@ class SegmentationDataset(Dataset):
         input_size: tuple[int, int],
         num_classes: int,
         colored: bool = True,
+        transform: str = "resize",
     ) -> None:
         self.dataset_path = Path(dataset_path)
         self.split = split
         self.input_size = input_size
         self.num_classes = num_classes
         self.colored = colored
+        requested_transform = normalize_segmentation_transform(transform)
+        self.transform = (
+            requested_transform
+            if split == "train"
+            else evaluation_segmentation_transform(requested_transform)
+        )
 
         split_dir = self.dataset_path / split
         self.images_dir = split_dir / "images"
@@ -145,9 +285,14 @@ class SegmentationDataset(Dataset):
 
     def __getitem__(self, index: int) -> tuple[torch.Tensor, torch.Tensor]:
         image_path, mask_path = self.samples[index]
-        image = load_image_tensor(image_path, input_size=self.input_size, colored=self.colored)
-        mask = load_mask_tensor(mask_path, input_size=self.input_size, num_classes=self.num_classes)
-        return image, mask
+        return load_segmentation_pair_tensors(
+            image_path,
+            mask_path,
+            input_size=self.input_size,
+            num_classes=self.num_classes,
+            colored=self.colored,
+            transform=self.transform,
+        )
 
 
 class SegmentationEvaluationDataset(Dataset):
@@ -158,6 +303,7 @@ class SegmentationEvaluationDataset(Dataset):
         input_size: tuple[int, int],
         num_classes: int,
         colored: bool = True,
+        transform: str = "resize",
     ) -> None:
         self.split_path = Path(split_path)
         self.images_dir = self.split_path / "images"
@@ -165,6 +311,7 @@ class SegmentationEvaluationDataset(Dataset):
         self.input_size = input_size
         self.num_classes = num_classes
         self.colored = colored
+        self.transform = evaluation_segmentation_transform(transform)
         if not self.images_dir.is_dir() or not self.masks_dir.is_dir():
             raise MLXUserError(
                 "Expected evaluation dataset structure:\n"
@@ -182,17 +329,13 @@ class SegmentationEvaluationDataset(Dataset):
 
     def __getitem__(self, index: int) -> tuple[torch.Tensor, torch.Tensor]:
         image_path, mask_path = self.samples[index]
-        return (
-            load_image_tensor(
-                image_path,
-                input_size=self.input_size,
-                colored=self.colored,
-            ),
-            load_mask_tensor(
-                mask_path,
-                input_size=self.input_size,
-                num_classes=self.num_classes,
-            ),
+        return load_segmentation_pair_tensors(
+            image_path,
+            mask_path,
+            input_size=self.input_size,
+            num_classes=self.num_classes,
+            colored=self.colored,
+            transform=self.transform,
         )
 
 
@@ -215,12 +358,48 @@ def resolve_segmentation_evaluation_split(
     )
 
 
+def resolve_optional_segmentation_test_split(
+    dataset_path: str | Path,
+) -> Path | None:
+    """Return a valid optional test split, rejecting partially defined splits."""
+
+    test_path = Path(dataset_path).expanduser() / "test"
+    if not test_path.exists():
+        return None
+    if not test_path.is_dir():
+        raise MLXUserError(
+            f"Segmentation test partition must be a directory: {test_path}"
+        )
+    images_dir = test_path / "images"
+    masks_dir = test_path / "masks"
+    has_images = images_dir.is_dir()
+    has_masks = masks_dir.is_dir()
+    if not has_images or not has_masks:
+        missing = [
+            str(path)
+            for path, exists in ((images_dir, has_images), (masks_dir, has_masks))
+            if not exists
+        ]
+        raise MLXUserError(
+            "Segmentation test partition is incomplete. "
+            f"Expected both '{images_dir}' and '{masks_dir}'; missing {', '.join(missing)}."
+        )
+
+    samples = _paired_samples(images_dir, masks_dir)
+    if not samples:
+        raise MLXUserError(
+            f"No paired image/mask samples were found under test partition: {test_path}"
+        )
+    return test_path
+
+
 def load_segmentation_datasets(
     dataset_path: str | Path,
     *,
     input_size: tuple[int, int],
     num_classes: int,
     colored: bool = True,
+    transform: str = "resize",
 ) -> tuple[SegmentationDataset, SegmentationDataset]:
     return (
         SegmentationDataset(
@@ -229,6 +408,7 @@ def load_segmentation_datasets(
             input_size=input_size,
             num_classes=num_classes,
             colored=colored,
+            transform=transform,
         ),
         SegmentationDataset(
             dataset_path,
@@ -236,6 +416,7 @@ def load_segmentation_datasets(
             input_size=input_size,
             num_classes=num_classes,
             colored=colored,
+            transform=transform,
         ),
     )
 

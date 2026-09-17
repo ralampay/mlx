@@ -10,8 +10,11 @@ from mlx.modes.image_classification.models.blocks import DraxBlock
 from mlx.modes.segmentation import list_models as segmentation_listing
 from mlx.modes.segmentation.models import (
     MODEL_NAMES,
+    MODEL_GROUP_NAMES,
+    SMALL_MODEL_NAMES,
     BackboneUNet,
     build_segmentation_model,
+    grouped_model_names,
     supported_model_names,
 )
 from mlx.modes.segmentation.models.backbones import BACKBONE_SPECS
@@ -39,6 +42,25 @@ def test_segmentation_registry_contains_all_non_siamese_backbones() -> None:
     assert MODEL_NAMES == {"unet", *EXPECTED_BACKBONE_MODELS}
     assert supported_model_names() == sorted(MODEL_NAMES)
     assert not any("siamese" in model_name for model_name in MODEL_NAMES)
+
+
+def test_small_model_group_is_explicit_and_below_ten_million_parameters() -> None:
+    assert MODEL_GROUP_NAMES == {"all", "all-small"}
+    assert SMALL_MODEL_NAMES == {
+        "unet-mobilenet_v3_large",
+        "unet-drax_mobilenet_v3_large-average",
+        "unet-drax_mobilenet_v3_large-sknet",
+        "unet-efficientnet_b0",
+    }
+    assert grouped_model_names("all-small") == sorted(SMALL_MODEL_NAMES)
+
+    for model_name in SMALL_MODEL_NAMES:
+        model = build_segmentation_model(
+            model_name,
+            {"colored": True, "pretrained": False},
+            num_classes=9,
+        )
+        assert sum(parameter.numel() for parameter in model.parameters()) < 10_000_000
 
 
 @pytest.mark.parametrize(

@@ -110,6 +110,20 @@ python -m mlx --mode segmentation --action train \
   --output ./artifacts/segmentation-s3 --profile mlx-training
 ```
 
+All segmentation models—or the `all-small` sub-10M group—can share one staged ZIP and
+produce a benchmark leaderboard:
+
+```bash
+python -m mlx --mode segmentation --action train \
+  --model all \
+  --dataset-s3-uri s3://my-datasets/segmentation.zip \
+  --output ./artifacts/all-segmentation-models --profile mlx-training
+```
+
+The grouped-model form stages the ZIP once and requires the archive to include valid
+`train`, `val`, and `test` paired image/mask partitions. Single-model segmentation
+training continues to require only `train` and `val`.
+
 Video anomaly detection:
 
 ```bash

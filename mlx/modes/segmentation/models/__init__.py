@@ -19,10 +19,28 @@ from mlx.modes.segmentation.models.unet import BackboneUNet, UNet
 
 DEFAULT_MODEL = "unet"
 MODEL_NAMES = {"unet", *BACKBONE_SPECS}
+SMALL_MODEL_NAMES = frozenset(
+    {
+        "unet-mobilenet_v3_large",
+        "unet-drax_mobilenet_v3_large-average",
+        "unet-drax_mobilenet_v3_large-sknet",
+        "unet-efficientnet_b0",
+    }
+)
+MODEL_GROUP_NAMES = frozenset({"all", "all-small"})
 
 
 def supported_model_names() -> list[str]:
     return sorted(MODEL_NAMES)
+
+
+def grouped_model_names(group_name: str) -> list[str]:
+    if group_name == "all":
+        return supported_model_names()
+    if group_name == "all-small":
+        return sorted(SMALL_MODEL_NAMES)
+    available = ", ".join(sorted(MODEL_GROUP_NAMES))
+    raise MLXUserError(f"Unsupported segmentation model group '{group_name}': {available}.")
 
 
 def build_segmentation_model(
@@ -57,11 +75,14 @@ __all__ = [
     "DoubleConvBlock",
     "DownsampleConvBlock",
     "MODEL_NAMES",
+    "MODEL_GROUP_NAMES",
+    "SMALL_MODEL_NAMES",
     "SegmentationEncoder",
     "UNet",
     "UNetDecoderBlock",
     "UpsampleSkipConvBlock",
     "build_segmentation_encoder",
     "build_segmentation_model",
+    "grouped_model_names",
     "supported_model_names",
 ]

@@ -65,7 +65,7 @@ mlx/
     │   └── aws/                  SageMaker Spot lifecycle and native checkpoint recovery
     ├── image_recognition_oc/     normal-only image recognition algorithms and research artifacts
     │   └── aws/                  single/all-backbone SageMaker training and benchmarking
-    ├── segmentation/             paired-mask data, U-Net models, metrics, research artifacts
+    ├── segmentation/             paired transforms/masks, U-Net models/groups, metrics, samples, research artifacts
     │   ├── streaming.py          injected frame source/sink contracts and OpenCV adapters
     │   ├── visualization.py      pure mask coloring, blending, and view composition
     │   └── models/backbone_factory.py  isolated classifier-backbone adapter
@@ -91,7 +91,7 @@ The primary workflow commands are:
 | --- | --- |
 | Image classification | `TrainImageClassificationModel`, `SmokeTestImageClassificationModel`, `BenchmarkImageClassification`, `InferImageClassification`, `GenerateImageClassificationCams`, `BuildImageClassificationDataset`, `ListImageClassificationModels`, AWS submit/status/stop/resume commands |
 | One-class image recognition | `TrainImageOneClassModel`, `BenchmarkImageOneClass`, `InferImageOneClass`, `ListImageOneClassModels`, AWS submit/status/stop/resume commands |
-| Segmentation | `TrainSegmentationModel`, `SmokeTestSegmentationModel`, `BenchmarkSegmentation`, `InferSegmentationImage`, `RunSegmentationStreamInference`, `BuildSegmentationDataset`, `ListSegmentationModels` |
+| Segmentation | `TrainSegmentationModel`, `TrainAllSegmentationModels`, `GenerateSegmentationSamples`, `SmokeTestSegmentationModel`, `BenchmarkSegmentation`, `InferSegmentationImage`, `RunSegmentationStreamInference`, `BuildSegmentationDataset`, `ListSegmentationModels` |
 | Video anomaly detection | `TrainVideoAnomalyModel`, `BenchmarkVideoAnomalyModel`, `InferVideoAnomaly`, `ListVideoAnomalyModels`, AWS all-model submit/status/resume commands |
 | Object detection | `TrainObjectDetectionModel`, `FineTuneObjectDetectionModel`, `BenchmarkObjectDetectionModel`, `CreateObjectDetector`, `ConvertObjectDetectionModel`, `ListObjectDetectionModels`, `RunObjectDetectionStream`, AWS submit/status/stop/resume and best-model locator commands |
 | Tracking | `CreateTrackingAlgorithm`, `RunObjectDetectionTrackingCommand`, `RunTrackByDetectionCommand`, `RunTrackingVideo`, `ExportMOTFromClassAwareTracking`, `BenchmarkMOTTracking`, `ExportTrackingReplay` |
@@ -121,6 +121,19 @@ atomically publishes a persistent cache entry under `~/.cache/mlx/datasets` by d
 identity includes bucket/key plus VersionId or ETag provenance and object size. Incomplete entries
 are never treated as valid. Training artifacts receive `dataset_source.json`; credentials and
 profile names are deliberately excluded.
+
+Segmentation `--model all` and `--model all-small` keep the shared staging command outside the
+batch command, so an S3 ZIP is inspected, downloaded, and extracted once before the resolved local
+root is injected into every model request. Single-model and batch commands therefore remain
+storage-provider neutral.
+The segmentation data boundary owns paired spatial transforms. Resize remains backward-compatible;
+random crops share coordinates between image and mask and resolve to deterministic center crops for
+validation, test, benchmarking, and samples. Crop padding uses zero for both inputs and class-index
+masks. Model groups are explicit registry-owned sets so membership remains stable when model
+implementations change.
+
+The runner removes its implicit local dataset default when an S3 URI is explicitly supplied while
+continuing to reject callers that explicitly provide both sources.
 
 S3 downloads emit structured `dataset_download` lifecycle events rather than terminal output.
 The reusable `RichDatasetDownloadProgress` renderer consumes those infrastructure events as one
@@ -500,6 +513,23 @@ Segmentation's reusable visualization transforms live in `visualization.py`; onl
 and prompts remain in presentation. Its encoder consumes a `ClassificationBackboneFactory`, with
 the existing image-classification implementation isolated in the default compatibility adapter
 instead of being imported by the encoder itself.
+
+Segmentation training treats `test/` as an optional qualitative-artifact boundary. A completely
+absent test split does not affect training, while a partially defined or invalid paired split is
+rejected before model work begins. After training, `GenerateSegmentationSamples` reloads the
+best-foreground-Dice checkpoint (falling back to best validation loss), selects at most 16
+deterministic samples across the sorted split, and refreshes mode-owned original,
+ground-truth, prediction, overlay, and labeled-panel artifacts. Full test metrics remain the
+responsibility of `BenchmarkSegmentation`.
+
+`TrainAllSegmentationModels` freezes the sorted segmentation registry for one sequential,
+fail-fast local run. It requires scratch initialization, a complete test partition, and a new or
+empty directory output. Each model owns a child directory; its lowest-validation-loss checkpoint
+is benchmarked on test while its best-Dice checkpoint remains the source of qualitative training
+samples. Root `all-models.json` and `leaderboard.csv` artifacts are refreshed after every completed
+model and rank finite test results by mean foreground Dice. Commands release model references and
+available accelerator cache between variants. Segmentation batch training is not a SageMaker
+workflow.
 
 Invalid CLI input, absent files, unsupported actions/providers, missing optional libraries, bad
 dataset layouts, and camera/video failures raise `MLXUserError`. Model-internal invariant failures

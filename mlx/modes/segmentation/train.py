@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import platform
 import time
+from pathlib import Path
 from typing import Any
 
 import cv2
@@ -12,7 +13,10 @@ from torch.utils.data import DataLoader
 
 from mlx.core.commands import NullWorkflowReporter, WorkflowReporter, emit
 from mlx.core.exceptions import MLXUserError
-from mlx.modes.segmentation.data import load_segmentation_datasets
+from mlx.modes.segmentation.data import (
+    load_segmentation_datasets,
+    resolve_optional_segmentation_test_split,
+)
 from mlx.modes.segmentation.metrics import (
     aggregate_confusion_metrics,
     class_metrics_from_confusion,
@@ -26,6 +30,7 @@ from mlx.modes.segmentation.research import (
     write_training_curves,
 )
 from mlx.modes.segmentation.requests import SegmentationRequest
+from mlx.modes.segmentation.samples import GenerateSegmentationSamples
 from mlx.modes.segmentation.utils import (
     load_training_checkpoint,
     resolve_class_names,
@@ -52,6 +57,7 @@ class TrainSegmentationModel:
         self.epochs = int(config.get("epochs", 50))
         self.learning_rate = float(config.get("lr") or 1e-3)
         self.input_size = tuple(config.get("input_size", (256, 256)))
+        self.transform = str(config.get("transform", "resize"))
         self.num_classes = int(config.get("num_classes", 2))
         self.colored = bool(config.get("colored", True))
         self.class_names = resolve_class_names(config, self.num_classes)
@@ -64,6 +70,9 @@ class TrainSegmentationModel:
             raise MLXUserError("--epochs must be at least 1 for segmentation training.")
         if self.num_classes < 2:
             raise MLXUserError("--num-classes must be at least 2 for segmentation training.")
+        test_split_path = resolve_optional_segmentation_test_split(
+            self.config["dataset_path"]
+        )
         emit(
             self.reporter,
             "info",
@@ -74,6 +83,7 @@ class TrainSegmentationModel:
             input_size=self.input_size,
             num_classes=self.num_classes,
             colored=self.colored,
+            transform=self.transform,
         )
         train_loader = DataLoader(
             train_dataset,
@@ -129,11 +139,31 @@ class TrainSegmentationModel:
             best_dice=best_dice,
             history=history,
         )
+        if test_split_path is not None:
+            self._generate_test_samples(test_split_path)
         emit(
             self.reporter,
             "success",
             f"Segmentation training complete; research artifacts are in {self.paths['output_dir']}"
         )
+
+    def _generate_test_samples(self, test_split_path: Path) -> None:
+        checkpoint_path = self.paths["dice_checkpoint_path"]
+        if not checkpoint_path.is_file():
+            checkpoint_path = self.paths["checkpoint_path"]
+            emit(
+                self.reporter,
+                "warning",
+                "Best-Dice checkpoint is unavailable; using the best-validation-loss "
+                "checkpoint for segmentation test samples.",
+            )
+        GenerateSegmentationSamples(
+            self.config,
+            checkpoint_path=checkpoint_path,
+            test_split_path=test_split_path,
+            output_dir=self.paths["output_dir"],
+            reporter=self.reporter,
+        ).execute()
 
     def _run_epochs(
         self,

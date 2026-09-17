@@ -48,4 +48,44 @@ def stack_segmentation_views(
     return np.hstack((original_bgr, mask_bgr, overlay_bgr))
 
 
-__all__ = ["blend_overlay", "colorize_mask", "stack_segmentation_views"]
+def compose_segmentation_sample_panel(
+    original_rgb: np.ndarray,
+    ground_truth_rgb: np.ndarray,
+    prediction_rgb: np.ndarray,
+    overlay_rgb: np.ndarray,
+) -> np.ndarray:
+    """Build a labeled RGB comparison panel for a qualitative test sample."""
+
+    height, width = original_rgb.shape[:2]
+    title_height = max(28, height // 12)
+    panels = []
+    for title, image in (
+        ("Picture", original_rgb),
+        ("Ground Truth", ground_truth_rgb),
+        ("Prediction", prediction_rgb),
+        ("Overlay", overlay_rgb),
+    ):
+        resized = cv2.resize(image, (width, height), interpolation=cv2.INTER_NEAREST)
+        titled = np.zeros((height + title_height, width, 3), dtype=np.uint8)
+        titled[title_height:] = resized
+        font_scale = max(0.4, min(0.8, width / 500.0))
+        cv2.putText(
+            titled,
+            title,
+            (8, title_height - 8),
+            cv2.FONT_HERSHEY_SIMPLEX,
+            font_scale,
+            (255, 255, 255),
+            1,
+            cv2.LINE_AA,
+        )
+        panels.append(titled)
+    return np.hstack(panels)
+
+
+__all__ = [
+    "blend_overlay",
+    "colorize_mask",
+    "compose_segmentation_sample_panel",
+    "stack_segmentation_views",
+]

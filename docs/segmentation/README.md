@@ -68,16 +68,23 @@ Requirements:
 Image preprocessing:
 
 - read as RGB
-- resize to `--width` x `--height`
+- apply the selected `--transform` at `--width` x `--height`
 - convert to `float32`
 - divide by `255.0`
 
 Mask preprocessing:
 
 - read as single-channel grayscale
-- resize with nearest-neighbor interpolation
+- use nearest-neighbor interpolation when resizing; cropping preserves class IDs
 - keep as integer class indices
 - do not normalize mask values
+
+Spatial transforms are paired so images and masks always receive identical crop
+coordinates. `resize` preserves the previous behavior and remains the default.
+`center-crop` takes a deterministic centered crop, while `random-crop` samples a
+new training crop and automatically uses `center-crop` for validation, test,
+benchmarking, and generated samples. Images or masks smaller than the requested
+crop are symmetrically zero-padded first; mask padding therefore uses class `0`.
 
 ## Available Actions
 
@@ -192,6 +199,55 @@ Important arguments:
 - `--class-names`: optional comma-separated names matching `--num-classes`
 - `--epochs`, `--batch-size`, `--device`, `--lr`: training controls
 - `--width`, `--height`: input dimensions used to build `input_size`
+- `--transform`: `resize` (default), `random-crop`, or `center-crop`
+
+Train and test-benchmark every registered segmentation model with one call:
+
+```bash
+python -m mlx --mode segmentation --action train \
+  --model all \
+  --dataset ./data/kvasir-seg \
+  --output ./results/all-segmentation-models
+```
+
+All-model training is sequential and fail-fast. It requires a complete paired test
+partition, scratch initialization (do not pass `--pretrained`), no `--model-path`,
+and a new or empty directory output. Every model uses validation loss to select its
+checkpoint and then runs the full benchmark on `test`. Results are ranked by mean
+foreground Dice; the leaderboard also records the minimum validation loss used for
+checkpoint selection:
+
+```text
+all-segmentation-models/
+├── all-models.json
+├── leaderboard.csv
+├── unet/
+│   ├── unet.pth
+│   ├── samples/
+│   └── benchmark/
+└── <each other registered model>/
+```
+
+Use `--model all-small` for the resource-conscious group whose members each
+have fewer than 10 million parameters: MobileNetV3 Large, EfficientNet-B0, and
+the average/SKNet DRAX-MobileNetV3 variants. It uses the same sequential
+training, test benchmark, and leaderboard contract as `--model all`.
+
+OpenEarthMap-style paired random crops can be requested directly:
+
+```bash
+python -m mlx --mode segmentation --action train \
+  --model all-small \
+  --dataset ./data/openearthmap \
+  --output ./results/openearthmap-small \
+  --width 512 --height 512 \
+  --transform random-crop \
+  --num-classes 9
+```
+
+If a model fails, later models are not started. Completed model directories and the
+partial root summary remain available, while rerunning into that non-empty output is
+rejected to prevent mixed comparison runs.
 
 Local training also accepts a ZIP from S3:
 
@@ -208,6 +264,20 @@ persistent cache, passes the resolved local root to the existing loader, and rec
 exclusive; change the cache with `--dataset-cache-dir` when needed.
 See the shared [S3 dataset training guide](../s3-dataset-training.md) for credentials, cache
 identity, safe extraction, provenance, limitations, and troubleshooting.
+
+S3 can also feed an all-model run. The ZIP is downloaded and extracted once, then
+the same resolved dataset is used for every model:
+
+```bash
+python -m mlx --mode segmentation --action train \
+  --model all \
+  --dataset-s3-uri s3://my-datasets/segmentation.zip \
+  --output ./results/all-segmentation-models \
+  --profile mlx-training
+```
+
+For this form, the archive must additionally contain paired `test/images` and
+`test/masks` directories.
 
 List every comparison model and its total parameter count for the selected
 class count:
@@ -239,6 +309,26 @@ Directory output writes:
 - `training.csv`: one row per epoch with loss, aggregate overlap, and per-class metrics
 - `training_curves.png`: loss and validation metric curves
 - `training_config.json`: effective configuration and dataset sizes
+
+When the dataset also contains a valid paired `test/images` and `test/masks`
+partition, training uses the best-Dice checkpoint to render up to 16 evenly
+spaced, filename-sorted qualitative samples. If a best-Dice checkpoint is not
+available, it reports the condition and uses the best-loss checkpoint. The
+generated files are replaced on each completed training run:
+
+```text
+samples/
+├── original/       transformed model inputs
+├── ground_truth/   colorized target masks
+├── prediction/     colorized predicted masks
+├── overlay/        predictions blended over inputs
+└── panels/         labeled Picture | Ground Truth | Prediction | Overlay views
+```
+
+A completely absent `test/` partition is allowed and skips this step. A present
+but incomplete, empty, or mismatched test partition is reported as an input
+error before training begins. Full per-image metrics and prediction/error-map
+artifacts remain part of the separate `benchmark` action.
 
 For compatibility, a file output such as `./checkpoints/unet-seg.pt` remains the
 best-loss checkpoint. Its best-Dice and last checkpoints are written beside it,

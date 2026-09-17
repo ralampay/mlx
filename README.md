@@ -427,8 +427,21 @@ python -m mlx --mode segmentation --action infer-image \
 ```
 
 Training stores best-loss, best-Dice, and resumable-last checkpoints together with
-CSV and plot research history. Benchmarking exports aggregate, per-class, per-image,
-probability, calibration, boundary, threshold, timing, and prediction artifacts.
+CSV and plot research history. When a paired test partition exists, it also writes
+up to 16 original, ground-truth, prediction, overlay, and combined-panel samples.
+Benchmarking exports aggregate, per-class, per-image, probability, calibration,
+boundary, threshold, timing, and prediction artifacts.
+
+Use `--model all` with `--action train` to train every registered segmentation model
+from scratch against one dataset and benchmark each best-validation-loss checkpoint
+on the required test split. Local or S3 ZIP datasets are supported; S3 data is staged
+once for the complete batch. Per-model artifacts live below the output directory and
+root `all-models.json`/`leaderboard.csv` files summarize the comparison.
+
+Use `--model all-small` for the four registered segmentation models below 10 million
+parameters. Segmentation training also accepts `--transform resize` (the default),
+`--transform random-crop`, or `--transform center-crop`; random training crops use
+deterministic center crops for validation, test benchmarking, and samples.
 
 See the [segmentation guide](./docs/segmentation/README.md) for dataset format,
 models, metrics, artifacts, and inference workflows.

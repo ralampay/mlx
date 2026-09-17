@@ -11,14 +11,18 @@ from mlx.core.commands import NullWorkflowReporter
 from mlx.core.streaming import NullFrameSink
 from mlx.core.exceptions import MLXUserError
 from mlx.core.ui import print_model_parameter_table
-from mlx.modes.segmentation.data import BuildSegmentationDataset, segmentation_dataset_root
+from mlx.modes.segmentation.data import (
+    BuildSegmentationDataset,
+    normalize_segmentation_transform,
+    segmentation_dataset_root,
+)
 from mlx.modes.segmentation.evaluation import BenchmarkSegmentation
 from mlx.modes.segmentation.inference import (
     InferSegmentationImage,
     RunSegmentationStreamInference,
 )
 from mlx.modes.segmentation.list_models import ListSegmentationModels
-from mlx.modes.segmentation.models import DEFAULT_MODEL
+from mlx.modes.segmentation.models import DEFAULT_MODEL, MODEL_GROUP_NAMES
 from mlx.modes.segmentation.presentation import (
     display_segmentation_result,
     print_segmentation_config_summary,
@@ -37,6 +41,10 @@ from mlx.modes.segmentation.train import (
     SmokeTestSegmentationModel,
     TrainSegmentationModel,
 )
+from mlx.modes.segmentation.train_all import (
+    TrainAllSegmentationModels,
+    validate_all_models_request,
+)
 from mlx.modes.segmentation.utils import resolve_model_name, resolve_train_output_paths
 from mlx.modes.segmentation.streaming import (
     OpenCVSegmentationFrameSink,
@@ -51,6 +59,7 @@ DEFAULT_CONFIG = {
     "device": "cpu",
     "epochs": 50,
     "input_size": (256, 256),
+    "transform": "resize",
     "lr": None,
     "mask_threshold": 0.5,
     "num_classes": 2,
@@ -108,17 +117,37 @@ def _run_stream(config: dict[str, Any], *, source: str):
 
 
 def _train(config: dict[str, Any]):
-    request = TrainSegmentationRequest.from_config(config)
+    request_config = dict(config)
+    explicit = set(config.get("_explicit_options") or ())
+    if request_config.get("dataset_s3_uri") and "dataset_path" not in explicit:
+        request_config["dataset_path"] = ""
+    request = TrainSegmentationRequest.from_config(request_config)
     reporter = _reporter(config)
+    train_all = request.model in MODEL_GROUP_NAMES
+    if train_all:
+        validate_all_models_request(request)
+
+    def trainer_factory(resolved: TrainSegmentationRequest):
+        if train_all:
+            return TrainAllSegmentationModels(
+                resolved,
+                reporter=reporter,
+                allow_dataset_source_manifest=bool(resolved.dataset_s3_uri),
+            )
+        return TrainSegmentationModel(resolved, reporter=reporter)
+
+    def artifact_dir_resolver(resolved: TrainSegmentationRequest) -> Path:
+        if train_all:
+            return Path(str(resolved.output_path)).expanduser()
+        return resolve_train_output_paths(
+            resolved.to_config(), model_name=resolve_model_name(resolved.to_config())
+        )["output_dir"]
+
     return TrainWithDatasetSource(
         request,
-        trainer_factory=lambda resolved: TrainSegmentationModel(
-            resolved, reporter=reporter
-        ),
+        trainer_factory=trainer_factory,
         root_resolver=segmentation_dataset_root,
-        artifact_dir_resolver=lambda resolved: resolve_train_output_paths(
-            resolved.to_config(), model_name=resolve_model_name(resolved.to_config())
-        )["output_dir"],
+        artifact_dir_resolver=artifact_dir_resolver,
         profile=config.get("profile"),
         reporter=reporter,
     ).execute()
@@ -154,7 +183,12 @@ def run_segmentation(mode_config: dict[str, Any]) -> Any:
         return ACTION_HANDLERS["ls-models"](config)
 
     config["model"] = mode_config.get("model") or DEFAULT_MODEL
+    if config["model"] in MODEL_GROUP_NAMES and config["action"] != "train":
+        raise MLXUserError(
+            f"Segmentation --model {config['model']} is supported only with --action train."
+        )
     config["input_size"] = tuple(config.get("input_size", (config["width"], config["height"])))
+    config["transform"] = normalize_segmentation_transform(config.get("transform"))
 
     if config.get("output_format") != "json":
         print_segmentation_config_summary(config["model"], config)

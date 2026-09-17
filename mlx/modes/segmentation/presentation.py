@@ -126,6 +126,37 @@ class RichSegmentationReporter:
                 )
             console.print(class_table)
             return
+        if event_name == "segmentation_all_models_complete":
+            table = Table(
+                title="Segmentation All-Model Leaderboard",
+                show_lines=True,
+            )
+            for heading, justify in (
+                ("Rank", "right"),
+                ("Model", "left"),
+                ("Best Val Loss", "right"),
+                ("Foreground Dice", "right"),
+                ("Foreground IoU", "right"),
+                ("Mean IoU", "right"),
+                ("Pixel Accuracy", "right"),
+                ("Test Loss", "right"),
+            ):
+                table.add_column(heading, justify=justify)
+            for row in payload["rows"]:
+                table.add_row(
+                    str(row["rank"]),
+                    str(row["model"]),
+                    _format_metric(row.get("best_validation_loss")),
+                    _format_metric(row.get("mean_foreground_dice")),
+                    _format_metric(row.get("mean_foreground_iou")),
+                    _format_metric(row.get("mean_iou")),
+                    _format_metric(row.get("pixel_accuracy")),
+                    _format_metric(row.get("cross_entropy_loss")),
+                )
+            console.print(table)
+            print_success(event.message)
+            print_info(f"All-model artifacts: {payload['output_dir']}")
+            return
         if event_name == "segmentation_dataset_summary":
             table = Table(title="Segmentation Pair Summary", show_lines=True)
             table.add_column("Directory", style="cyan")

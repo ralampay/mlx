@@ -63,6 +63,11 @@ def build_parser() -> RichArgumentParser:
     parser.add_argument("--backbone", default=None)
     parser.add_argument("--height", type=int, default=256)
     parser.add_argument("--width", type=int, default=256)
+    parser.add_argument(
+        "--transform",
+        choices=("resize", "random-crop", "center-crop"),
+        default="resize",
+    )
     parser.add_argument("--device", default="cpu")
     parser.add_argument("--action", default=None)
     parser.add_argument("--embedding-size", type=int, default=4096, dest="embedding_size")
@@ -316,6 +321,8 @@ def _render_help() -> None:
     usage.add_row("python -m mlx --mode segmentation --action train --dataset ./dataset --model unet --output unet-seg.pt")
     usage.add_row("python -m mlx --mode segmentation --action train --dataset ./dataset --model unet-resnet18 --pretrained --output ./unet-resnet18")
     usage.add_row("python -m mlx --mode segmentation --action train --dataset ./dataset --model unet-draxnet-sknet --output ./unet-draxnet-sknet")
+    usage.add_row("python -m mlx --mode segmentation --action train --model all --dataset-s3-uri s3://my-datasets/segmentation.zip --output ./all-segmentation-models")
+    usage.add_row("python -m mlx --mode segmentation --action train --model all-small --dataset ./dataset --transform random-crop --width 512 --height 512 --output ./small-segmentation-models")
     usage.add_row("python -m mlx --mode segmentation --action benchmark --dataset ./dataset --model-path ./unet-seg.pt --output ./benchmark-results")
     usage.add_row("python -m mlx --mode segmentation --action ls-models")
     usage.add_row("python -m mlx --mode segmentation --action infer-image --model-path ./unet-seg.pt --input-img ./sample.jpg")
@@ -351,7 +358,7 @@ def _render_help() -> None:
     )
     options.add_row("--rebuild-image", "False", "Force a new content-tagged SageMaker image build and ECR push.")
     options.add_row("--provider", "ultralytics", "Object-detection provider: ultralytics or libreyolo.")
-    options.add_row("--model", "None", "Provider-specific model identifier, YAML path, or architecture name.")
+    options.add_row("--model", "None", "Provider-specific model identifier or architecture name; segmentation train also accepts all and all-small.")
     options.add_row("--backbone", "mode-specific", "Feature backbone used by one-class image recognition.")
     options.add_row("--action", "mode-specific", "Sub-action such as train, ls-models, infer-video, convert, benchmark, or build-dataset.")
     options.add_row("--dataset", "./tmp/dataset", "Local dataset source. Its layout and supported aliases are mode-specific.")
@@ -376,6 +383,7 @@ def _render_help() -> None:
     options.add_row("--input-img", "/tmp/image.jpg", "Input image for classification or one-class recognition inference.")
     options.add_row("--device", "cpu", "Execution device such as cpu or cuda:0.")
     options.add_row("--height / --width", "256 / 256", "Image size controls.")
+    options.add_row("--transform", "resize", "Segmentation spatial transform: resize, random-crop, or center-crop. Random crops become center crops for validation and test.")
     options.add_row("--batch-size", "1", "Training or evaluation batch size.")
     options.add_row("--epochs", "100", "Training epoch count.")
     options.add_row("--num-pairs", "100", "One-shot image-classification pairs per label for training or benchmarking.")

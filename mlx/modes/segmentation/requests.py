@@ -21,6 +21,7 @@ class SegmentationRequest(ConfigRequest):
     width: int = 256
     height: int = 256
     input_size: tuple[int, int] = (256, 256)
+    transform: str = "resize"
     batch_size: int = 4
     epochs: int = 50
     lr: Optional[float] = None

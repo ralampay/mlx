@@ -133,6 +133,7 @@ def checkpoint_payload(
         "model_config": dict(config),
         "model_name": model_name,
         "num_classes": num_classes,
+        "transform": str(config.get("transform", "resize")),
         "palette": config.get("palette") or default_palette(num_classes),
         "state_dict": model.state_dict(),
     }
@@ -213,6 +214,11 @@ def load_training_checkpoint(
             tuple(checkpoint.get("input_size") or ()),
             tuple(config.get("input_size", (256, 256))),
         ),
+        (
+            "transform",
+            str(checkpoint.get("transform", "resize")),
+            str(config.get("transform", "resize")),
+        ),
         ("color mode", bool(checkpoint.get("colored", True)), bool(config.get("colored", True))),
     )
     for label, actual, expected in checks:
@@ -268,6 +274,9 @@ def load_checkpoint_bundle(config: dict[str, Any]) -> tuple[Any, dict[str, Any]]
     runtime_config["input_size"] = tuple(
         checkpoint.get("input_size", runtime_config.get("input_size", (256, 256)))
     )
+    runtime_config["transform"] = str(
+        checkpoint.get("transform", runtime_config.get("transform", "resize"))
+    )
     runtime_config["num_classes"] = int(
         checkpoint.get("num_classes", runtime_config.get("num_classes", 2))
     )
@@ -285,6 +294,7 @@ def load_checkpoint_bundle(config: dict[str, Any]) -> tuple[Any, dict[str, Any]]
         "class_names": checkpoint.get("class_names"),
         "colored": runtime_config["colored"],
         "input_size": runtime_config["input_size"],
+        "transform": runtime_config["transform"],
         "mask_threshold": float(checkpoint.get("mask_threshold", config.get("mask_threshold", 0.5))),
         "model_name": model_name,
         "num_classes": runtime_config["num_classes"],

@@ -2,7 +2,7 @@
 
 MLX is a command-line toolkit for machine-learning workflows. It provides a shared
 CLI and project conventions while keeping object detection, image classification,
-one-class image recognition, video anomaly detection, segmentation, NLP, and tracking logic in
+one-class image recognition, video anomaly detection, segmentation, saliency mapping, NLP, and tracking logic in
 focused modules.
 
 ## Contents
@@ -16,6 +16,7 @@ focused modules.
 - [One-class image recognition](#one-class-image-recognition)
 - [Video anomaly detection](#video-anomaly-detection)
 - [Segmentation](#segmentation)
+- [Saliency mapping](#saliency-mapping)
 - [NLP embeddings](#nlp-embeddings)
 - [Documentation](#documentation)
 
@@ -114,6 +115,7 @@ Available CLI modes are:
 | `image_recognition_oc` | `train`, AWS `train-all`/`benchmark`/`resume`/`status`/`stop`, `infer-image`, `benchmark`, `ls-models` |
 | `video_anomaly_detection` | `train`, AWS `train-all`/`status`/`resume`, `benchmark`, `infer-video`, `ls-models` |
 | `segmentation` | `train`, `test`, `benchmark`, `infer-image`, `infer-camera`, `infer-video`, `build-dataset`, `ls-models` |
+| `saliency_mapping` (`saliency-mapping`) | `train`, `test`, `benchmark`, `infer-image`, `build-dataset`, `ls-models` |
 | `nlp` | `embed` |
 
 Hyphenated mode names such as `object-detection`, `image-classification`,
@@ -446,6 +448,29 @@ deterministic center crops for validation, test benchmarking, and samples.
 See the [segmentation guide](./docs/segmentation/README.md) for dataset format,
 models, metrics, artifacts, and inference workflows.
 
+## Saliency mapping
+
+Package: `mlx.modes.saliency_mapping`
+
+This still-image salient-object-detection mode reuses every registered segmentation
+U-Net encoder and decoder with a one-channel logits head. Sigmoid probabilities and
+grayscale targets remain continuous in `[0, 1]` rather than becoming class IDs.
+
+```bash
+python -m mlx --mode saliency-mapping --action ls-models
+python -m mlx --mode saliency-mapping --action test --model all-small
+python -m mlx --mode saliency-mapping --action train \
+  --model unet-drax_mobilenet_v3_large-average \
+  --dataset ./data/duts --output ./artifacts/saliency
+```
+
+Training uses weighted BCE-with-logits + SSIM + IoU and selects the best checkpoint
+by lowest validation MAE. Benchmarks export per-image and aggregate MAE, max/mean
+F-beta (`beta²=0.3`), threshold and precision-recall data, runtime measurements,
+continuous predictions, heatmaps, overlays, and sample panels. `all-small` has
+exactly the same members as segmentation, while `all` selects every registered
+saliency architecture. See the [saliency-mapping guide](./docs/saliency-mapping/README.md).
+
 ## NLP embeddings
 
 Package: `mlx.modes.nlp`
@@ -474,3 +499,4 @@ MLX derives an output name beside the input CSV.
 - [Image classification](./docs/image_classification/README.md)
 - [One-class image recognition](./docs/image_recognition_oc/README.md)
 - [Segmentation](./docs/segmentation/README.md)
+- [Saliency mapping](./docs/saliency-mapping/README.md)

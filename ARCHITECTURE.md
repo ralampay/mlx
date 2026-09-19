@@ -69,6 +69,8 @@ mlx/
     │   ├── streaming.py          injected frame source/sink contracts and OpenCV adapters
     │   ├── visualization.py      pure mask coloring, blending, and view composition
     │   └── models/backbone_factory.py  isolated classifier-backbone adapter
+    ├── saliency_mapping/         still-image SOD data, loss, metrics, training, inference, and artifacts
+    │   └── models/               one-channel registry over shared segmentation U-Net construction
     ├── object_detection/
     │   ├── models.py             provider-neutral detection values and detector protocol
     │   ├── providers.py          lazy provider registry and provider protocol
@@ -92,6 +94,7 @@ The primary workflow commands are:
 | Image classification | `TrainImageClassificationModel`, `SmokeTestImageClassificationModel`, `BenchmarkImageClassification`, `InferImageClassification`, `GenerateImageClassificationCams`, `BuildImageClassificationDataset`, `ListImageClassificationModels`, AWS submit/status/stop/resume commands |
 | One-class image recognition | `TrainImageOneClassModel`, `BenchmarkImageOneClass`, `InferImageOneClass`, `ListImageOneClassModels`, AWS submit/status/stop/resume commands |
 | Segmentation | `TrainSegmentationModel`, `TrainAllSegmentationModels`, `GenerateSegmentationSamples`, `SmokeTestSegmentationModel`, `BenchmarkSegmentation`, `InferSegmentationImage`, `RunSegmentationStreamInference`, `BuildSegmentationDataset`, `ListSegmentationModels` |
+| Saliency mapping | `TrainSaliencyModel`, `TrainSaliencyModelGroup`, `GenerateSaliencySamples`, `SmokeTestSaliencyModels`, `BenchmarkSaliencyMapping`, `BenchmarkSaliencyModelGroup`, `InferSaliencyImage`, `BuildSaliencyDataset`, `ListSaliencyModels` |
 | Video anomaly detection | `TrainVideoAnomalyModel`, `BenchmarkVideoAnomalyModel`, `InferVideoAnomaly`, `ListVideoAnomalyModels`, AWS all-model submit/status/resume commands |
 | Object detection | `TrainObjectDetectionModel`, `FineTuneObjectDetectionModel`, `BenchmarkObjectDetectionModel`, `CreateObjectDetector`, `ConvertObjectDetectionModel`, `ListObjectDetectionModels`, `RunObjectDetectionStream`, AWS submit/status/stop/resume and best-model locator commands |
 | Tracking | `CreateTrackingAlgorithm`, `RunObjectDetectionTrackingCommand`, `RunTrackByDetectionCommand`, `RunTrackingVideo`, `ExportMOTFromClassAwareTracking`, `BenchmarkMOTTracking`, `ExportTrackingReplay` |
@@ -100,6 +103,11 @@ The primary workflow commands are:
 Large commands should keep `execute()` readable by delegating cohesive steps to private methods
 or focused helpers. Stateless tensor transforms, metrics, serialization helpers, and model
 builders remain functions.
+
+Saliency mapping deliberately depends on the segmentation model construction boundary: its
+registry mirrors segmentation model identifiers and groups, then requests the shared U-Net
+family with one output channel. Saliency-owned data, sigmoid application, BCE/SSIM/IoU loss,
+SOD metrics, checkpoints, artifacts, and presentation do not flow back into segmentation.
 
 ## Portable Training Dataset Sources
 

@@ -66,6 +66,14 @@ MODE_DESCRIPTORS: tuple[ModeDescriptor, ...] = (
         purpose="Semantic segmentation workflows for U-Net style models",
     ),
     ModeDescriptor(
+        name="saliency_mapping",
+        aliases=("saliency-mapping",),
+        runner="mlx.modes.saliency_mapping.runner:run_saliency_mapping",
+        default_action="test",
+        actions=("train", "test", "benchmark", "infer-image", "build-dataset", "ls-models"),
+        purpose="Still-image single-channel salient-object detection",
+    ),
+    ModeDescriptor(
         name="video_anomaly_detection",
         aliases=("video-anomaly-detection",),
         runner="mlx.modes.video_anomaly_detection.runner:run_video_anomaly_detection",

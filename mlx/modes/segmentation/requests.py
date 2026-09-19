@@ -47,6 +47,7 @@ class BenchmarkSegmentationRequest(SegmentationRequest):
     action: str = "benchmark"
     boundary_tolerance: int = 2
     calibration_bins: int = 15
+    curve_bins: int = 4096
     threshold_steps: int = 101
     plots: bool = True
 

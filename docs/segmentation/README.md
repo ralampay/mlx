@@ -379,6 +379,12 @@ The benchmark reports and saves:
 - binary threshold analysis controlled by `--threshold-steps` and
   `--mask-threshold`
 
+Dataset-wide metrics are accumulated one batch at a time, so benchmark memory
+does not grow with the number of evaluated pixels. ROC and precision-recall
+curves use bounded score histograms controlled by `--curve-bins` (default
+`4096`); their AUC/AP values are approximations, while confusion, calibration,
+boundary, loss, MCC, and configured-threshold metrics remain exact.
+
 Research output includes `metrics.csv`, `metrics.json`, `class_metrics.csv`,
 `image_metrics.csv`, `timing.csv`, `run_metadata.json`, confusion matrices,
 ROC/PR/calibration curve data and plots, threshold artifacts for binary models,

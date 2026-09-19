@@ -257,6 +257,12 @@ def build_parser() -> RichArgumentParser:
         dest="calibration_bins",
     )
     parser.add_argument(
+        "--curve-bins",
+        type=int,
+        default=4096,
+        dest="curve_bins",
+    )
+    parser.add_argument(
         "--threshold-steps",
         type=int,
         default=101,
@@ -466,6 +472,7 @@ def _render_help() -> None:
     options.add_row("--split", "test", "Object-detection or segmentation dataset split used by benchmark: train, val, or test.")
     options.add_row("--boundary-tolerance", "2", "Boundary-metric matching tolerance in resized-image pixels.")
     options.add_row("--calibration-bins", "15", "Confidence bins used for segmentation calibration metrics.")
+    options.add_row("--curve-bins", "4096", "Score bins used for bounded-memory segmentation ROC/PR metrics.")
     options.add_row("--threshold-steps", "101", "Number of binary segmentation thresholds evaluated by benchmark.")
     options.add_row("--mask-threshold", "0.5", "Threshold used when rendering binary segmentation masks.")
     options.add_row("--overlay-alpha", "0.45", "Blend strength for segmentation overlays.")

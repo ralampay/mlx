@@ -8,7 +8,6 @@ from typing import Any
 import cv2
 import numpy as np
 import torch
-from sklearn.metrics import matthews_corrcoef
 from torch import nn
 from torch.utils.data import DataLoader
 
@@ -22,13 +21,9 @@ from mlx.modes.segmentation.data import (
 )
 from mlx.modes.segmentation.metrics import (
     SegmentationResearchMetrics,
+    StreamingSegmentationMetrics,
     aggregate_boundary_metrics,
-    aggregate_confusion_metrics,
-    class_metrics_from_confusion,
-    confusion_matrix_from_arrays,
     per_image_metrics,
-    probability_metrics,
-    threshold_sweep,
 )
 from mlx.modes.segmentation.visualization import blend_overlay, colorize_mask
 from mlx.modes.segmentation.research import (
@@ -59,6 +54,7 @@ class BenchmarkSegmentation:
         self.split = str(config.get("split", "test"))
         self.boundary_tolerance = int(config.get("boundary_tolerance", 2))
         self.calibration_bins = int(config.get("calibration_bins", 15))
+        self.curve_bins = int(config.get("curve_bins", 4096))
         self.threshold_steps = int(config.get("threshold_steps", 101))
         self.reporter = reporter or NullWorkflowReporter()
 
@@ -126,6 +122,8 @@ class BenchmarkSegmentation:
             raise MLXUserError("--boundary-tolerance must be zero or greater.")
         if self.calibration_bins < 2:
             raise MLXUserError("--calibration-bins must be at least 2.")
+        if self.curve_bins < 2:
+            raise MLXUserError("--curve-bins must be at least 2.")
         if self.threshold_steps < 2:
             raise MLXUserError("--threshold-steps must be at least 2.")
 
@@ -142,9 +140,13 @@ class BenchmarkSegmentation:
             self.config.get("mask_threshold", metadata.get("mask_threshold", 0.5))
         )
         criterion = nn.CrossEntropyLoss(reduction="sum")
-        target_batches: list[np.ndarray] = []
-        prediction_batches: list[np.ndarray] = []
-        probability_batches: list[np.ndarray] = []
+        metric_accumulator = StreamingSegmentationMetrics(
+            num_classes=num_classes,
+            calibration_bins=self.calibration_bins,
+            curve_bins=self.curve_bins,
+            threshold_steps=self.threshold_steps,
+            configured_threshold=configured_threshold,
+        )
         image_rows: list[dict[str, Any]] = []
         forward_times: list[float] = []
         total_loss = 0.0
@@ -154,7 +156,7 @@ class BenchmarkSegmentation:
             torch.cuda.reset_peak_memory_stats()
 
         with torch.no_grad():
-            for batch_index, (images, masks) in enumerate(loader, start=1):
+            for loader_batch_index, (images, masks) in enumerate(loader, start=1):
                 images = images.to(self.device)
                 masks_device = masks.to(self.device)
                 self._synchronize()
@@ -173,22 +175,24 @@ class BenchmarkSegmentation:
                 targets_np = masks.numpy().astype(np.int64, copy=False)
                 predictions_np = predictions.cpu().numpy().astype(np.int64, copy=False)
                 probabilities_np = probabilities.permute(0, 2, 3, 1).cpu().numpy()
-                target_batches.append(targets_np)
-                prediction_batches.append(predictions_np)
-                probability_batches.append(probabilities_np)
+                metric_accumulator.update(
+                    targets_np,
+                    predictions_np,
+                    probabilities_np,
+                )
 
                 per_sample_time = elapsed / max(1, len(images))
-                for batch_index in range(len(images)):
-                    image_path, mask_path = dataset.samples[sample_offset + batch_index]
+                for sample_index in range(len(images)):
+                    image_path, mask_path = dataset.samples[sample_offset + sample_index]
                     row: dict[str, Any] = {
                         "image": str(image_path),
                         "mask": str(mask_path),
-                        "width": int(targets_np[batch_index].shape[1]),
-                        "height": int(targets_np[batch_index].shape[0]),
+                        "width": int(targets_np[sample_index].shape[1]),
+                        "height": int(targets_np[sample_index].shape[0]),
                         "inference_ms": per_sample_time * 1000.0,
                     }
-                    sample_probabilities = probabilities_np[batch_index]
-                    sample_target = targets_np[batch_index]
+                    sample_probabilities = probabilities_np[sample_index]
+                    sample_target = targets_np[sample_index]
                     selected_probabilities = sample_probabilities[
                         np.arange(sample_target.shape[0])[:, None],
                         np.arange(sample_target.shape[1])[None, :],
@@ -217,8 +221,8 @@ class BenchmarkSegmentation:
                     )
                     row.update(
                         per_image_metrics(
-                            targets_np[batch_index],
-                            predictions_np[batch_index],
+                            targets_np[sample_index],
+                            predictions_np[sample_index],
                             class_names=class_names,
                             boundary_tolerance=self.boundary_tolerance,
                         )
@@ -230,47 +234,39 @@ class BenchmarkSegmentation:
                         self._write_prediction_images(
                             self._output_dir(),
                             image_path,
-                            targets_np[batch_index],
-                            predictions_np[batch_index],
+                            targets_np[sample_index],
+                            predictions_np[sample_index],
                             metadata,
                         )
+                    del sample_probabilities, sample_target, selected_probabilities
                 sample_offset += len(images)
                 emit(
                     self.reporter,
                     "progress",
-                    f"Benchmarked segmentation batch {batch_index} of {len(loader)}.",
-                    current=batch_index,
+                    f"Benchmarked segmentation batch {loader_batch_index} of {len(loader)}.",
+                    current=loader_batch_index,
                     total=len(loader),
+                )
+                del (
+                    images,
+                    masks,
+                    masks_device,
+                    logits,
+                    probabilities,
+                    predictions,
+                    targets_np,
+                    predictions_np,
+                    probabilities_np,
                 )
 
         wall_seconds = time.perf_counter() - wall_start
-        targets = np.concatenate(target_batches, axis=0)
-        predictions = np.concatenate(prediction_batches, axis=0)
-        probabilities = np.concatenate(probability_batches, axis=0)
-        matrix = confusion_matrix_from_arrays(targets, predictions, num_classes)
-        class_rows = class_metrics_from_confusion(matrix, class_names)
-        metrics = aggregate_confusion_metrics(matrix, class_rows)
-        metrics["cross_entropy_loss"] = total_loss / max(1, targets.size)
-        metrics["multiclass_mcc"] = float(
-            matthews_corrcoef(targets.reshape(-1), predictions.reshape(-1))
+        metrics, class_rows, curves, threshold_rows = metric_accumulator.finalize(
+            class_names
         )
-        probability_summary, curves = probability_metrics(
-            targets,
-            probabilities,
-            class_rows,
-            calibration_bins=self.calibration_bins,
+        metrics["cross_entropy_loss"] = total_loss / max(
+            1, metric_accumulator.pixel_count
         )
-        metrics.update(probability_summary)
         metrics.update(aggregate_boundary_metrics(image_rows, class_names))
-        threshold_rows: list[dict[str, float]] = []
-        if num_classes == 2:
-            threshold_rows, threshold_summary = threshold_sweep(
-                targets,
-                probabilities[..., 1],
-                threshold_steps=self.threshold_steps,
-                configured_threshold=configured_threshold,
-            )
-            metrics.update(threshold_summary)
 
         timing = self._timing_metrics(
             wall_seconds=wall_seconds,
@@ -279,14 +275,14 @@ class BenchmarkSegmentation:
                 float(row["inference_ms"]) / 1000.0 for row in image_rows
             ],
             image_count=len(dataset),
-            pixel_count=int(targets.size),
+            pixel_count=metric_accumulator.pixel_count,
         )
         return (
             SegmentationResearchMetrics(
                 metrics=metrics,
                 class_rows=class_rows,
                 image_rows=image_rows,
-                confusion_matrix=matrix,
+                confusion_matrix=metric_accumulator.confusion_matrix,
                 curves=curves,
                 threshold_rows=threshold_rows,
             ),
@@ -439,6 +435,7 @@ class BenchmarkSegmentation:
                 "input_size": metadata["input_size"],
                 "transform": metadata.get("transform", "resize"),
                 "num_classes": metadata["num_classes"],
+                "curve_approximation_bins": self.curve_bins,
                 "device": self.device,
                 "device_name": self._device_name(),
                 "python_version": platform.python_version(),

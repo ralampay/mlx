@@ -527,6 +527,13 @@ deterministic samples across the sorted split, and refreshes mode-owned original
 ground-truth, prediction, overlay, and labeled-panel artifacts. Full test metrics remain the
 responsibility of `BenchmarkSegmentation`.
 
+`BenchmarkSegmentation` feeds each inference batch into a mode-owned metrics accumulator rather
+than retaining dataset-wide target, prediction, and probability tensors. Confusion, calibration,
+loss, MCC, and configured binary-threshold statistics remain exact; bounded per-class score
+histograms produce approximate ROC/PR curves and AUC/AP values with configurable resolution. Its
+memory use therefore depends on batch size, class count, and histogram resolution rather than
+dataset pixel count.
+
 `TrainAllSegmentationModels` freezes the sorted segmentation registry for one sequential,
 fail-fast local run. It requires scratch initialization, a complete test partition, and a new or
 empty directory output. Each model owns a child directory; its lowest-validation-loss checkpoint

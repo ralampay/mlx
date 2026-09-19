@@ -193,6 +193,368 @@ def aggregate_confusion_metrics(
     }
 
 
+def multiclass_mcc_from_confusion(matrix: np.ndarray) -> float:
+    """Compute multiclass MCC without retaining the original pixel labels."""
+    sample_count = float(matrix.sum())
+    correct = float(np.trace(matrix))
+    true_totals = matrix.sum(axis=1).astype(np.float64, copy=False)
+    predicted_totals = matrix.sum(axis=0).astype(np.float64, copy=False)
+    covariance = correct * sample_count - float(
+        np.dot(true_totals, predicted_totals)
+    )
+    true_covariance = sample_count**2 - float(np.dot(true_totals, true_totals))
+    predicted_covariance = sample_count**2 - float(
+        np.dot(predicted_totals, predicted_totals)
+    )
+    denominator = np.sqrt(true_covariance * predicted_covariance)
+    return float(covariance / denominator) if denominator else 0.0
+
+
+class StreamingSegmentationMetrics:
+    """Accumulate dataset-wide segmentation metrics with bounded memory."""
+
+    def __init__(
+        self,
+        *,
+        num_classes: int,
+        calibration_bins: int,
+        curve_bins: int,
+        threshold_steps: int,
+        configured_threshold: float,
+    ) -> None:
+        self.num_classes = num_classes
+        self.calibration_bins = calibration_bins
+        self.curve_bins = curve_bins
+        self.pixel_count = 0
+        self.confusion_matrix = np.zeros(
+            (num_classes, num_classes), dtype=np.int64
+        )
+        self._negative_log_likelihood_sum = 0.0
+        self._confidence_sum = 0.0
+        self._entropy_sum = 0.0
+        self._class_brier_sums = np.zeros(num_classes, dtype=np.float64)
+        self._calibration_counts = np.zeros(calibration_bins, dtype=np.int64)
+        self._calibration_confidence_sums = np.zeros(
+            calibration_bins, dtype=np.float64
+        )
+        self._calibration_correct_counts = np.zeros(
+            calibration_bins, dtype=np.int64
+        )
+        histogram_shape = (num_classes, curve_bins)
+        self._positive_histograms = np.zeros(histogram_shape, dtype=np.int64)
+        self._negative_histograms = np.zeros(histogram_shape, dtype=np.int64)
+        self.thresholds = (
+            np.asarray(
+                sorted(
+                    set(
+                        np.linspace(0.0, 1.0, threshold_steps).tolist()
+                        + [configured_threshold]
+                    )
+                ),
+                dtype=np.float64,
+            )
+            if num_classes == 2
+            else np.asarray([], dtype=np.float64)
+        )
+        self._threshold_true_positive = np.zeros(
+            len(self.thresholds), dtype=np.int64
+        )
+        self._threshold_false_positive = np.zeros(
+            len(self.thresholds), dtype=np.int64
+        )
+        self._binary_positive_count = 0
+        self._binary_negative_count = 0
+
+    def update(
+        self,
+        targets: np.ndarray,
+        predictions: np.ndarray,
+        probabilities: np.ndarray,
+    ) -> None:
+        flattened_targets = targets.reshape(-1).astype(np.int64, copy=False)
+        flattened_predictions = predictions.reshape(-1).astype(np.int64, copy=False)
+        flattened_probabilities = probabilities.reshape(-1, self.num_classes)
+        if len(flattened_targets) != len(flattened_probabilities):
+            raise ValueError(
+                "Segmentation targets and probabilities must have equal pixel counts."
+            )
+
+        batch_pixel_count = len(flattened_targets)
+        self.pixel_count += batch_pixel_count
+        self.confusion_matrix += confusion_matrix_from_arrays(
+            flattened_targets,
+            flattened_predictions,
+            self.num_classes,
+        )
+        selected = np.clip(
+            np.take_along_axis(
+                flattened_probabilities,
+                flattened_targets[:, None],
+                axis=1,
+            ).reshape(-1),
+            1e-12,
+            1.0,
+        ).astype(np.float64, copy=False)
+        self._negative_log_likelihood_sum += float(-np.log(selected).sum())
+        confidence = flattened_probabilities.max(axis=1)
+        probability_predictions = flattened_probabilities.argmax(axis=1)
+        self._confidence_sum += float(confidence.sum(dtype=np.float64))
+
+        calibration_indices = np.clip(
+            np.searchsorted(
+                np.linspace(0.0, 1.0, self.calibration_bins + 1),
+                confidence,
+                side="right",
+            )
+            - 1,
+            0,
+            self.calibration_bins - 1,
+        )
+        self._calibration_counts += np.bincount(
+            calibration_indices, minlength=self.calibration_bins
+        )
+        self._calibration_confidence_sums += np.bincount(
+            calibration_indices,
+            weights=confidence,
+            minlength=self.calibration_bins,
+        )
+        self._calibration_correct_counts += np.bincount(
+            calibration_indices,
+            weights=(probability_predictions == flattened_targets).astype(np.int64),
+            minlength=self.calibration_bins,
+        ).astype(np.int64)
+
+        for class_index in range(self.num_classes):
+            scores = flattened_probabilities[:, class_index]
+            scores_float64 = scores.astype(np.float64, copy=False)
+            binary_targets = flattened_targets == class_index
+            self._class_brier_sums[class_index] += float(
+                np.square(scores_float64 - binary_targets).sum()
+            )
+            self._entropy_sum += float(
+                -np.sum(
+                    scores_float64
+                    * np.log(np.clip(scores_float64, 1e-12, 1.0))
+                )
+            )
+            score_bins = np.minimum(
+                (scores * self.curve_bins).astype(np.int64),
+                self.curve_bins - 1,
+            )
+            self._positive_histograms[class_index] += np.bincount(
+                score_bins[binary_targets], minlength=self.curve_bins
+            )
+            self._negative_histograms[class_index] += np.bincount(
+                score_bins[~binary_targets], minlength=self.curve_bins
+            )
+
+        if self.num_classes == 2:
+            self._update_threshold_counts(
+                flattened_targets,
+                flattened_probabilities[:, 1],
+            )
+
+    def finalize(
+        self,
+        class_names: list[str],
+    ) -> tuple[
+        dict[str, float],
+        list[dict[str, Any]],
+        dict[str, list[dict[str, float]]],
+        list[dict[str, float]],
+    ]:
+        class_rows = class_metrics_from_confusion(self.confusion_matrix, class_names)
+        metrics = aggregate_confusion_metrics(self.confusion_matrix, class_rows)
+        metrics["multiclass_mcc"] = multiclass_mcc_from_confusion(
+            self.confusion_matrix
+        )
+        metrics.update(self._probability_metrics(class_rows))
+        curves = {
+            "calibration": self._calibration_rows(),
+            "roc": [],
+            "precision_recall": [],
+        }
+        self._add_curve_metrics(metrics, class_rows, curves)
+        threshold_rows: list[dict[str, float]] = []
+        if self.num_classes == 2:
+            threshold_rows, threshold_summary = _threshold_rows_from_counts(
+                self.thresholds,
+                self._threshold_true_positive,
+                self._threshold_false_positive,
+                positive_count=self._binary_positive_count,
+                negative_count=self._binary_negative_count,
+            )
+            metrics.update(threshold_summary)
+        return metrics, class_rows, curves, threshold_rows
+
+    def _update_threshold_counts(
+        self,
+        targets: np.ndarray,
+        foreground_scores: np.ndarray,
+    ) -> None:
+        binary_targets = targets > 0
+        positive_scores = np.sort(foreground_scores[binary_targets])
+        negative_scores = np.sort(foreground_scores[~binary_targets])
+        self._binary_positive_count += len(positive_scores)
+        self._binary_negative_count += len(negative_scores)
+        self._threshold_true_positive += len(positive_scores) - np.searchsorted(
+            positive_scores,
+            self.thresholds,
+            side="left",
+        )
+        self._threshold_false_positive += len(negative_scores) - np.searchsorted(
+            negative_scores,
+            self.thresholds,
+            side="left",
+        )
+
+    def _probability_metrics(
+        self,
+        class_rows: list[dict[str, Any]],
+    ) -> dict[str, float]:
+        denominator = max(1, self.pixel_count)
+        calibration_rows = self._calibration_rows()
+        expected_error = sum(
+            row["count"]
+            / denominator
+            * abs(row["accuracy"] - row["confidence"])
+            for row in calibration_rows
+        )
+        metrics = {
+            "negative_log_likelihood": self._negative_log_likelihood_sum / denominator,
+            "multiclass_brier_score": float(self._class_brier_sums.sum())
+            / denominator,
+            "mean_confidence": self._confidence_sum / denominator,
+            "mean_predictive_entropy": self._entropy_sum / denominator,
+            "expected_calibration_error": float(expected_error),
+            "maximum_calibration_error": float(
+                max(
+                    (
+                        abs(row["accuracy"] - row["confidence"])
+                        for row in calibration_rows
+                    ),
+                    default=0.0,
+                )
+            ),
+            "curve_approximation_bins": float(self.curve_bins),
+        }
+        for class_index, class_row in enumerate(class_rows):
+            slug = metric_slug(str(class_row["class_name"]))
+            metrics[f"brier_{slug}"] = (
+                float(self._class_brier_sums[class_index]) / denominator
+            )
+        return metrics
+
+    def _calibration_rows(self) -> list[dict[str, float]]:
+        rows: list[dict[str, float]] = []
+        for index, count in enumerate(self._calibration_counts):
+            if count == 0:
+                continue
+            rows.append(
+                {
+                    "bin_lower": index / self.calibration_bins,
+                    "bin_upper": (index + 1) / self.calibration_bins,
+                    "count": float(count),
+                    "confidence": float(
+                        self._calibration_confidence_sums[index] / count
+                    ),
+                    "accuracy": float(
+                        self._calibration_correct_counts[index] / count
+                    ),
+                }
+            )
+        return rows
+
+    def _add_curve_metrics(
+        self,
+        metrics: dict[str, float],
+        class_rows: list[dict[str, Any]],
+        curves: dict[str, list[dict[str, float]]],
+    ) -> None:
+        auc_values: list[float] = []
+        ap_values: list[float] = []
+        weights: list[float] = []
+        for class_index, class_row in enumerate(class_rows):
+            positive = self._positive_histograms[class_index]
+            negative = self._negative_histograms[class_index]
+            positive_count = int(positive.sum())
+            negative_count = int(negative.sum())
+            slug = metric_slug(str(class_row["class_name"]))
+            if positive_count == 0 or negative_count == 0:
+                metrics[f"roc_auc_{slug}"] = float("nan")
+                metrics[f"average_precision_{slug}"] = float("nan")
+                metrics[f"pr_auc_{slug}"] = float("nan")
+                continue
+
+            occupied = np.flatnonzero((positive + negative) > 0)[::-1]
+            true_positive = np.cumsum(positive[occupied], dtype=np.int64)
+            false_positive = np.cumsum(negative[occupied], dtype=np.int64)
+            true_positive_rate = true_positive / positive_count
+            false_positive_rate = false_positive / negative_count
+            precision = true_positive / (true_positive + false_positive)
+            recall = true_positive_rate
+            roc_x = np.concatenate(([0.0], false_positive_rate))
+            roc_y = np.concatenate(([0.0], true_positive_rate))
+            pr_recall = np.concatenate(([0.0], recall))
+            pr_precision = np.concatenate(([1.0], precision))
+            roc_auc = float(np.trapezoid(roc_y, roc_x))
+            average_precision = float(
+                np.sum(np.diff(pr_recall) * pr_precision[1:])
+            )
+            pr_auc = float(np.trapezoid(pr_precision, pr_recall))
+            metrics[f"roc_auc_{slug}"] = roc_auc
+            metrics[f"average_precision_{slug}"] = average_precision
+            metrics[f"pr_auc_{slug}"] = pr_auc
+            class_row["roc_auc"] = roc_auc
+            class_row["average_precision"] = average_precision
+            class_row["pr_auc"] = pr_auc
+            auc_values.append(roc_auc)
+            ap_values.append(average_precision)
+            weights.append(float(class_row["support"]))
+
+            curves["roc"].append(
+                {
+                    "class_index": float(class_index),
+                    "false_positive_rate": 0.0,
+                    "true_positive_rate": 0.0,
+                    "threshold": float("inf"),
+                }
+            )
+            curves["precision_recall"].append(
+                {
+                    "class_index": float(class_index),
+                    "recall": 0.0,
+                    "precision": 1.0,
+                    "threshold": float("inf"),
+                }
+            )
+            for offset, bin_index in enumerate(occupied):
+                threshold = float(bin_index / self.curve_bins)
+                curves["roc"].append(
+                    {
+                        "class_index": float(class_index),
+                        "false_positive_rate": float(false_positive_rate[offset]),
+                        "true_positive_rate": float(true_positive_rate[offset]),
+                        "threshold": threshold,
+                    }
+                )
+                curves["precision_recall"].append(
+                    {
+                        "class_index": float(class_index),
+                        "recall": float(recall[offset]),
+                        "precision": float(precision[offset]),
+                        "threshold": threshold,
+                    }
+                )
+
+        metrics["macro_roc_auc"] = nanmean(auc_values)
+        metrics["weighted_roc_auc"] = weighted_nanmean(auc_values, weights)
+        metrics["macro_average_precision"] = nanmean(ap_values)
+        metrics["weighted_average_precision"] = weighted_nanmean(
+            ap_values, weights
+        )
+
+
 def probability_metrics(
     targets: np.ndarray,
     probabilities: np.ndarray,
@@ -506,13 +868,35 @@ def threshold_sweep(
     thresholds = sorted(
         set(np.linspace(0.0, 1.0, threshold_steps).tolist() + [configured_threshold])
     )
-    rows: list[dict[str, float]] = []
+    true_positive: list[int] = []
+    false_positive: list[int] = []
     for threshold in thresholds:
         predicted = scores >= threshold
-        tp = float(((binary_targets == 1) & predicted).sum())
-        fp = float(((binary_targets == 0) & predicted).sum())
-        tn = float(((binary_targets == 0) & ~predicted).sum())
-        fn = float(((binary_targets == 1) & ~predicted).sum())
+        true_positive.append(int(((binary_targets == 1) & predicted).sum()))
+        false_positive.append(int(((binary_targets == 0) & predicted).sum()))
+    return _threshold_rows_from_counts(
+        np.asarray(thresholds, dtype=np.float64),
+        np.asarray(true_positive, dtype=np.int64),
+        np.asarray(false_positive, dtype=np.int64),
+        positive_count=int(binary_targets.sum()),
+        negative_count=int((binary_targets == 0).sum()),
+    )
+
+
+def _threshold_rows_from_counts(
+    thresholds: np.ndarray,
+    true_positive: np.ndarray,
+    false_positive: np.ndarray,
+    *,
+    positive_count: int,
+    negative_count: int,
+) -> tuple[list[dict[str, float]], dict[str, float]]:
+    rows: list[dict[str, float]] = []
+    for index, threshold in enumerate(thresholds):
+        tp = float(true_positive[index])
+        fp = float(false_positive[index])
+        tn = float(negative_count - false_positive[index])
+        fn = float(positive_count - true_positive[index])
         precision = safe_divide(tp, tp + fp)
         recall = safe_divide(tp, tp + fn)
         specificity = safe_divide(tn, tn + fp)

@@ -22,12 +22,14 @@ class TrainSaliencyModelGroup:
         request: TrainSaliencyRequest,
         *,
         reporter: WorkflowReporter | None = None,
+        model_registry=None,
         trainer_factory: TrainerFactory | None = None,
     ) -> None:
+        self.model_registry = model_registry
         self.request = request
         self.reporter = reporter or NullWorkflowReporter()
         self.trainer_factory = trainer_factory or (
-            lambda request, reporter: TrainSaliencyModel(request, reporter=reporter)
+            lambda request, reporter: TrainSaliencyModel(request, reporter=reporter, **({"model_registry": model_registry} if model_registry is not None else {}))
         )
 
     def execute(self) -> dict[str, Any]:
@@ -51,7 +53,7 @@ class TrainSaliencyModelGroup:
             raise MLXUserError("Grouped saliency training requires paired test/images and test/masks.")
         root.mkdir(parents=True, exist_ok=True)
         rows = []
-        names = grouped_model_names(str(self.request.model))
+        names = grouped_model_names(str(self.request.model), **({"registry": self.model_registry} if self.model_registry is not None else {}))
         for index, model_name in enumerate(names, start=1):
             emit(
                 self.reporter,
@@ -78,6 +80,7 @@ class TrainSaliencyModelGroup:
                         }
                     ),
                     reporter=self.reporter,
+                    **({"model_registry": self.model_registry} if self.model_registry is not None else {}),
                 ).execute()
                 row = {
                     "model": model_name,

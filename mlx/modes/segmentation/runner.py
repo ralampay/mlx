@@ -126,6 +126,8 @@ def _run_stream(config: dict[str, Any], *, source: str):
 
 
 def _train(config: dict[str, Any]):
+    from mlx.core.configuration import load_component_options
+    config = {**config, "loss_config": load_component_options(config.get("loss_config"), purpose="loss")}
     request_config = dict(config)
     explicit = set(config.get("_explicit_options") or ())
     if request_config.get("dataset_s3_uri") and "dataset_path" not in explicit:

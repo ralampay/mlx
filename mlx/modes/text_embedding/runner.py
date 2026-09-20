@@ -49,7 +49,8 @@ def _embed(config: dict[str, Any]):
         from mlx.modes.autoencoder.adapter import AutoencoderRepresentationTransformer
 
         transformer = AutoencoderRepresentationTransformer(
-            values["adapter"], device=str(values.get("device", "cpu"))
+            values["adapter"], device=str(values.get("device", "cpu")),
+            trust_checkpoint_code=bool(values.get("trust_checkpoint_code", False)),
         )
     if not values.get("representation"):
         values["representation"] = (

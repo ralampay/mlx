@@ -327,24 +327,35 @@ class BenchmarkTextEmbeddingCommand:
                 "Benchmark vector-store provider does not match the embedding manifest: "
                 f"requested {requested_provider}, stored {stored_provider}."
             )
+        qrels_by_query = self._qrels_by_query(artifacts["qrels"])
+        queries = tuple(item for item in artifacts["queries"] if item[0].id in qrels_by_query)
+        if not queries:
+            raise MLXUserError("No exported queries have judgments in the selected qrels.")
+        excluded_queries = len(artifacts["queries"]) - len(queries)
+        corpus_size = int(dataset_manifest["corpus_documents"])
+        if corpus_size < 1:
+            raise MLXUserError("Embedding artifact manifest has an invalid corpus size.")
         output_dir = prepare_new_output_directory(
             str(self.request.output_path), purpose="Text-embedding benchmark"
         )
         started_at = utc_timestamp()
         factory = self.vector_store_factory or self.vector_store_registry.resolve(requested_provider)
         store = factory(artifacts["root"] / "vector_store", collection="corpus", create=False)
-        qrels_by_query = self._qrels_by_query(artifacts["qrels"])
         query_rows = []
         rankings = []
         failures = []
         metric_results: list[QueryMetricResult] = []
-        corpus_size = int(dataset_manifest["corpus_documents"])
-        if corpus_size < 1:
-            raise MLXUserError("Embedding artifact manifest has an invalid corpus size.")
         search_depth = min(self.request.top_k, corpus_size)
         try:
-            for index, (query, vector) in enumerate(artifacts["queries"], start=1):
+            for index, (query, vector) in enumerate(queries, start=1):
                 results = tuple(store.query(vector, k=search_depth))
+                identifiers = [result.id for result in results]
+                if len(results) > search_depth or len(set(identifiers)) != len(identifiers):
+                    raise MLXUserError("Vector store returned duplicate IDs or too many results.")
+                if any(identifier not in artifacts["corpus_ids"] for identifier in identifiers):
+                    raise MLXUserError("Vector store returned an ID absent from the corpus export.")
+                if any(not math.isfinite(result.score) for result in results):
+                    raise MLXUserError("Vector store returned non-finite scores.")
                 if any(results[pos].score < results[pos + 1].score for pos in range(len(results) - 1)):
                     raise MLXUserError("Vector store returned results outside best-first score order.")
                 qrels = qrels_by_query.get(query.id, {})
@@ -370,9 +381,9 @@ class BenchmarkTextEmbeddingCommand:
                 emit(
                     self.reporter,
                     "progress",
-                    f"Benchmarked query {index} of {len(artifacts['queries'])}.",
+                    f"Benchmarked query {index} of {len(queries)}.",
                     current=index,
-                    total=len(artifacts["queries"]),
+                    total=len(queries),
                     payload={"event": "text_embedding_benchmark_progress"},
                 )
         finally:
@@ -387,7 +398,8 @@ class BenchmarkTextEmbeddingCommand:
             "model_sha256": model["sha256"],
             "representation": representation,
             "corpus_size": corpus_size,
-            "query_count": len(artifacts["queries"]),
+            "query_count": len(queries),
+            "excluded_queries": excluded_queries,
             "dimensions": embedding["dimensions"],
             "similarity": embedding_manifest["vector_store"].get("similarity", "cosine"),
             "vector_store": requested_provider,
@@ -404,7 +416,8 @@ class BenchmarkTextEmbeddingCommand:
             "k_values": list(self.request.k_values),
             "metrics": list(self.request.metrics),
             "corpus_documents": corpus_size,
-            "queries": len(artifacts["queries"]),
+            "queries": len(queries),
+            "excluded_queries": excluded_queries,
             "relevance_judgments": len(artifacts["qrels"]),
             "benchmark_timestamp": utc_timestamp(),
             "representation": representation,
@@ -427,7 +440,7 @@ class BenchmarkTextEmbeddingCommand:
         return BenchmarkTextEmbeddingResult(
             output_dir=output_dir,
             metrics=aggregate,
-            query_count=len(artifacts["queries"]),
+            query_count=len(queries),
             failures=len(failures),
         )
 

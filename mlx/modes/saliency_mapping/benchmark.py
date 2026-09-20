@@ -41,7 +41,9 @@ class BenchmarkSaliencyMapping:
         request: BenchmarkSaliencyRequest,
         *,
         reporter: WorkflowReporter | None = None,
+        model_registry=None,
     ) -> None:
+        self.model_registry = model_registry
         self.request = request
         self.reporter = reporter or NullWorkflowReporter()
 
@@ -50,10 +52,10 @@ class BenchmarkSaliencyMapping:
             raise MLXUserError("--threshold-steps must be at least 2.")
         config = self.request.to_config()
         if self.request.model_path:
-            model, metadata = load_checkpoint_bundle(config)
+            model, metadata = load_checkpoint_bundle(config, **({"model_registry": self.model_registry} if self.model_registry is not None else {}))
         else:
             model_name = str(self.request.model)
-            model = build_saliency_model(model_name, config)
+            model = build_saliency_model(model_name, config, **({"registry": self.model_registry} if self.model_registry is not None else {}))
             metadata = {
                 "checkpoint_path": None,
                 "model_name": model_name,
@@ -289,12 +291,14 @@ class BenchmarkSaliencyModelGroup:
         request: BenchmarkSaliencyRequest,
         *,
         reporter: WorkflowReporter | None = None,
+        model_registry=None,
         benchmark_factory: BenchmarkFactory | None = None,
     ) -> None:
+        self.model_registry = model_registry
         self.request = request
         self.reporter = reporter or NullWorkflowReporter()
         self.benchmark_factory = benchmark_factory or (
-            lambda request, reporter: BenchmarkSaliencyMapping(request, reporter=reporter)
+            lambda request, reporter: BenchmarkSaliencyMapping(request, reporter=reporter, **({"model_registry": model_registry} if model_registry is not None else {}))
         )
 
     def execute(self) -> dict[str, Any]:
@@ -303,7 +307,7 @@ class BenchmarkSaliencyModelGroup:
         root = Path(self.request.output_path).expanduser()
         root.mkdir(parents=True, exist_ok=True)
         rows = []
-        for model_name in grouped_model_names(str(self.request.model)):
+        for model_name in grouped_model_names(str(self.request.model), **({"registry": self.model_registry} if self.model_registry is not None else {})):
             checkpoint = self._checkpoint_for(model_name)
             model_request = replace(
                 self.request,

@@ -19,13 +19,17 @@ class AutoencoderRepresentationTransformer:
         checkpoint_path: str | Path,
         *,
         device: str = "cpu",
+        trust_checkpoint_code: bool = False,
         registry: AutoencoderRegistry = DEFAULT_AUTOENCODER_REGISTRY,
     ) -> None:
         path, checkpoint = load_checkpoint(checkpoint_path)
         self._path = path
         self._checkpoint = checkpoint
         self._device = device
-        self._model = build_checkpoint_model(checkpoint, registry=registry, device=device)
+        self._model = build_checkpoint_model(
+            checkpoint, registry=registry, device=device,
+            trust_checkpoint_code=trust_checkpoint_code,
+        )
 
     @property
     def input_dimensions(self) -> int:

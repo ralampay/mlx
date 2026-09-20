@@ -21,7 +21,7 @@ from mlx.modes.saliency_mapping.visualization import (
     tensor_to_rgb,
     write_rgb,
 )
-from mlx.modes.segmentation.samples import evenly_spaced_sample_indices
+from mlx.modes.saliency_mapping.compatibility import evenly_spaced_sample_indices
 
 
 class GenerateSaliencySamples:
@@ -34,7 +34,9 @@ class GenerateSaliencySamples:
         output_dir: str | Path,
         sample_limit: int = 16,
         reporter: WorkflowReporter | None = None,
+        model_registry=None,
     ) -> None:
+        self.model_registry = model_registry
         self.config = dict(config)
         self.checkpoint_path = Path(checkpoint_path)
         self.split_path = Path(split_path)
@@ -46,7 +48,8 @@ class GenerateSaliencySamples:
         if self.sample_limit < 1:
             raise MLXUserError("Saliency sample limit must be at least 1.")
         model, metadata = load_checkpoint_bundle(
-            {**self.config, "model_path": str(self.checkpoint_path)}
+            {**self.config, "model_path": str(self.checkpoint_path)},
+            **({"model_registry": self.model_registry} if self.model_registry is not None else {}),
         )
         device = str(self.config.get("device", "cpu"))
         model = model.to(device).eval()

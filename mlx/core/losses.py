@@ -23,3 +23,12 @@ def build_scalar_loss(name: str, entries: Mapping[str, str], options=None):
     if not isinstance(loss, nn.Module):
         raise MLXUserError(f"Loss '{name}' must construct a torch.nn.Module.")
     return loss
+
+
+def validate_scalar_loss(loss, *, training: bool, context: str = "Training") -> None:
+    """Check the shared scalar tensor contract, without owning an objective."""
+    import torch
+    if not isinstance(loss, torch.Tensor) or loss.ndim != 0 or not torch.isfinite(loss):
+        raise MLXUserError(f"{context} loss must return one finite scalar tensor.")
+    if training and not loss.requires_grad:
+        raise MLXUserError(f"{context} loss must retain gradients for backward().")

@@ -112,3 +112,10 @@ Select it with
 `--loss my_package.losses:WeightedReconstructionLossDefinition --loss-config ./weights.json`.
 Applications can also extend and inject `ReconstructionLossRegistry`. Import-path extensions are
 explicit trusted Python code and must remain importable whenever their checkpoints are loaded.
+## Checkpoint trust
+
+Checkpoints use restricted tensor loading. Built-in models load without extra flags. A checkpoint
+that names external architecture code requires `--trust-checkpoint-code` for both autoencoder
+embedding and text-embedding `--adapter`, or an exact reference in a caller-injected registry.
+Only authorize code you trust: the flag permits Python imports and is not a sandbox. It never
+enables unrestricted pickle loading. See the [autoencoder extension tutorial](tutorials/adding-an-autoencoder.md).

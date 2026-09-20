@@ -12,7 +12,8 @@ from mlx.modes.image_classification.models import (
 
 
 class ListImageClassificationModels:
-    def __init__(self, config: dict[str, Any]) -> None:
+    def __init__(self, config: dict[str, Any], *, model_registry=None) -> None:
+        self.model_registry = model_registry
         self.config = {**config, "pretrained": False}
 
     def execute(self) -> list[ModelParameterSummary]:
@@ -21,7 +22,7 @@ class ListImageClassificationModels:
             raise MLXUserError("--num-classes must be at least 1 when listing models.")
 
         summaries = []
-        for model_name in supported_model_names():
+        for model_name in supported_model_names(**({"registry": self.model_registry} if self.model_registry is not None else {})):
             model = self._build_model(model_name, num_classes)
             summaries.append(
                 ModelParameterSummary(
@@ -33,10 +34,12 @@ class ListImageClassificationModels:
         return summaries
 
     def _build_model(self, model_name: str, num_classes: int):
-        if model_family_for(model_name) == "one-shot":
-            return build_image_classification_model(model_name, self.config)
+        if model_family_for(model_name, **({"registry": self.model_registry} if self.model_registry is not None else {})) == "one-shot":
+            return build_image_classification_model(model_name, self.config,
+                **({"registry": self.model_registry} if self.model_registry is not None else {}))
         return build_image_classification_model(
             model_name,
             self.config,
             num_classes=num_classes,
+                **({"registry": self.model_registry} if self.model_registry is not None else {}),
         )

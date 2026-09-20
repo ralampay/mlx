@@ -129,11 +129,8 @@ def build_image_feature_backbone(
 def _remove_classification_head(model_name: str, model: nn.Module) -> None:
     """Remove only the final logits layer after the adapter captured its width."""
 
-    if model_name.startswith("resnet") or model_name == "draxnet":
-        model.fc = nn.Identity()
-    elif model_name == "densenet121":
-        model.classifier = nn.Identity()
-    elif model_name in {"mobilenet_v3_large", "efficientnet_b0", "drax_mobilenet_v3_large"}:
-        model.classifier = nn.Identity()
-    elif model_name.startswith("convnext_"):
-        model.classifier[2] = nn.Identity()
+    from .catalog import FEATURE_HEAD_PATHS
+    from .standard import _assign_module_attr
+    head_path = FEATURE_HEAD_PATHS.get(model_name)
+    if head_path is not None:
+        _assign_module_attr(model, head_path, nn.Identity())

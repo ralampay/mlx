@@ -1,17 +1,17 @@
-"""Still-image salient-object-detection workflows."""
+"""Still-image salient-object-detection public commands, loaded on demand."""
+from importlib import import_module
 
-from mlx.modes.saliency_mapping.benchmark import BenchmarkSaliencyMapping
-from mlx.modes.saliency_mapping.data import BuildSaliencyDataset
-from mlx.modes.saliency_mapping.inference import InferSaliencyImage
-from mlx.modes.saliency_mapping.train import (
-    SmokeTestSaliencyModels,
-    TrainSaliencyModel,
-)
+_EXPORTS = {
+    "BenchmarkSaliencyMapping": "benchmark",
+    "BuildSaliencyDataset": "data",
+    "InferSaliencyImage": "inference",
+    "SmokeTestSaliencyModels": "train",
+    "TrainSaliencyModel": "train",
+}
+__all__ = list(_EXPORTS)
 
-__all__ = [
-    "BenchmarkSaliencyMapping",
-    "BuildSaliencyDataset",
-    "InferSaliencyImage",
-    "SmokeTestSaliencyModels",
-    "TrainSaliencyModel",
-]
+
+def __getattr__(name):
+    if name not in _EXPORTS:
+        raise AttributeError(name)
+    return getattr(import_module(f"{__name__}.{_EXPORTS[name]}"), name)

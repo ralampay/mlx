@@ -60,7 +60,6 @@ def _shape(value, expected, method):
 
 
 def validate_loss(loss, *, training: bool) -> None:
-    if not isinstance(loss, torch.Tensor) or loss.ndim != 0 or not torch.isfinite(loss):
-        raise MLXUserError("Autoencoder loss must return one finite scalar tensor.")
-    if training and not loss.requires_grad:
-        raise MLXUserError("Autoencoder training loss must retain gradients for backward().")
+    """Compatibility entrypoint for the shared tensor loss contract."""
+    from mlx.core.losses import validate_scalar_loss
+    validate_scalar_loss(loss, training=training, context="Autoencoder")

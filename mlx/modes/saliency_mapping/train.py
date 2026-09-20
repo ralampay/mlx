@@ -35,7 +35,9 @@ class TrainSaliencyModel:
         request: TrainSaliencyRequest,
         *,
         reporter: WorkflowReporter | None = None,
+        model_registry=None,
     ) -> None:
+        self.model_registry = model_registry
         self.request = request
         self.config = request.to_config()
         self.model_name = str(request.model)
@@ -64,7 +66,7 @@ class TrainSaliencyModel:
             shuffle=False,
             num_workers=workers,
         )
-        model = build_saliency_model(self.model_name, self.config).to(self.request.device)
+        model = build_saliency_model(self.model_name, self.config, **({"registry": self.model_registry} if self.model_registry is not None else {})).to(self.request.device)
         optimizer = Adam(model.parameters(), lr=float(self.request.lr or 1e-3))
         criterion = SaliencyHybridLoss(
             bce_weight=self.request.bce_weight,
@@ -217,6 +219,7 @@ class TrainSaliencyModel:
             split_path=test_path,
             output_dir=self.paths["output_dir"],
             reporter=self.reporter,
+            **({"model_registry": self.model_registry} if self.model_registry is not None else {}),
         ).execute()
 
     def _write_training_curves(self, history):
@@ -243,7 +246,9 @@ class SmokeTestSaliencyModels:
         request: SaliencyRequest,
         *,
         reporter: WorkflowReporter | None = None,
+        model_registry=None,
     ) -> None:
+        self.model_registry = model_registry
         self.request = request
         self.reporter = reporter or NullWorkflowReporter()
 
@@ -251,8 +256,8 @@ class SmokeTestSaliencyModels:
         results = []
         channels = 3 if self.request.colored else 1
         width, height = self.request.input_size
-        for model_name in grouped_model_names(str(self.request.model)):
-            model = build_saliency_model(model_name, self.request.to_config()).to(self.request.device).eval()
+        for model_name in grouped_model_names(str(self.request.model), **({"registry": self.model_registry} if self.model_registry is not None else {})):
+            model = build_saliency_model(model_name, self.request.to_config(), **({"registry": self.model_registry} if self.model_registry is not None else {})).to(self.request.device).eval()
             with torch.inference_mode():
                 logits = model(
                     torch.randn(

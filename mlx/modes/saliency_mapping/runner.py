@@ -29,7 +29,7 @@ from mlx.modes.saliency_mapping.requests import (
     TrainSaliencyRequest,
 )
 from mlx.modes.saliency_mapping.train import SmokeTestSaliencyModels, TrainSaliencyModel
-from mlx.modes.segmentation.data import normalize_segmentation_transform
+from mlx.modes.saliency_mapping.compatibility import normalize_segmentation_transform
 
 DEFAULT_CONFIG = {
     "action": "test",

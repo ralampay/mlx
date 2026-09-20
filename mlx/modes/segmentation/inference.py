@@ -25,11 +25,12 @@ from mlx.modes.segmentation.requests import SegmentationRequest
 
 
 class InferSegmentationImage:
-    def __init__(self, request: SegmentationRequest) -> None:
+    def __init__(self, request: SegmentationRequest, *, model_registry=None) -> None:
+        self.model_registry = model_registry
         self.request = request
 
     def execute(self) -> dict[str, Any]:
-        return _run_image_inference(self.request.to_config())
+        return _run_image_inference(self.request.to_config(), model_registry=self.model_registry)
 
 
 def infer_segmentation_image(config: dict[str, Any]) -> dict[str, Any]:
@@ -44,8 +45,8 @@ def infer_segmentation_image(config: dict[str, Any]) -> dict[str, Any]:
     return result
 
 
-def _run_image_inference(config: dict[str, Any]) -> dict[str, Any]:
-    model, metadata = load_checkpoint_bundle(config)
+def _run_image_inference(config: dict[str, Any], *, model_registry=None) -> dict[str, Any]:
+    model, metadata = load_checkpoint_bundle(config, **({"model_registry": model_registry} if model_registry is not None else {}))
     device = config.get("device", "cpu")
     model = model.to(device)
     model.eval()
@@ -102,9 +103,11 @@ class RunSegmentationStreamInference:
         frame_source: SegmentationFrameSource | None = None,
         frame_sink: SegmentationFrameSink | None = None,
         reporter: WorkflowReporter | None = None,
+        model_registry=None,
     ) -> None:
         if isinstance(config, SegmentationRequest):
             config = config.to_config()
+        self.model_registry = model_registry
         self.config = config
         self.source = source
         self.device = config.get("device", "cpu")
@@ -121,7 +124,7 @@ class RunSegmentationStreamInference:
             raise MLXUserError(
                 "Segmentation stream inference requires injected frame source and sink adapters."
             )
-        self.model, self.metadata = load_checkpoint_bundle(self.config)
+        self.model, self.metadata = load_checkpoint_bundle(self.config, **({"model_registry": self.model_registry} if self.model_registry is not None else {}))
         self.model = self.model.to(self.device)
         self.model.eval()
         emit(

@@ -536,3 +536,7 @@ loss contracts, and the built-in MSE, MAE, and Smooth L1 losses.
 - [Text embedding and retrieval](./docs/text-embedding.md)
 - [Vector autoencoders](./docs/autoencoder.md)
 - [Saliency mapping](./docs/saliency-mapping/README.md)
+## Extending MLX
+
+See the [extension inventory](docs/extensions.md), [executable tutorials](docs/tutorials/README.md),
+and canonical [architecture](ARCHITECTURE.md) for adding models, trackers, losses, metrics, and adapters.

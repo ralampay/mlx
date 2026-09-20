@@ -158,6 +158,7 @@ class EmbeddingArtifactReader:
         embedding_manifest = self._read_json(directory / "embedding_manifest.json")
         if dataset_manifest.get("schema_version") != SCHEMA_VERSION or embedding_manifest.get("schema_version") != SCHEMA_VERSION:
             raise MLXUserError("Unsupported or missing embedding artifact schema version.")
+        self._validate_manifests(dataset_manifest, embedding_manifest)
         corpus_scan = self._scan_embedding_csv(
             directory / "corpus_embeddings.csv", query=False, collect=False
         )
@@ -178,6 +179,8 @@ class EmbeddingArtifactReader:
             raise MLXUserError("Corpus embedding count does not match dataset_manifest.json.")
         if query_scan["count"] != dataset_manifest.get("queries"):
             raise MLXUserError("Query embedding count does not match dataset_manifest.json.")
+        if len(qrels) != dataset_manifest["qrels"]:
+            raise MLXUserError("Qrels count does not match dataset_manifest.json.")
         for judgment in qrels:
             if (
                 judgment.query_id not in query_scan["ids"]
@@ -195,7 +198,43 @@ class EmbeddingArtifactReader:
                 for identifier, text, vector in query_rows
             ),
             "qrels": tuple(qrels),
+            "corpus_ids": frozenset(corpus_scan["ids"]),
         }
+
+    @staticmethod
+    def _validate_manifests(dataset, manifest) -> None:
+        for field in ("corpus_documents", "queries", "qrels"):
+            if type(dataset.get(field)) is not int or dataset[field] < 1:
+                raise MLXUserError(f"Dataset manifest has an invalid {field} value.")
+        if not isinstance(dataset.get("name"), str) or not dataset["name"].strip():
+            raise MLXUserError("Dataset manifest requires a non-empty name.")
+        for section, fields in {
+            "model": ("path", "sha256"),
+            "embedding": ("dimensions", "normalized"),
+            "vector_store": ("provider", "similarity"),
+        }.items():
+            value = manifest.get(section)
+            if not isinstance(value, dict) or any(field not in value for field in fields):
+                raise MLXUserError(f"Embedding manifest has an invalid {section} section.")
+        embedding = manifest["embedding"]
+        if type(embedding["dimensions"]) is not int or embedding["dimensions"] < 1:
+            raise MLXUserError("Embedding manifest has invalid dimensions.")
+        if type(embedding["normalized"]) is not bool:
+            raise MLXUserError("Embedding manifest normalization must be Boolean.")
+        for section, field in (("model", "path"), ("model", "sha256"),
+                               ("vector_store", "provider")):
+            if not isinstance(manifest[section][field], str) or not manifest[section][field].strip():
+                raise MLXUserError(f"Embedding manifest requires {section}.{field}.")
+        if manifest["vector_store"]["similarity"] != "cosine":
+            raise MLXUserError("Embedding manifest similarity must be cosine.")
+        embedded_dataset = manifest.get("dataset")
+        if not isinstance(embedded_dataset, dict) or any(
+            embedded_dataset.get(key) != dataset.get(key)
+            for key in ("name", "corpus_documents", "queries", "qrels")
+        ):
+            raise MLXUserError("Embedding and dataset manifests describe different datasets.")
+        if not isinstance(dataset.get("qrels_path", "qrels.tsv"), str):
+            raise MLXUserError("Dataset manifest qrels_path must be a string.")
 
     @staticmethod
     def _read_json(path: Path) -> dict[str, Any]:
@@ -228,6 +267,11 @@ class EmbeddingArtifactReader:
                         raise MLXUserError(f"Invalid or duplicate embedding row in {path} at line {line}.")
                     try:
                         raw = json.loads(row.get("embedding", ""))
+                        if not isinstance(raw, list) or any(
+                            isinstance(value, bool) or not isinstance(value, (int, float))
+                            for value in raw
+                        ):
+                            raise ValueError("Expected a numeric JSON array.")
                         vector = tuple(float(value) for value in raw)
                     except (TypeError, ValueError, json.JSONDecodeError) as exc:
                         raise MLXUserError(f"Invalid embedding vector in {path} at line {line}.") from exc
@@ -264,7 +308,7 @@ class EmbeddingArtifactReader:
                             str(row["query-id"]), str(row["corpus-id"]), int(row["score"])
                         )
                     )
-        except (OSError, UnicodeError, csv.Error, KeyError, ValueError) as exc:
+        except (OSError, UnicodeError, csv.Error, KeyError, TypeError, ValueError) as exc:
             raise MLXUserError(f"Corrupt qrels embedding artifact '{path}': {exc}") from exc
         if not judgments:
             raise MLXUserError(f"Embedding artifact qrels contains no judgments: {path}")
@@ -356,7 +400,8 @@ class BenchmarkArtifactWriter:
 
 - Dataset: `{summary['dataset']}`
 - Corpus documents: {summary['corpus_size']}
-- Queries: {summary['query_count']}
+- Evaluated queries: {summary['query_count']}
+- Excluded unjudged queries: {summary.get('excluded_queries', 0)}
 
 ## Embedding Model
 

@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Optional
+from typing import Any, Mapping, Optional
 
 from mlx.core.requests import ConfigRequest
 
@@ -44,6 +44,8 @@ class ImageClassificationRequest(ConfigRequest):
 @dataclass(frozen=True)
 class TrainImageClassificationRequest(ImageClassificationRequest):
     action: str = "train"
+    loss: Optional[str] = None
+    loss_config: str | Mapping[str, Any] | None = None
 
 
 @dataclass(frozen=True)

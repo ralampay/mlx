@@ -26,3 +26,11 @@ BUILTIN_BUILDERS = MappingProxyType({
     "drax_mobilenet_v3_large": "mlx.modes.image_classification.models.drax_mobilenet:build_drax_mobilenet_v3_large",
 })
 BUILTIN_STANDARD_NAMES = frozenset(TORCHVISION_MODELS) | frozenset(BUILTIN_BUILDERS)
+
+# Feature-only reuse removes the entire classifier branch for mobile families.
+FEATURE_HEAD_PATHS = MappingProxyType({
+    **{name: ("classifier" if spec.feature_family == "mobile" else spec.head)
+       for name, spec in TORCHVISION_MODELS.items()},
+    "draxnet": "fc",
+    "drax_mobilenet_v3_large": "classifier",
+})

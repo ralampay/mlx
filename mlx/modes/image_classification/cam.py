@@ -72,12 +72,14 @@ class GenerateImageClassificationCams:
         request: ImageClassificationRequest,
         *,
         reporter: WorkflowReporter | None = None,
+        model_registry=None,
     ) -> None:
+        self.model_registry = model_registry
         self.request = request
         self.reporter = reporter or NullWorkflowReporter()
 
     def execute(self) -> list[CamResult]:
-        results = _generate_cams(self.request.to_config())
+        results = _generate_cams(self.request.to_config(), model_registry=self.model_registry)
         emit(
             self.reporter,
             "success",
@@ -97,13 +99,14 @@ def generate_image_classification_cams(config: dict[str, Any]) -> list[CamResult
     return results
 
 
-def _generate_cams(config: dict[str, Any]) -> list[CamResult]:
-    model, metadata = load_checkpoint_bundle(config)
+def _generate_cams(config: dict[str, Any], *, model_registry=None) -> list[CamResult]:
+    model, metadata = load_checkpoint_bundle(config, **({"model_registry": model_registry} if model_registry is not None else {}))
     device = config.get("device", "cpu")
     model = model.to(device)
     model.eval()
 
-    method = str(config.get("cam_method") or "gradcam").lower()
+    method = str(config.get("cam_method") or "gradcam")
+    method = method if ":" in method else method.lower()
     if metadata["family"] == "one-shot":
         results = generate_one_shot_cams(model, metadata, config, device=device, method=method)
     else:

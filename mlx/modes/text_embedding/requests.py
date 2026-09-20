@@ -22,6 +22,7 @@ class EmbedTextRequest(ConfigRequest):
     batch_size: int = 16
     representation: str = "original"
     adapter: Optional[str] = None
+    trust_checkpoint_code: bool = False
     device: str = "cpu"
 
 

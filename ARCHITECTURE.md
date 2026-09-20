@@ -71,7 +71,7 @@ mlx/
     │   ├── visualization.py      pure mask coloring, blending, and view composition
     │   └── models/backbone_factory.py  isolated classifier-backbone adapter
     ├── saliency_mapping/         still-image SOD data, loss, metrics, training, inference, and artifacts
-    │   └── models/               one-channel registry over shared segmentation U-Net construction
+    │   └── models/               saliency registry with segmentation compatibility builders
     ├── object_detection/
     │   ├── models.py             provider-neutral detection values and detector protocol
     │   ├── providers.py          lazy provider registry and provider protocol
@@ -110,10 +110,12 @@ Large commands should keep `execute()` readable by delegating cohesive steps to 
 or focused helpers. Stateless tensor transforms, metrics, serialization helpers, and model
 builders remain functions.
 
-Saliency mapping deliberately depends on the segmentation model construction boundary: its
-registry mirrors segmentation model identifiers and groups, then requests the shared U-Net
-family with one output channel. Saliency-owned data, sigmoid application, BCE/SSIM/IoU loss,
-SOD metrics, checkpoints, artifacts, and presentation do not flow back into segmentation.
+Saliency owns an immutable `SaliencyModelRegistry` of `(name, config) -> model` builders producing
+one-channel logits. Built-in entries retain segmentation identifiers and groups through
+`saliency_mapping.compatibility`; custom saliency models need no segmentation registration.
+That gateway also contains the deliberate reuse of segmentation image policies and sample
+selection. Saliency-owned data, sigmoid application, BCE/SSIM/IoU loss, SOD metrics, checkpoints,
+artifacts, and presentation do not flow back into segmentation.
 
 ## Portable Training Dataset Sources
 
@@ -243,7 +245,8 @@ To add another provider:
 
 1. create `mlx.modes.object_detection.<provider>/provider.py` without importing it globally;
 2. implement `ObjectDetectionProvider`, translating library results to the neutral detection types;
-3. register a lazy `module:function` factory in `PROVIDER_REGISTRY`;
+3. register a lazy `module:function` factory with `ProviderRegistry.register` and inject the returned
+   registry (built-in defaults live in `providers.py`);
 4. translate dependency and model/data errors into `MLXUserError` at the provider boundary;
 5. add fake-provider contract tests plus provider-specific decoding and integration tests;
 6. document supported models, formats, training semantics, and install dependencies.
@@ -508,8 +511,9 @@ fallback. Metadata discovery may still import a mode's framework modules; it doe
 models or external services.
 
 Classification and segmentation training accept injected model registries and loss factories.
-Registry injection also crosses checkpoint loading boundaries in classification inference and
-benchmarking, segmentation benchmarking, and post-training segmentation sample generation. An
+Registry injection also crosses discovery, smoke testing, checkpoint loading, inference, CAM,
+benchmarking, and segmentation/saliency post-training sample generation. Batch segmentation and
+saliency commands bind their default child-command factories to the same registry. An
 injected model must remain resolvable when its checkpoint is reloaded; registry objects themselves
 are not serialized into checkpoints. Video 3D backbone selection uses its own capability registry,
 so adding a native 3D implementation does not require a classification-model registration.
@@ -542,6 +546,12 @@ writer owns aggregate/per-query tables, rankings, failures, provenance, and the 
 Markdown report. A future `PgVectorStore` implements the same protocol and is registered in the
 immutable vector-store registry; neither command, dataset parsing, nor metric code changes.
 
+Benchmark evaluation includes only exported queries present in the selected qrels. Unjudged
+queries remain in embedding exports but are excluded from aggregate metrics and failure lists;
+the benchmark summary and manifest report their count. Artifact readers validate manifest
+structures and exported IDs before index access. Retrieval results must have unique known IDs,
+finite best-first scores, and respect the requested depth. Chroma reload checks cosine metadata.
+
 ## Vector Autoencoders and Representation Transforms
 
 `mlx.core.vector_transforms.VectorRepresentationTransformer` is the narrow cross-mode contract for
@@ -557,6 +567,15 @@ registries support built-in aliases and explicit `package.module:DefinitionClass
 Definitions build models or loss modules from validated mappings, allowing custom experiments
 without adding selection branches to commands. Checkpoints retain the exact architecture import
 path and preprocessing contract so later encoding reconstructs the correct implementation.
+
+Autoencoder checkpoints use restricted tensor loading, never an unsafe-pickle fallback. Before
+importing architecture code, loading validates the checkpoint structure and dimensions. Built-in
+references and exact references in a caller-supplied registry are trusted; other references require
+`trust_checkpoint_code=True` (`--trust-checkpoint-code`). This authorizes Python imports, not a
+sandbox, and must be used only for trusted code. Existing built-in checkpoints remain compatible.
+
+Native classification, segmentation, and autoencoder training share scalar tensor loss validation
+in `mlx.core.losses`; objective definitions and target semantics remain mode-owned.
 
 Input normalization is part of adapter provenance. Training detects normalized MLX embedding
 artifacts or accepts an explicit override; live GGUF vectors receive the same preprocessing before
@@ -628,6 +647,26 @@ Compatibility functions such as `train_image_classification`, `infer_segmentatio
 `convert_object_detection_model` construct a typed request or provider command and call
 `execute()`. Former Ultralytics-owned detection and tracking imports are re-exported from their old
 paths. Compatibility wrappers must not accumulate new business logic.
+
+## Extension Review and Tutorials
+
+The [extension inventory](docs/extensions.md) records current ownership, selection, discovery,
+testing, and remaining limitations. [Executable tutorials](docs/tutorials/README.md) demonstrate
+local extension without changing runners. Registries remain mode-owned; shared import-reference
+validation and JSON option loading in core store no registrations. Tracking reuses those helpers.
+Classification feature-head removal is catalog metadata rather than another model-name dispatch.
+
+Classification, segmentation, and saliency package exports are lazy compatibility surfaces.
+Inspecting a registry must not import visualization or optional provider integrations. Detailed
+parameter-count listings may construct models; metadata-only discovery must not do so.
+Classification and segmentation runners normalize loss options before constructing typed training
+requests; legacy Python factories continue accepting JSON paths or mappings.
+
+LibreYOLO incremental neural adapters remain provider-owned, distinct from inference adapters.
+Before adapter training, the integration verifies that either the train signature or the trainer's
+configuration fields explicitly declare all requested adapter controls. Generic `**kwargs` alone
+is not evidence of support. Unsupported versions fail with `MLXUserError` rather than silently
+performing full-model training. MLX does not invent a neural-adapter registry or provider hook.
 
 ## Testing and Change Rules
 

@@ -83,18 +83,25 @@ class TrainAllSegmentationModels:
         reporter: WorkflowReporter | None = None,
         trainer_factory: TrainerFactory | None = None,
         benchmark_factory: BenchmarkFactory | None = None,
+        model_registry=None,
         model_names: list[str] | tuple[str, ...] | None = None,
         allow_dataset_source_manifest: bool = False,
     ) -> None:
         self.request = request
         self.reporter = reporter or NullWorkflowReporter()
-        self.trainer_factory = trainer_factory or _default_trainer_factory
-        self.benchmark_factory = benchmark_factory or _default_benchmark_factory
+        self.trainer_factory = trainer_factory or (
+            (lambda request, reporter: TrainSegmentationModel(request, reporter=reporter, model_registry=model_registry))
+            if model_registry is not None else _default_trainer_factory
+        )
+        self.benchmark_factory = benchmark_factory or (
+            (lambda request, reporter: BenchmarkSegmentation(request, reporter=reporter, model_registry=model_registry))
+            if model_registry is not None else _default_benchmark_factory
+        )
         self.model_names = tuple(
             sorted(
                 model_names
                 if model_names is not None
-                else grouped_model_names(str(request.model))
+                else grouped_model_names(str(request.model), **({"registry": model_registry} if model_registry is not None else {}))
             )
         )
         self.allow_dataset_source_manifest = allow_dataset_source_manifest

@@ -20,12 +20,13 @@ from mlx.modes.saliency_mapping.visualization import (
 
 
 class InferSaliencyImage:
-    def __init__(self, request: SaliencyRequest) -> None:
+    def __init__(self, request: SaliencyRequest, *, model_registry=None) -> None:
+        self.model_registry = model_registry
         self.request = request
 
     def execute(self) -> dict[str, Any]:
         config = self.request.to_config()
-        model, metadata = load_checkpoint_bundle(config)
+        model, metadata = load_checkpoint_bundle(config, **({"model_registry": self.model_registry} if self.model_registry is not None else {}))
         device = self.request.device
         model = model.to(device).eval()
         input_path = Path(self.request.input_img).expanduser()

@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Optional
+from typing import Any, Mapping, Optional
 
 from mlx.core.requests import ConfigRequest
 
@@ -20,7 +20,7 @@ class AutoencoderRequest(ConfigRequest):
     device: str = "cpu"
     random_seed: Optional[int] = 42
     normalize_inputs: Optional[bool] = None
-    autoencoder_config: Optional[str] = None
+    autoencoder_config: str | Mapping[str, Any] | None = None
 
 
 @dataclass(frozen=True)
@@ -29,13 +29,14 @@ class AutoencoderTrainRequest(AutoencoderRequest):
     lr: Optional[float] = 0.001
     val_ratio: Optional[float] = 0.2
     loss: str = "mse"
-    loss_config: Optional[str] = None
+    loss_config: str | Mapping[str, Any] | None = None
     plots: bool = True
     use_best: bool = True
 
 
 @dataclass(frozen=True)
 class AutoencoderEmbedRequest(AutoencoderRequest):
+    trust_checkpoint_code: bool = False
     normalize_embeddings: bool = False
 
 

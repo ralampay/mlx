@@ -1,19 +1,19 @@
-from mlx.modes.image_classification.cam import GenerateImageClassificationCams
-from mlx.modes.image_classification.data import BuildImageClassificationDataset
-from mlx.modes.image_classification.evaluation import BenchmarkImageClassification
-from mlx.modes.image_classification.inference import InferImageClassification
-from mlx.modes.image_classification.runner import run_image_classification
-from mlx.modes.image_classification.train import (
-    SmokeTestImageClassificationModel,
-    TrainImageClassificationModel,
-)
+"""Classification public workflows, loaded on demand."""
+from importlib import import_module
 
-__all__ = [
-    "BenchmarkImageClassification",
-    "BuildImageClassificationDataset",
-    "GenerateImageClassificationCams",
-    "InferImageClassification",
-    "SmokeTestImageClassificationModel",
-    "TrainImageClassificationModel",
-    "run_image_classification",
-]
+_EXPORTS = {
+    "BenchmarkImageClassification": "evaluation",
+    "BuildImageClassificationDataset": "data",
+    "GenerateImageClassificationCams": "cam",
+    "InferImageClassification": "inference",
+    "SmokeTestImageClassificationModel": "train",
+    "TrainImageClassificationModel": "train",
+    "run_image_classification": "runner",
+}
+__all__ = list(_EXPORTS)
+
+
+def __getattr__(name):
+    if name not in _EXPORTS:
+        raise AttributeError(name)
+    return getattr(import_module(f"{__name__}.{_EXPORTS[name]}"), name)

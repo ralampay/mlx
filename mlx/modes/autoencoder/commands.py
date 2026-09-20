@@ -345,7 +345,8 @@ class EmbedAutoencoder:
             raise MLXUserError("--batch-size must be positive.")
         table = self.csv_loader.load(self.request.input_path)
         transformer = self.transformer_factory(
-            self.request.model_path, device=self.request.device
+            self.request.model_path, device=self.request.device,
+            **({"trust_checkpoint_code": True} if self.request.trust_checkpoint_code else {}),
         )
         if table.dimensions != transformer.input_dimensions:
             raise MLXUserError(

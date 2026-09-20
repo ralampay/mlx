@@ -11,7 +11,8 @@ from mlx.modes.segmentation.models import (
 
 
 class ListSegmentationModels:
-    def __init__(self, config: dict[str, Any]) -> None:
+    def __init__(self, config: dict[str, Any], *, model_registry=None) -> None:
+        self.model_registry = model_registry
         self.config = {**config, "pretrained": False}
 
     def execute(self) -> list[ModelParameterSummary]:
@@ -20,11 +21,12 @@ class ListSegmentationModels:
             raise MLXUserError("--num-classes must be at least 1 when listing models.")
 
         summaries = []
-        for model_name in supported_model_names():
+        for model_name in supported_model_names(**({"registry": self.model_registry} if self.model_registry is not None else {})):
             model = build_segmentation_model(
                 model_name,
                 self.config,
                 num_classes=num_classes,
+                **({"registry": self.model_registry} if self.model_registry is not None else {}),
             )
             summaries.append(
                 ModelParameterSummary(

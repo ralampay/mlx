@@ -10,6 +10,7 @@ from torch.utils.data import DataLoader
 
 from mlx.core.commands import NullWorkflowReporter, WorkflowReporter, emit
 from mlx.core.exceptions import MLXUserError
+from mlx.core.losses import validate_scalar_loss
 from mlx.modes.image_classification.losses import build_loss
 from mlx.modes.image_classification.data import (
     load_one_shot_datasets,
@@ -99,18 +100,20 @@ class SmokeTestImageClassificationModel:
         request: ImageClassificationRequest,
         *,
         reporter: WorkflowReporter | None = None,
+        model_registry=None,
     ) -> None:
+        self.model_registry = model_registry
         self.request = request
         self.reporter = reporter or NullWorkflowReporter()
 
     def execute(self) -> None:
         config = self.request.to_config()
         model_name = resolve_model_name(config)
-        family = model_family_for(model_name)
+        family = model_family_for(model_name, registry=self.model_registry)
         if family == "one-shot":
-            _test_one_shot(model_name, config, reporter=self.reporter)
+            _test_one_shot(model_name, config, reporter=self.reporter, model_registry=self.model_registry)
             return
-        _test_standard(model_name, config, reporter=self.reporter)
+        _test_standard(model_name, config, reporter=self.reporter, model_registry=self.model_registry)
 
 
 def train_image_classification(config: dict[str, Any]) -> None:
@@ -186,6 +189,7 @@ def _train_one_shot(
             optimizer.zero_grad()
             output = model(img1, img2)
             loss = criterion(output, label.unsqueeze(1))
+            validate_scalar_loss(loss, training=True)
             loss.backward()
             optimizer.step()
             running_loss += loss.item()
@@ -320,6 +324,7 @@ def _train_standard(
             output = model(images)
             if joint_svdd:
                 classification_loss = criterion(output.logits, targets)
+                validate_scalar_loss(classification_loss, training=True)
                 svdd_loss = compute_svdd_loss(model, output.svdd_embedding)
                 loss = classification_loss
                 if epoch >= svdd_warmup_epochs:
@@ -328,6 +333,7 @@ def _train_standard(
                 running_svdd_loss += svdd_loss.item()
             else:
                 loss = criterion(output, targets)
+            validate_scalar_loss(loss, training=True)
             loss.backward()
             optimizer.step()
             running_loss += loss.item()
@@ -424,6 +430,7 @@ def _test_one_shot(
     config: dict[str, Any],
     *,
     reporter: WorkflowReporter | None = None,
+    model_registry=None,
 ) -> None:
     reporter = reporter or NullWorkflowReporter()
     batch = config["batch_size"]
@@ -432,7 +439,7 @@ def _test_one_shot(
     colored = config["colored"]
 
     emit(reporter, "info", f"Running one-shot test on device={device} | input={height}x{width} | batch={batch}")
-    model = build_image_classification_model(model_name, config).to(device)
+    model = build_image_classification_model(model_name, config, **({"registry": model_registry} if model_registry is not None else {})).to(device)
 
     channels = 3 if colored else 1
     x1 = torch.randn(batch, channels, height, width).to(device)
@@ -447,6 +454,7 @@ def _test_standard(
     config: dict[str, Any],
     *,
     reporter: WorkflowReporter | None = None,
+    model_registry=None,
 ) -> None:
     reporter = reporter or NullWorkflowReporter()
     batch = config["batch_size"]
@@ -464,6 +472,7 @@ def _test_standard(
         model_name,
         config,
         num_classes=num_classes,
+        **({"registry": model_registry} if model_registry is not None else {}),
     ).to(device)
 
     channels = 3 if colored else 1
@@ -502,6 +511,7 @@ def _validate_one_shot(model, val_loader, criterion, device: str) -> tuple[float
             img1, img2, label = img1.to(device), img2.to(device), label.to(device)
             output = model(img1, img2)
             loss = criterion(output, label.unsqueeze(1))
+            validate_scalar_loss(loss, training=False)
             val_loss += loss.item()
             predictions = (output >= 0.5).float().squeeze(1)
             preds.extend(int(item) for item in predictions.cpu().tolist())
@@ -520,6 +530,7 @@ def _validate_standard(model, val_loader, criterion, device: str) -> tuple[float
             images, targets = images.to(device), targets.to(device)
             logits = model(images)
             loss = criterion(logits, targets)
+            validate_scalar_loss(loss, training=False)
             val_loss += loss.item()
             predictions = logits.argmax(dim=1)
             preds.extend(int(item) for item in predictions.cpu().tolist())
@@ -546,6 +557,7 @@ def _validate_joint_svdd(
             images, targets = images.to(device), targets.to(device)
             output = model(images)
             classification_loss = criterion(output.logits, targets)
+            validate_scalar_loss(classification_loss, training=False)
             svdd_loss = compute_svdd_loss(model, output.svdd_embedding)
             classification_total += classification_loss.item()
             svdd_total += svdd_loss.item()

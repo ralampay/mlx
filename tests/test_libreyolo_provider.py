@@ -236,8 +236,12 @@ def test_libreyolo_training_forwards_incremental_adapter_options(
     train_calls = []
 
     class FakeLoadedModel:
-        def train(self, **kwargs):
-            train_calls.append(kwargs)
+        def train(self, *, incremental_adapter, incremental_adapter_train_only, incremental_adapter_type, **kwargs):
+            train_calls.append({
+                **kwargs, "incremental_adapter": incremental_adapter,
+                "incremental_adapter_train_only": incremental_adapter_train_only,
+                "incremental_adapter_type": incremental_adapter_type,
+            })
             return {}
 
     _install_fake_libreyolo(

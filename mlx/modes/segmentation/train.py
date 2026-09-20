@@ -13,6 +13,7 @@ from torch.utils.data import DataLoader
 
 from mlx.core.commands import NullWorkflowReporter, WorkflowReporter, emit
 from mlx.core.exceptions import MLXUserError
+from mlx.core.losses import validate_scalar_loss
 from mlx.modes.segmentation.data import (
     load_segmentation_datasets,
     resolve_optional_segmentation_test_split,
@@ -316,6 +317,7 @@ class TrainSegmentationModel:
             optimizer.zero_grad()
             logits = model(images)
             loss = criterion(logits, masks)
+            validate_scalar_loss(loss, training=True)
             loss.backward()
             optimizer.step()
             running_loss += float(loss.item()) * len(images)
@@ -332,7 +334,9 @@ class TrainSegmentationModel:
             for images, masks in loader:
                 images, masks_device = images.to(self.device), masks.to(self.device)
                 logits = model(images)
-                loss_sum += float(criterion(logits, masks_device).item()) * len(images)
+                loss = criterion(logits, masks_device)
+                validate_scalar_loss(loss, training=False)
+                loss_sum += float(loss.item()) * len(images)
                 sample_count += len(images)
                 targets.append(masks.numpy())
                 predictions.append(logits.argmax(dim=1).cpu().numpy())
@@ -360,12 +364,14 @@ class SmokeTestSegmentationModel:
         request: SegmentationRequest,
         *,
         reporter: WorkflowReporter | None = None,
+        model_registry=None,
     ) -> None:
+        self.model_registry = model_registry
         self.request = request
         self.reporter = reporter or NullWorkflowReporter()
 
     def execute(self) -> None:
-        _run_smoke_test(self.request.to_config(), reporter=self.reporter)
+        _run_smoke_test(self.request.to_config(), reporter=self.reporter, model_registry=self.model_registry)
 
 
 def smoke_test_segmentation(config: dict[str, Any]) -> None:
@@ -381,6 +387,7 @@ def _run_smoke_test(
     config: dict[str, Any],
     *,
     reporter: WorkflowReporter | None = None,
+    model_registry=None,
 ) -> None:
     reporter = reporter or NullWorkflowReporter()
     model_name = resolve_model_name(config)
@@ -394,7 +401,8 @@ def _run_smoke_test(
         f"Running segmentation test on device={device} | input={width}x{height} "
         f"| batch={batch} | classes={num_classes}"
     )
-    model = build_segmentation_model(model_name, config, num_classes=num_classes).to(device)
+    model = build_segmentation_model(model_name, config, num_classes=num_classes,
+                                     **({"registry": model_registry} if model_registry is not None else {})).to(device)
     channels = 3 if config.get("colored", True) else 1
     output = model(torch.randn(batch, channels, height, width).to(device))
     emit(

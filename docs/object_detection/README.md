@@ -278,7 +278,10 @@ only the MobileNet ImageNet V2 features; Drax, projections, neck, and head start
 Without it, training starts from scratch. Loading or resuming a detector checkpoint
 preserves its weights. Listing constructs models on CPU without downloading weights.
 
-Incremental adapter-only fine-tuning is available for an existing
+Incremental adapter-only fine-tuning requires a LibreYOLO version whose training signature or
+trainer configuration explicitly supports the incremental-adapter controls. MLX rejects unsupported
+versions before training; accepting arbitrary keyword arguments alone is insufficient. With a
+compatible provider, it is available for an existing
 `yolox-drax-mobilenet-v3-large` foundation checkpoint. The checkpoint and new
 dataset must use exactly the same class definitions and indices:
 

@@ -57,3 +57,7 @@ The repository documentation is split by CLI mode and backing package:
 | `text_embedding`, `text-embedding`, `nlp` | `mlx.modes.text_embedding` (`nlp` also retains legacy CSV options) |
 | `autoencoder` | `mlx.modes.autoencoder` |
 | `saliency_mapping`, `saliency-mapping` | `mlx.modes.saliency_mapping` |
+## Extending MLX
+
+Start with the [extension inventory](extensions.md) and [small executable tutorials](tutorials/README.md).
+The canonical dependency and ownership rules remain in [ARCHITECTURE.md](../ARCHITECTURE.md).

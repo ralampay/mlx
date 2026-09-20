@@ -14,8 +14,8 @@ from mlx.core.commands import NullWorkflowReporter, WorkflowReporter, emit
 from mlx.core.datasets import resolve_split_dataset_root
 from mlx.core.exceptions import MLXUserError
 from mlx.modes.saliency_mapping.requests import BuildSaliencyDatasetRequest
-from mlx.modes.segmentation.data import (
-    IMAGE_EXTENSIONS,
+from mlx.modes.saliency_mapping.compatibility import (
+    image_extensions,
     evaluation_segmentation_transform,
     normalize_segmentation_transform,
 )
@@ -32,7 +32,7 @@ def saliency_dataset_root(extracted_path: Path) -> Path:
 def _image_paths(directory: Path) -> list[Path]:
     return sorted(
         path for path in directory.iterdir()
-        if path.is_file() and path.suffix.lower() in IMAGE_EXTENSIONS
+        if path.is_file() and path.suffix.lower() in image_extensions()
     )
 
 

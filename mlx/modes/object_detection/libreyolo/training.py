@@ -10,7 +10,9 @@ from mlx.modes.object_detection.artifacts import (
     find_existing_checkpoint,
     find_latest_checkpoint,
 )
-from mlx.modes.object_detection.libreyolo.model_factory import build_scratch_model
+from mlx.modes.object_detection.libreyolo.model_factory import (
+    build_scratch_model, validate_incremental_adapter_support,
+)
 from mlx.modes.object_detection.libreyolo.utils import (
     dependency_error,
     resolve_dataset_source,
@@ -107,6 +109,8 @@ class TrainLibreYOLOObjectDetection:
                     model_spec, device=self.config.get("device", "cpu")
                 )
 
+            if self.config.get("incremental_adapter"):
+                validate_incremental_adapter_support(model)
             train_kwargs = self._build_train_kwargs(
                 data=dataset.data,
                 project_dir=project_dir,

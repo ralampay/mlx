@@ -1,14 +1,13 @@
 from __future__ import annotations
 
 import inspect
-import json
 from dataclasses import dataclass, field
-from importlib import import_module
-from pathlib import Path
 from types import MappingProxyType
 from typing import Any, Mapping
 
 from mlx.core.exceptions import MLXUserError
+from mlx.core.extensions import load_reference
+from mlx.core.configuration import load_component_options
 from mlx.modes.object_detection.tracking.protocols import TrackingAlgorithm
 
 
@@ -133,18 +132,7 @@ class CreateTrackingAlgorithm:
         return class_path
 
     def _load_class(self, class_path: str):
-        module_name, attribute_name = class_path.split(":", 1)
-        if not module_name or not attribute_name:
-            raise MLXUserError(
-                "Tracker class path must use 'package.module:ClassName' format."
-            )
-        try:
-            value = getattr(import_module(module_name), attribute_name)
-        except (ImportError, AttributeError, ValueError) as exc:
-            raise MLXUserError(
-                f"Unable to load tracker '{class_path}': {exc}. "
-                "Check the import path and installed package."
-            ) from exc
+        value = load_reference(class_path, kind="tracker")
         if not inspect.isclass(value):
             raise MLXUserError(f"Tracker import '{class_path}' does not reference a class.")
         return value
@@ -159,15 +147,4 @@ class CreateTrackingAlgorithm:
             return dict(self.options)
         if self.config_path is None:
             return {}
-        path = Path(self.config_path).expanduser()
-        if not path.is_file():
-            raise MLXUserError(f"Tracker configuration file not found: {path}")
-        try:
-            value = json.loads(path.read_text(encoding="utf-8"))
-        except (OSError, UnicodeError, json.JSONDecodeError) as exc:
-            raise MLXUserError(
-                f"Unable to read tracker configuration '{path}': {exc}"
-            ) from exc
-        if not isinstance(value, dict):
-            raise MLXUserError("Tracker configuration must be a JSON object.")
-        return value
+        return load_component_options(self.config_path, purpose="tracker")

@@ -115,7 +115,7 @@ def load_training_checkpoint(
     }
 
 
-def load_checkpoint_bundle(config: dict[str, Any]):
+def load_checkpoint_bundle(config: dict[str, Any], *, model_registry=None):
     path = config.get("model_path")
     if not path:
         raise MLXUserError("This saliency action requires --model-path.")
@@ -129,7 +129,7 @@ def load_checkpoint_bundle(config: dict[str, Any]):
     runtime["input_size"] = tuple(checkpoint.get("input_size", (256, 256)))
     runtime["transform"] = str(checkpoint.get("transform", "resize"))
     model_name = config.get("model") or checkpoint.get("model_name") or DEFAULT_MODEL
-    model = build_saliency_model(model_name, runtime)
+    model = build_saliency_model(model_name, runtime, **({"registry": model_registry} if model_registry is not None else {}))
     try:
         model.load_state_dict(checkpoint["state_dict"])
     except RuntimeError as exc:

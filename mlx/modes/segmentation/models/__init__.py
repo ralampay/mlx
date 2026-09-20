@@ -36,11 +36,11 @@ def supported_model_names(registry=None) -> list[str]:
     return sorted((registry or DEFAULT_SEGMENTATION_REGISTRY).entries)
 
 
-def grouped_model_names(group_name: str) -> list[str]:
+def grouped_model_names(group_name: str, *, registry=None) -> list[str]:
     if group_name == "all":
-        return supported_model_names()
+        return supported_model_names(registry)
     if group_name == "all-small":
-        return sorted(SMALL_MODEL_NAMES)
+        return sorted(SMALL_MODEL_NAMES & set(supported_model_names(registry)))
     available = ", ".join(sorted(MODEL_GROUP_NAMES))
     raise MLXUserError(f"Unsupported segmentation model group '{group_name}': {available}.")
 

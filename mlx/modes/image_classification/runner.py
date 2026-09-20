@@ -108,6 +108,8 @@ def _generate_cams(config: dict[str, Any]):
 
 
 def _train(config: dict[str, Any]):
+    from mlx.core.configuration import load_component_options
+    config = {**config, "loss_config": load_component_options(config.get("loss_config"), purpose="loss")}
     request = TrainImageClassificationRequest.from_config(config)
     reporter = _reporter(config)
     return TrainWithDatasetSource(

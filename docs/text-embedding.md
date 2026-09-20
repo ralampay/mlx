@@ -74,6 +74,9 @@ python -m mlx --mode text-embedding --action embed \
   --input ./datasets/scifact --output ./artifacts/scifact-e5-ae128
 ```
 
+For checkpoints naming custom Python architecture code, add `--trust-checkpoint-code` only if
+you trust that code. Built-in architectures do not require this flag.
+
 The checkpoint controls any L2 preprocessing expected by the autoencoder. MLX encodes both corpus
 and query vectors through the bottleneck, then applies the optional final
 `--normalize-embeddings` step. Exported CSVs and Chroma therefore use the same latent vectors.
@@ -95,6 +98,12 @@ Benchmarking loads query vectors and copied qrels from the embedding artifacts, 
 vector store, and does not load or execute the GGUF model. The default retrieval depth is 100 and
 metric cutoffs are 1, 5, 10, 20, and 100. Override them with `--top-k` and a comma-separated
 `--k-values`; the maximum cutoff cannot exceed the retrieval depth.
+
+Only exported queries present in the selected qrels are evaluated. Unjudged queries are excluded
+from aggregate metrics and failure lists; `excluded_queries` records their count. This matters for
+BEIR exports containing queries from multiple splits. Judged queries with only nonpositive labels
+remain in the cohort with zero relevance-based metrics. Corrupt manifests, incompatible cosine
+indexes, and invalid rankings fail with actionable errors.
 
 The result directory contains `metrics.json`, one-row `metrics.csv`, `query_metrics.csv`,
 `rankings.jsonl`, `failures.csv`, `benchmark_manifest.json`, `run_metadata.json`, and `report.md`.

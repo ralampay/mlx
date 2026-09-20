@@ -3,6 +3,7 @@ from __future__ import annotations
 import csv
 import json
 import platform
+import pickle
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Mapping, Sequence
@@ -74,8 +75,8 @@ def load_checkpoint(path: str | Path) -> tuple[Path, dict[str, Any]]:
     if not checkpoint_path.is_file():
         raise MLXUserError(f"Autoencoder checkpoint not found: {checkpoint_path}")
     try:
-        value = torch.load(checkpoint_path, map_location="cpu", weights_only=False)
-    except (OSError, RuntimeError, TypeError, ValueError) as exc:
+        value = torch.load(checkpoint_path, map_location="cpu", weights_only=True)
+    except (OSError, RuntimeError, TypeError, ValueError, EOFError, pickle.UnpicklingError) as exc:
         raise MLXUserError(f"Unable to load autoencoder checkpoint '{checkpoint_path}': {exc}") from exc
     if not isinstance(value, dict):
         raise MLXUserError(f"Autoencoder checkpoint must contain a mapping: {checkpoint_path}")
@@ -89,9 +90,24 @@ def load_checkpoint(path: str | Path) -> tuple[Path, dict[str, Any]]:
         raise MLXUserError(
             f"Autoencoder checkpoint '{checkpoint_path}' is missing: {', '.join(missing)}."
         )
-    if int(value["checkpoint_version"]) != CHECKPOINT_VERSION or value["adapter_type"] != "autoencoder":
+    if type(value["checkpoint_version"]) is not int or value["checkpoint_version"] != CHECKPOINT_VERSION or value["adapter_type"] != "autoencoder":
         raise MLXUserError(f"Unsupported autoencoder checkpoint schema: {checkpoint_path}")
+    _validate_checkpoint(value)
     return checkpoint_path, value
+
+
+def _validate_checkpoint(value: Mapping[str, Any]) -> None:
+    for field in ("input_dimensions", "bottleneck_dimensions"):
+        if type(value.get(field)) is not int or value[field] < 1:
+            raise MLXUserError(f"Autoencoder checkpoint has invalid {field}.")
+    for field in ("architecture", "architecture_path"):
+        if not isinstance(value.get(field), str) or not value[field].strip():
+            raise MLXUserError(f"Autoencoder checkpoint requires {field}.")
+    for field in ("model_config", "state_dict"):
+        if not isinstance(value.get(field), Mapping):
+            raise MLXUserError(f"Autoencoder checkpoint requires a {field} mapping.")
+    if type(value.get("expects_l2_normalized_input")) is not bool:
+        raise MLXUserError("Autoencoder checkpoint input normalization must be Boolean.")
 
 
 def build_checkpoint_model(
@@ -99,7 +115,18 @@ def build_checkpoint_model(
     *,
     registry: AutoencoderRegistry = DEFAULT_AUTOENCODER_REGISTRY,
     device: str = "cpu",
+    trust_checkpoint_code: bool = False,
 ):
+    _validate_checkpoint(checkpoint)
+    reference = checkpoint["architecture_path"]
+    # Registry references are explicitly supplied by the application, not the checkpoint.
+    trusted = set(DEFAULT_AUTOENCODER_REGISTRY.entries.values()) | set(registry.entries.values())
+    trusted.add("mlx.modes.autoencoder.architectures.simple:SimpleAutoencoderDefinition")
+    if reference not in trusted and not trust_checkpoint_code:
+        raise MLXUserError(
+            "Checkpoint references external architecture code. Register its exact import "
+            "reference explicitly or use --trust-checkpoint-code only for a trusted checkpoint."
+        )
     definition, _ = registry.resolve(str(checkpoint["architecture_path"]))
     config = dict(checkpoint["model_config"])
     config["input_dimensions"] = int(checkpoint["input_dimensions"])

@@ -40,6 +40,11 @@ class ChromaVectorStore:
                     name=collection,
                     embedding_function=None,
                 )
+                metadata = self._collection.metadata or {}
+                if metadata.get("hnsw:space") != "cosine":
+                    raise MLXUserError("Stored Chroma collection does not declare cosine similarity.")
+        except MLXUserError:
+            raise
         except Exception as exc:
             raise MLXUserError(
                 f"Unable to open Chroma vector store '{root}': {exc}."

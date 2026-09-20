@@ -75,6 +75,8 @@ def compute_query_metrics(
     *, metric_names: Sequence[str] = DEFAULT_METRICS,
     registry: RetrievalMetricRegistry = DEFAULT_METRIC_REGISTRY,
 ) -> QueryMetricResult:
+    if len(set(retrieved_document_ids)) != len(retrieved_document_ids):
+        raise MLXUserError("Retrieved document IDs must be unique.")
     relevances = [max(0, int(qrels.get(identifier, 0))) for identifier in retrieved_document_ids]
     ideal = [int(value) for value in qrels.values() if value > 0]
     relevant_count = len(ideal)

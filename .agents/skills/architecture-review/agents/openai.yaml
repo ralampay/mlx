@@ -1,0 +1,7 @@
+interface:
+  display_name: "Architecture Review"
+  short_description: "Review repository architecture and refactor only when justified."
+  default_prompt: "Review the current repository architecture and refactor concrete issues where justified."
+
+policy:
+  allow_implicit_invocation: false

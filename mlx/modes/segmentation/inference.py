@@ -124,17 +124,17 @@ class RunSegmentationStreamInference:
             raise MLXUserError(
                 "Segmentation stream inference requires injected frame source and sink adapters."
             )
-        self.model, self.metadata = load_checkpoint_bundle(self.config, **({"model_registry": self.model_registry} if self.model_registry is not None else {}))
-        self.model = self.model.to(self.device)
-        self.model.eval()
-        emit(
-            self.reporter,
-            "info",
-            f"Using device: {self.device} | Input size: {self.metadata['input_size'][0]}x{self.metadata['input_size'][1]}"
-        )
         frames_processed = 0
         stopped_by_user = False
         try:
+            self.model, self.metadata = load_checkpoint_bundle(self.config, **({"model_registry": self.model_registry} if self.model_registry is not None else {}))
+            self.model = self.model.to(self.device)
+            self.model.eval()
+            emit(
+                self.reporter,
+                "info",
+                f"Using device: {self.device} | Input size: {self.metadata['input_size'][0]}x{self.metadata['input_size'][1]}"
+            )
             while True:
                 ok, frame = self.frame_source.read()
                 if not ok or frame is None:
@@ -153,8 +153,10 @@ class RunSegmentationStreamInference:
                     emit(self.reporter, "info", "Exiting inference.")
                     break
         finally:
-            self.frame_source.release()
-            self.frame_sink.close()
+            try:
+                self.frame_source.release()
+            finally:
+                self.frame_sink.close()
         return SegmentationStreamResult(
             frames_processed=frames_processed,
             stopped_by_user=stopped_by_user,

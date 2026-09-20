@@ -7,7 +7,7 @@ from typing import Any, Mapping, Protocol, runtime_checkable
 from torch import nn
 
 from mlx.core.exceptions import MLXUserError
-from mlx.modes.autoencoder.model_registry import _load_definition
+from mlx.modes.autoencoder.definitions import load_definition
 
 
 @runtime_checkable
@@ -99,7 +99,7 @@ class ReconstructionLossRegistry:
                 f"Unsupported autoencoder loss '{reference}'. Available losses: {available}; "
                 "external losses may use package.module:DefinitionClass."
             )
-        definition = _load_definition(path, "loss")
+        definition = load_definition(path, "loss")
         if not isinstance(definition, ReconstructionLossDefinition):
             raise MLXUserError(
                 f"Loss definition '{path}' must provide name, description, and build(config)."

@@ -67,7 +67,7 @@ mlx/
     ├── image_recognition_oc/     normal-only image recognition algorithms and research artifacts
     │   └── aws/                  single/all-backbone SageMaker training and benchmarking
     ├── segmentation/             paired transforms/masks, U-Net models/groups, metrics, samples, research artifacts
-    │   ├── streaming.py          injected frame source/sink contracts and OpenCV adapters
+    │   ├── streaming.py          compatibility names for shared frame ports and OpenCV adapters
     │   ├── visualization.py      pure mask coloring, blending, and view composition
     │   └── models/backbone_factory.py  isolated classifier-backbone adapter
     ├── saliency_mapping/         still-image SOD data, loss, metrics, training, inference, and artifacts
@@ -532,6 +532,10 @@ vectors through `VectorStore`. The llama.cpp adapter owns GGUF loading and seque
 validation. The Chroma adapter owns persistence and converts cosine distance to a normalized
 higher-is-better score. Neither third-party package is imported by unrelated modes.
 
+Embedding backend metadata and provider/store factories are resolved before output creation or
+model construction. The command closes an acquired vector store even when CSV initialization
+fails; artifact setup and embedding share the same cleanup boundary.
+
 BEIR parsing produces immutable corpus, query, relevance-judgment, and dataset values independently
 of embedding and retrieval. Document title/body composition and configurable query/document
 prefixes live at the workflow boundary rather than in the llama.cpp adapter. Embedding artifacts
@@ -564,6 +568,8 @@ is supplied.
 The `autoencoder` mode owns numeric CSV parsing, reconstruction training, checkpoint schemas,
 model/loss registries, standalone bottleneck export, and Rich presentation. Its immutable lazy
 registries support built-in aliases and explicit `package.module:DefinitionClass` references.
+Both registries use the mode-owned `autoencoder.definitions` constructor; neither registry
+depends on the other. Each registry validates its own definition protocol.
 Definitions build models or loss modules from validated mappings, allowing custom experiments
 without adding selection branches to commands. Checkpoints retain the exact architecture import
 path and preprocessing contract so later encoding reconstructs the correct implementation.
@@ -609,6 +615,10 @@ finalizes partial MOT output but skips whole-video benchmarking. The CLI supplie
 adapters. Other modes keep their output
 formatters in `presentation.py`; ongoing changes must move new terminal/window behavior toward
 the same injected-adapter boundary rather than adding UI work to model, data, or metric modules.
+Segmentation streaming reuses the lazy OpenCV adapters and frame ports in `mlx.core.streaming`;
+its historic adapter names and public capture attribute remain available. The stream command
+releases its injected source and closes its sink on model-setup failures as well as loop exit,
+and attempts sink cleanup even if source release fails.
 Segmentation's reusable visualization transforms live in `visualization.py`; only window display
 and prompts remain in presentation. Its encoder consumes a `ClassificationBackboneFactory`, with
 the existing image-classification implementation isolated in the default compatibility adapter

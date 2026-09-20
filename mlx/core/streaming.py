@@ -10,7 +10,7 @@ from mlx.core.exceptions import MLXUserError
 
 
 class FrameSource(Protocol):
-    def read(self) -> tuple[bool, np.ndarray]: ...
+    def read(self) -> tuple[bool, np.ndarray | None]: ...
 
     def release(self) -> None: ...
 
@@ -108,7 +108,7 @@ class OpenCVFrameSource:
         self._capture = capture
         self._cv2 = cv2
 
-    def read(self) -> tuple[bool, np.ndarray]:
+    def read(self) -> tuple[bool, np.ndarray | None]:
         return self._capture.read()
 
     def release(self) -> None:

@@ -344,3 +344,29 @@ def test_text_embedding_adapter_transforms_before_export_and_indexing(tmp_path: 
     with (output / "query_embeddings.csv").open(newline="") as source:
         row = next(csv.DictReader(source))
     assert json.loads(row["embedding"]) == [1.0]
+
+
+@pytest.mark.parametrize("registry", [AutoencoderRegistry({}), ReconstructionLossRegistry({})])
+@pytest.mark.parametrize("invalid", ["not-class", "constructor", "protocol"])
+def test_definition_factories_preserve_contextual_failures(monkeypatch, registry, invalid):
+    module = ModuleType("test_invalid_definition")
+
+    class BrokenDefinition:
+        def __init__(self):
+            raise ValueError("invalid settings")
+
+    module.Definition = {
+        "not-class": lambda: None,
+        "constructor": BrokenDefinition,
+        "protocol": type("MissingProtocol", (), {}),
+    }[invalid]
+    monkeypatch.setitem(sys.modules, module.__name__, module)
+    expected = {
+        "not-class": "does not reference a class",
+        "constructor": "Unable to construct",
+        "protocol": "must provide name, description",
+    }[invalid]
+    with pytest.raises(MLXUserError, match=expected) as error:
+        registry.resolve("test_invalid_definition:Definition")
+    if invalid == "constructor":
+        assert isinstance(error.value.__cause__, ValueError)

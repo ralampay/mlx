@@ -1,10 +1,9 @@
 from __future__ import annotations
-import inspect
 from dataclasses import dataclass, field
 from types import MappingProxyType
 from typing import Mapping
 from mlx.core.exceptions import MLXUserError
-from mlx.core.extensions import load_reference
+from mlx.modes.autoencoder.definitions import load_definition
 from mlx.modes.autoencoder.contracts import AutoencoderDefinition
 
 BUILTIN_AUTOENCODERS: Mapping[str, str] = MappingProxyType(
@@ -49,22 +48,12 @@ class AutoencoderRegistry:
                 f"Unsupported autoencoder model '{reference}'. Available models: {available}; "
                 "external models may use package.module:DefinitionClass."
             )
-        definition = _load_definition(path, "autoencoder")
+        definition = load_definition(path, "autoencoder")
         if not isinstance(definition, AutoencoderDefinition):
             raise MLXUserError(
                 f"Autoencoder definition '{path}' must provide name, description, and build(config)."
             )
         return definition, path
-
-
-def _load_definition(path: str, kind: str):
-    value = load_reference(path, kind=kind)
-    if not inspect.isclass(value):
-        raise MLXUserError(f"{kind.title()} import '{path}' does not reference a class.")
-    try:
-        return value()
-    except (TypeError, ValueError) as exc:
-        raise MLXUserError(f"Unable to construct {kind} definition '{path}': {exc}") from exc
 
 
 DEFAULT_AUTOENCODER_REGISTRY = AutoencoderRegistry()

@@ -85,6 +85,11 @@ class EmbedTextCommand:
 
     def execute(self) -> EmbedTextResult:
         model_path, input_path = self._validate_request()
+        backend = self.backend_registry.resolve(self.request.embedding_backend)
+        provider_factory = self.provider_factory or self.backend_registry.factory(self.request.embedding_backend)
+        factory = self.vector_store_factory or self.vector_store_registry.resolve(
+            self.request.vector_store
+        )
         dataset = self.dataset_loader.load(input_path)
         output_dir = prepare_new_output_directory(
             str(self.request.output_path), purpose="Text embedding"
@@ -100,19 +105,15 @@ class EmbedTextCommand:
                 "queries": len(dataset.queries),
             },
         )
-        provider_factory = self.provider_factory or self.backend_registry.factory(self.request.embedding_backend)
         provider = provider_factory(model_path)
-        factory = self.vector_store_factory or self.vector_store_registry.resolve(
-            self.request.vector_store
-        )
         vector_store_path = output_dir / "vector_store"
         vector_store_path.mkdir(parents=True, exist_ok=True)
         store = factory(vector_store_path, collection="corpus", create=True)
         corpus_csv = output_dir / "corpus_embeddings.csv"
         query_csv = output_dir / "query_embeddings.csv"
-        self.artifact_writer.initialize_csv(corpus_csv, kind="corpus")
-        self.artifact_writer.initialize_csv(query_csv, kind="query")
         try:
+            self.artifact_writer.initialize_csv(corpus_csv, kind="corpus")
+            self.artifact_writer.initialize_csv(query_csv, kind="query")
             self._embed_corpus(dataset, provider, store, corpus_csv)
             self._embed_queries(dataset, provider, query_csv)
         finally:
@@ -135,7 +136,7 @@ class EmbedTextCommand:
             source_dimensions=self._source_dimensions,
             adapter=(dict(self.transformer.provenance) if self.transformer else None),
             started_at=started_at,
-            backend=self.backend_registry.resolve(self.request.embedding_backend).provenance,
+            backend=backend.provenance,
         )
         result = EmbedTextResult(
             output_dir=output_dir,

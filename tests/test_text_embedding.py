@@ -354,3 +354,77 @@ def test_chroma_adapter_persists_and_reloads_when_installed(tmp_path: Path) -> N
     assert [item.id for item in results] == ["d1", "d2"]
     assert results[0].metadata["title"] == "One"
     assert results[0].score > results[1].score
+
+
+@pytest.mark.parametrize("kind", ["corpus", "query"])
+def test_embed_closes_store_when_csv_initialization_fails(tmp_path, kind):
+    dataset = write_beir(tmp_path / "dataset")
+    model = tmp_path / "model.gguf"
+    model.touch()
+    store = FakeVectorStore()
+    provider = FakeEmbeddingProvider()
+
+    class FailingWriter(EmbeddingArtifactWriter):
+        def initialize_csv(self, path, *, kind):
+            if kind == failing_kind:
+                raise MLXUserError("Cannot initialize embedding CSV")
+            return super().initialize_csv(path, kind=kind)
+
+    failing_kind = kind
+    with pytest.raises(MLXUserError, match="Cannot initialize"):
+        EmbedTextCommand(
+            EmbedTextRequest(model=str(model), input_path=str(dataset),
+                             output_path=str(tmp_path / "output")),
+            provider_factory=lambda path: provider,
+            vector_store_factory=lambda *args, **kwargs: store,
+            artifact_writer=FailingWriter(),
+        ).execute()
+    assert store.closed
+    assert provider.batches == []
+
+
+@pytest.mark.parametrize("invalid", ["backend", "store"])
+def test_embed_rejects_unknown_components_before_loading_resources(tmp_path, invalid):
+    from mlx.modes.text_embedding.embedding.registry import EmbeddingBackendRegistry
+
+    model = tmp_path / "model.gguf"
+    model.touch()
+    output = tmp_path / "output"
+    calls = []
+    registry = EmbeddingBackendRegistry({}).register(
+        "fake", lambda path: calls.append(path) or FakeEmbeddingProvider(), provenance="fake"
+    )
+    # Injecting a factory does not bypass the backend's provenance contract.
+    with pytest.raises(MLXUserError, match="Unsupported"):
+        EmbedTextCommand(
+            EmbedTextRequest(
+                model=str(model), input_path=str(tmp_path / "unused-dataset"),
+                output_path=str(output),
+                embedding_backend="missing" if invalid == "backend" else "fake",
+                vector_store="missing",
+            ),
+            backend_registry=registry,
+            provider_factory=lambda path: calls.append(path) or FakeEmbeddingProvider(),
+        ).execute()
+    assert not output.exists()
+    assert calls == []
+
+
+def test_embed_registered_backend_keeps_provenance(tmp_path):
+    from mlx.modes.text_embedding.embedding.registry import EmbeddingBackendRegistry
+
+    dataset = write_beir(tmp_path / "dataset")
+    model = tmp_path / "model.gguf"
+    model.touch()
+    output = tmp_path / "output"
+    registry = EmbeddingBackendRegistry({}).register(
+        "fake", lambda path: FakeEmbeddingProvider(), provenance="custom-embedding-library"
+    )
+    EmbedTextCommand(
+        EmbedTextRequest(model=str(model), input_path=str(dataset), output_path=str(output),
+                         embedding_backend="fake"),
+        backend_registry=registry,
+        vector_store_factory=lambda *args, **kwargs: FakeVectorStore(),
+    ).execute()
+    manifest = json.loads((output / "embedding_manifest.json").read_text())
+    assert manifest["model"]["backend"] == "custom-embedding-library"

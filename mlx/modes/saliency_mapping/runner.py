@@ -6,6 +6,7 @@ from typing import Any
 from mlx.core.commands import NullWorkflowReporter
 from mlx.core.datasets import TrainWithDatasetSource, validate_dataset_source_options
 from mlx.core.exceptions import MLXUserError
+from mlx.core.configuration import with_explicit_options
 from mlx.modes.saliency_mapping.benchmark import (
     BenchmarkSaliencyMapping,
     BenchmarkSaliencyModelGroup,
@@ -118,6 +119,7 @@ ACTION_HANDLERS = {
 
 
 def run_saliency_mapping(mode_config: dict[str, Any]) -> Any:
+    mode_config = with_explicit_options(mode_config)
     config = {**DEFAULT_CONFIG, **mode_config}
     config["action"] = config.get("action") or "test"
     validate_dataset_source_options(config, action=config["action"])

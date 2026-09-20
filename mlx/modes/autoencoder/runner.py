@@ -4,7 +4,7 @@ from typing import Any
 
 from mlx.core.commands import NullWorkflowReporter
 from mlx.core.exceptions import MLXUserError
-from mlx.core.configuration import load_component_options
+from mlx.core.configuration import load_component_options, with_explicit_options
 from mlx.modes.autoencoder.commands import (
     EmbedAutoencoder,
     ListAutoencoderLosses,
@@ -84,6 +84,7 @@ ACTION_HANDLERS = {
 
 
 def run_autoencoder(config: dict[str, Any]):
+    config = with_explicit_options(config)
     action = config.get("action") or "ls-models"
     handler = ACTION_HANDLERS.get(action)
     if handler is None:

@@ -9,6 +9,7 @@ from mlx.core.datasets import (
 from mlx.core.commands import NullWorkflowReporter
 from mlx.core.streaming import OpenCVFrameSink
 from mlx.core.exceptions import MLXUserError
+from mlx.core.configuration import with_explicit_options
 from mlx.modes.video_anomaly_detection.commands import (
     BenchmarkVideoAnomalyModel,
     InferVideoAnomaly,
@@ -147,6 +148,7 @@ ACTION_HANDLERS = {
 
 
 def run_video_anomaly_detection(mode_config: dict[str, Any]):
+    mode_config = with_explicit_options(mode_config)
     if mode_config.get("platform", "local") == "aws":
         from mlx.modes.video_anomaly_detection.aws.runner import (
             run_aws_video_anomaly_detection,

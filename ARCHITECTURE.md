@@ -496,6 +496,11 @@ their former umbrella request types for Python compatibility. `ConfigRequest` ke
 public compatibility values but discards underscore-prefixed CLI bookkeeping. Commands may still
 adapt a typed request to a mapping at a legacy boundary; runners are responsible for selecting
 the action-specific type.
+Runners that distinguish explicit options normalize their input through
+`core.configuration.with_explicit_options` before adding mode defaults. CLI-provided option
+metadata remains authoritative, including an empty set; a plain Python mapping treats its
+supplied public keys as explicit. Normalization copies the mapping and option set, so callers'
+configuration is not mutated. Typed requests continue to discard this boundary-only metadata.
 
 Tracking, object-detection providers, image-classification custom models, temporal encoders, and
 3D video backbones expose immutable registry mappings or registry value objects. Extension APIs
@@ -666,7 +671,10 @@ local extension without changing runners. Registries remain mode-owned; shared i
 validation and JSON option loading in core store no registrations. Tracking reuses those helpers.
 Classification feature-head removal is catalog metadata rather than another model-name dispatch.
 
-Classification, segmentation, and saliency package exports are lazy compatibility surfaces.
+Classification, segmentation, saliency, autoencoder, text embedding, one-class recognition,
+and video anomaly package exports are lazy compatibility surfaces. Importing their requests or
+registries does not load workflow commands, runners, or presentation merely through package
+initialization. Public command names resolve on demand to their owning implementation modules.
 Inspecting a registry must not import visualization or optional provider integrations. Detailed
 parameter-count listings may construct models; metadata-only discovery must not do so.
 Classification and segmentation runners normalize loss options before constructing typed training

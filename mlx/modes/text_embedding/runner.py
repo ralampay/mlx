@@ -4,6 +4,7 @@ from typing import Any
 
 from mlx.core.commands import NullWorkflowReporter
 from mlx.core.exceptions import MLXUserError
+from mlx.core.configuration import with_explicit_options
 from mlx.modes.text_embedding.commands import (
     BenchmarkTextEmbeddingCommand,
     EmbedTextCommand,
@@ -109,6 +110,7 @@ ACTION_HANDLERS = {
 
 
 def run_text_embedding(config: dict[str, Any]) -> Any:
+    config = with_explicit_options(config)
     action = config.get("action") or "embed"
     handler = ACTION_HANDLERS.get(action)
     if handler is None:

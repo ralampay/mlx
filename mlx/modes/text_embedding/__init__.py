@@ -1,17 +1,20 @@
-"""Provider-neutral text embedding and retrieval benchmarking workflows."""
+"""Text embedding public workflows, loaded on demand."""
+from importlib import import_module
 
-from mlx.modes.text_embedding.commands import (
-    BenchmarkTextEmbeddingCommand,
-    EmbedTextCommand,
-)
-from mlx.modes.text_embedding.requests import (
-    BenchmarkTextEmbeddingRequest,
-    EmbedTextRequest,
-)
+_EXPORTS = {
+    "BenchmarkTextEmbeddingCommand": "commands",
+    "BenchmarkTextEmbeddingRequest": "requests",
+    "EmbedTextCommand": "commands",
+    "EmbedTextRequest": "requests",
+}
+__all__ = list(_EXPORTS)
 
-__all__ = [
-    "BenchmarkTextEmbeddingCommand",
-    "BenchmarkTextEmbeddingRequest",
-    "EmbedTextCommand",
-    "EmbedTextRequest",
-]
+
+def __getattr__(name):
+    if name not in _EXPORTS:
+        raise AttributeError(name)
+    return getattr(import_module(f"{__name__}.{_EXPORTS[name]}"), name)
+
+
+def __dir__():
+    return sorted(set(globals()) | set(__all__))

@@ -10,6 +10,7 @@ from mlx.core.datasets import (
 from mlx.core.commands import NullWorkflowReporter
 from mlx.core.streaming import NullFrameSink
 from mlx.core.exceptions import MLXUserError
+from mlx.core.configuration import with_explicit_options
 from mlx.core.ui import print_model_parameter_table
 from mlx.modes.object_detection.commands import (
     BenchmarkObjectDetectionModel,
@@ -39,6 +40,7 @@ from mlx.modes.object_detection.data import object_detection_dataset_root
 
 
 def run_object_detection(config: dict[str, Any]) -> Any:
+    config = with_explicit_options(config)
     if config.get("platform", "local") == "aws":
         from mlx.modes.object_detection.aws.runner import run_aws_object_detection
 

@@ -10,6 +10,7 @@ from mlx.core.datasets import (
 from mlx.core.commands import NullWorkflowReporter
 from mlx.core.streaming import NullFrameSink
 from mlx.core.exceptions import MLXUserError
+from mlx.core.configuration import with_explicit_options
 from mlx.core.ui import print_model_parameter_table
 from mlx.modes.segmentation.data import (
     BuildSegmentationDataset,
@@ -198,6 +199,7 @@ ACTION_HANDLERS = {
 
 
 def run_segmentation(mode_config: dict[str, Any]) -> Any:
+    mode_config = with_explicit_options(mode_config)
     config = {**DEFAULT_CONFIG, **mode_config}
     config["action"] = config.get("action") or DEFAULT_CONFIG["action"]
     validate_dataset_source_options(config, action=config["action"])

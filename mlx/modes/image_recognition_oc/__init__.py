@@ -1,17 +1,22 @@
-from mlx.modes.image_recognition_oc.commands import (
-    BenchmarkImageOneClass,
-    ImageOneClassInferenceResult,
-    InferImageOneClass,
-    ListImageOneClassModels,
-    TrainImageOneClassModel,
-)
-from mlx.modes.image_recognition_oc.runner import run_image_recognition_oc
+"""One-class image recognition public workflows, loaded on demand."""
+from importlib import import_module
 
-__all__ = [
-    "BenchmarkImageOneClass",
-    "ImageOneClassInferenceResult",
-    "InferImageOneClass",
-    "ListImageOneClassModels",
-    "TrainImageOneClassModel",
-    "run_image_recognition_oc",
-]
+_EXPORTS = {
+    "BenchmarkImageOneClass": "evaluation",
+    "ImageOneClassInferenceResult": "inference",
+    "InferImageOneClass": "inference",
+    "ListImageOneClassModels": "list_models",
+    "TrainImageOneClassModel": "training",
+    "run_image_recognition_oc": "runner",
+}
+__all__ = list(_EXPORTS)
+
+
+def __getattr__(name):
+    if name not in _EXPORTS:
+        raise AttributeError(name)
+    return getattr(import_module(f"{__name__}.{_EXPORTS[name]}"), name)
+
+
+def __dir__():
+    return sorted(set(globals()) | set(__all__))

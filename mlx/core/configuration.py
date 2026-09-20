@@ -1,4 +1,4 @@
-"""Loading explicit component option objects; mode policy stays in its owner."""
+"""Configuration boundary helpers; mode-specific defaults remain mode owned."""
 from __future__ import annotations
 import json
 from pathlib import Path
@@ -19,3 +19,15 @@ def load_component_options(source: str | Mapping[str, Any] | None, *, purpose: s
     if not isinstance(value, dict):
         raise MLXUserError(f"{purpose} configuration must be a JSON object.")
     return value
+
+
+def with_explicit_options(config: Mapping[str, Any]) -> dict[str, Any]:
+    """Copy runner input, distinguishing parser defaults from Python-supplied values."""
+    values = dict(config)
+    explicit = config.get("_explicit_options")
+    values["_explicit_options"] = (
+        set(explicit) if explicit is not None else {
+            name for name in config if not name.startswith("_")
+        }
+    )
+    return values

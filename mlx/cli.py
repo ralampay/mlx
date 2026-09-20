@@ -286,6 +286,12 @@ def build_parser() -> RichArgumentParser:
         dest="calibration_bins",
     )
     parser.add_argument(
+        "--curve-bins",
+        type=int,
+        default=4096,
+        dest="curve_bins",
+    )
+    parser.add_argument(
         "--threshold-steps",
         type=int,
         default=101,
@@ -293,6 +299,9 @@ def build_parser() -> RichArgumentParser:
     )
     parser.add_argument("--mask-threshold", type=float, default=0.5, dest="mask_threshold")
     parser.add_argument("--overlay-alpha", type=float, default=0.45, dest="overlay_alpha")
+    parser.add_argument("--bce-weight", type=float, default=1.0, dest="bce_weight")
+    parser.add_argument("--ssim-weight", type=float, default=1.0, dest="ssim_weight")
+    parser.add_argument("--iou-weight", type=float, default=1.0, dest="iou_weight")
     parser.add_argument("--cam-method", default="gradcam", dest="cam_method")
     parser.add_argument("--target-layer", default=None, dest="target_layer")
     parser.add_argument("--target-index", type=int, default=None, dest="target_index")
@@ -356,6 +365,9 @@ def _render_help() -> None:
     usage.add_row("python -m mlx --mode segmentation --action ls-models")
     usage.add_row("python -m mlx --mode segmentation --action infer-image --model-path ./unet-seg.pt --input-img ./sample.jpg")
     usage.add_row("python -m mlx --mode segmentation --action build-dataset --dataset ./raw-segmentation")
+    usage.add_row("python -m mlx --mode saliency-mapping --action ls-models")
+    usage.add_row("python -m mlx --mode saliency-mapping --action train --model unet --dataset ./saliency-dataset --output ./saliency-run")
+    usage.add_row("python -m mlx --mode saliency-mapping --action benchmark --model-path ./saliency-run/unet.pth --dataset ./saliency-dataset --output ./saliency-benchmark")
     usage.add_row("python -m mlx --mode video_anomaly_detection --action train --model resnet18 --backbone-mode 3d --backbone-temporal-kernel-size 3 --clip-length 16 --dataset ./ped2-prepared --output ./artifacts/ped2")
     usage.add_row("python -m mlx --mode video_anomaly_detection --platform aws --action train-all --config ./aws-video-anomaly.yaml")
     usage.add_row("python -m mlx --mode video_anomaly_detection --platform aws --action status --config ./aws-video-anomaly.yaml --job-name JOB_NAME --watch")
@@ -515,10 +527,15 @@ def _render_help() -> None:
     options.add_row("--split", "test", "Object-detection or segmentation dataset split used by benchmark: train, val, or test.")
     options.add_row("--boundary-tolerance", "2", "Boundary-metric matching tolerance in resized-image pixels.")
     options.add_row("--calibration-bins", "15", "Confidence bins used for segmentation calibration metrics.")
+    options.add_row("--curve-bins", "4096", "Score bins used for bounded-memory segmentation ROC/PR metrics.")
     options.add_row("--threshold-steps", "101", "Number of binary segmentation thresholds evaluated by benchmark.")
     options.add_row("--mask-threshold", "0.5", "Threshold used when rendering binary segmentation masks.")
     options.add_row("--overlay-alpha", "0.45", "Blend strength for segmentation overlays.")
-    options.add_row("--cam-method", "gradcam", "CAM method for image-classification cam: gradcam, ablationcam, or scorecam.")
+    options.add_row("--bce-weight / --ssim-weight / --iou-weight", "1.0", "Weights for the saliency BASNet-style hybrid objective.")
+    options.add_row("--cam-method", "gradcam", "Registered CAM method or an explicit package.module:Class reference.")
+    options.add_row("--names-only", "False", "List model names without constructing models in supported modes.")
+    options.add_row("--embedding-backend", "llama-cpp", "Text-embedding backend; use ls-embedding-backends for discovery.")
+    options.add_row("--metrics", "None", "Comma-separated retrieval metric names; use text-embedding ls-metrics for discovery.")
     options.add_row("--target-layer", "None", "Optional dotted module path to explain, such as layer4.1 or features.-1.")
     options.add_row("--target-index", "None", "Optional class index or Siamese output index to explain. Defaults to model prediction.")
     options.add_row("--max-samples", "None", "Maximum number of test samples or one-shot pairs to render.")

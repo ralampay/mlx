@@ -162,7 +162,18 @@ def _train(config: dict[str, Any]):
     ).execute()
 
 
+def _list_losses(config):
+    from mlx.core.model_listing import ListComponentNames
+    from mlx.core.presentation import display_component_inventory
+    from mlx.modes.segmentation.losses import LOSS_DEFINITIONS
+    result = ListComponentNames(LOSS_DEFINITIONS).execute()
+    if config.get("output_format") != "json":
+        display_component_inventory(result, title="Available Losses")
+    return result
+
+
 ACTION_HANDLERS = {
+    "ls-losses": _list_losses,
     "benchmark": lambda config: BenchmarkSegmentation(
         BenchmarkSegmentationRequest.from_config(config),
         reporter=_reporter(config),
@@ -188,8 +199,8 @@ def run_segmentation(mode_config: dict[str, Any]) -> Any:
     config = {**DEFAULT_CONFIG, **mode_config}
     config["action"] = config.get("action") or DEFAULT_CONFIG["action"]
     validate_dataset_source_options(config, action=config["action"])
-    if config["action"] == "ls-models":
-        return ACTION_HANDLERS["ls-models"](config)
+    if config["action"] in {"ls-models", "ls-losses"}:
+        return ACTION_HANDLERS[config["action"]](config)
 
     config["model"] = mode_config.get("model") or DEFAULT_MODEL
     if config["model"] in MODEL_GROUP_NAMES and config["action"] != "train":

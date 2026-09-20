@@ -62,12 +62,14 @@ class BenchmarkImageClassification:
         request: ImageClassificationRequest,
         *,
         reporter: WorkflowReporter | None = None,
+        model_registry=None,
     ) -> None:
+        self.model_registry = model_registry
         self.request = request
         self.reporter = reporter or NullWorkflowReporter()
 
     def execute(self) -> dict[str, float]:
-        return _run_benchmark(self.request.to_config(), reporter=self.reporter)
+        return _run_benchmark(self.request.to_config(), reporter=self.reporter, model_registry=self.model_registry)
 
 
 def benchmark_image_classification(config: dict[str, Any]) -> dict[str, float]:
@@ -83,9 +85,10 @@ def _run_benchmark(
     config: dict[str, Any],
     *,
     reporter: WorkflowReporter | None = None,
+    model_registry=None,
 ) -> dict[str, float]:
     reporter = reporter or NullWorkflowReporter()
-    model, metadata = load_checkpoint_bundle(config)
+    model, metadata = load_checkpoint_bundle(config, **({"model_registry": model_registry} if model_registry is not None else {}))
     family = metadata["family"]
     device = config.get("device", "cpu")
     model = model.to(device)

@@ -269,6 +269,11 @@ class Backbone3DRegistry:
     def resolve(self, name):
         reference = self.entries.get(name)
         if reference is None:
+            if name.startswith("siamese-"):
+                raise MLXUserError(
+                    f"Model '{name}' is a one-shot/Siamese model, not a registered "
+                    "3D video-anomaly backbone. Select a registered 3D backbone."
+                )
             raise MLXUserError(f"Model '{name}' has no 3D video-anomaly backbone. Available models: {', '.join(sorted(self.entries))}.")
         return load_reference(reference, kind="3D backbone") if isinstance(reference, str) else reference
 

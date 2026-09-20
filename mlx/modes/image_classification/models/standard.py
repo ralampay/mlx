@@ -75,7 +75,7 @@ def build_standard_model(
     config: dict | None = None,
     registry: StandardModelRegistry | None = None,
 ):
-    custom_builder = (registry or DEFAULT_STANDARD_MODEL_REGISTRY).builders.get(model_name)
+    custom_builder = model_name if ":" in model_name else (registry or DEFAULT_STANDARD_MODEL_REGISTRY).builders.get(model_name)
     if custom_builder is not None:
         if isinstance(custom_builder, str):
             custom_builder = load_reference(custom_builder, kind="classification model")

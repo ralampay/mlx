@@ -169,6 +169,7 @@ class TrainSegmentationModel:
             test_split_path=test_split_path,
             output_dir=self.paths["output_dir"],
             reporter=self.reporter,
+            **({"model_registry": self.model_registry} if self.model_registry is not None else {}),
         ).execute()
 
     def _run_epochs(

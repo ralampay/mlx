@@ -213,15 +213,18 @@ def test_optional_test_split_is_skipped_or_rejected_when_malformed(
         resolve_optional_segmentation_test_split(dataset)
 
 
+@pytest.mark.parametrize("model_registry", [None, object()])
 def test_training_sample_generation_falls_back_to_best_loss(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
+    model_registry,
 ) -> None:
     events = []
     command = segmentation_train.TrainSegmentationModel.__new__(
         segmentation_train.TrainSegmentationModel
     )
     command.config = {"device": "cpu"}
+    command.model_registry = model_registry
     command.reporter = CallbackWorkflowReporter(events.append)
     command.paths = {
         "dice_checkpoint_path": tmp_path / "missing-best-dice.pth",
@@ -247,6 +250,7 @@ def test_training_sample_generation_falls_back_to_best_loss(
     command._generate_test_samples(tmp_path / "dataset" / "test")
 
     assert captured["checkpoint_path"] == command.paths["checkpoint_path"]
+    assert captured.get("model_registry") is model_registry
     assert any(event.level == "warning" for event in events)
 
 

@@ -60,6 +60,15 @@ def _reporter(config: dict[str, Any]):
 
 
 def _list_models(config: dict[str, Any]):
+    if config.get("names_only"):
+        from mlx.modes.video_anomaly_detection.variants import video_anomaly_model_variants
+        from mlx.core.model_listing import ListComponentNames
+        from mlx.core.presentation import display_component_inventory
+        result = ListComponentNames([item.variant_id for item in video_anomaly_model_variants()]).execute()
+        if config.get("output_format") != "json":
+            display_component_inventory(result, title="Available Models")
+        return result
+
     result = ListVideoAnomalyModels(
         ListVideoAnomalyModelsRequest.from_config(config),
         reporter=_reporter(config),

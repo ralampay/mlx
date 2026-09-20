@@ -70,6 +70,8 @@ mlx/
     │   ├── streaming.py          injected frame source/sink contracts and OpenCV adapters
     │   ├── visualization.py      pure mask coloring, blending, and view composition
     │   └── models/backbone_factory.py  isolated classifier-backbone adapter
+    ├── saliency_mapping/         still-image SOD data, loss, metrics, training, inference, and artifacts
+    │   └── models/               one-channel registry over shared segmentation U-Net construction
     ├── object_detection/
     │   ├── models.py             provider-neutral detection values and detector protocol
     │   ├── providers.py          lazy provider registry and provider protocol
@@ -97,6 +99,7 @@ The primary workflow commands are:
 | Image classification | `TrainImageClassificationModel`, `SmokeTestImageClassificationModel`, `BenchmarkImageClassification`, `InferImageClassification`, `GenerateImageClassificationCams`, `BuildImageClassificationDataset`, `ListImageClassificationModels`, AWS submit/status/stop/resume commands |
 | One-class image recognition | `TrainImageOneClassModel`, `BenchmarkImageOneClass`, `InferImageOneClass`, `ListImageOneClassModels`, AWS submit/status/stop/resume commands |
 | Segmentation | `TrainSegmentationModel`, `TrainAllSegmentationModels`, `GenerateSegmentationSamples`, `SmokeTestSegmentationModel`, `BenchmarkSegmentation`, `InferSegmentationImage`, `RunSegmentationStreamInference`, `BuildSegmentationDataset`, `ListSegmentationModels` |
+| Saliency mapping | `TrainSaliencyModel`, `TrainSaliencyModelGroup`, `GenerateSaliencySamples`, `SmokeTestSaliencyModels`, `BenchmarkSaliencyMapping`, `BenchmarkSaliencyModelGroup`, `InferSaliencyImage`, `BuildSaliencyDataset`, `ListSaliencyModels` |
 | Video anomaly detection | `TrainVideoAnomalyModel`, `BenchmarkVideoAnomalyModel`, `InferVideoAnomaly`, `ListVideoAnomalyModels`, AWS all-model submit/status/resume commands |
 | Object detection | `TrainObjectDetectionModel`, `FineTuneObjectDetectionModel`, `BenchmarkObjectDetectionModel`, `CreateObjectDetector`, `ConvertObjectDetectionModel`, `ListObjectDetectionModels`, `RunObjectDetectionStream`, AWS submit/status/stop/resume and best-model locator commands |
 | Tracking | `CreateTrackingAlgorithm`, `RunObjectDetectionTrackingCommand`, `RunTrackByDetectionCommand`, `RunTrackingVideo`, `ExportMOTFromClassAwareTracking`, `BenchmarkMOTTracking`, `ExportTrackingReplay` |
@@ -106,6 +109,11 @@ The primary workflow commands are:
 Large commands should keep `execute()` readable by delegating cohesive steps to private methods
 or focused helpers. Stateless tensor transforms, metrics, serialization helpers, and model
 builders remain functions.
+
+Saliency mapping deliberately depends on the segmentation model construction boundary: its
+registry mirrors segmentation model identifiers and groups, then requests the shared U-Net
+family with one output channel. Saliency-owned data, sigmoid application, BCE/SSIM/IoU loss,
+SOD metrics, checkpoints, artifacts, and presentation do not flow back into segmentation.
 
 ## Portable Training Dataset Sources
 
@@ -491,6 +499,21 @@ Tracking, object-detection providers, image-classification custom models, tempor
 return a new registry for dependency injection. Historic registration calls also update their
 default registry for compatibility, while exported mappings remain read-only to callers.
 
+Metadata-only discovery uses `ListComponentNames` and structured `ComponentSummary` values.
+Classification, segmentation, one-class recognition, video anomaly detection, and detection
+support `ls-models --names-only` without constructing models. Existing detailed model listings
+retain their parameter-count behavior. Detection providers expose optional `model_names()`
+metadata; providers without that capability fail explicitly instead of loading models as a
+fallback. Metadata discovery may still import a mode's framework modules; it does not initialize
+models or external services.
+
+Classification and segmentation training accept injected model registries and loss factories.
+Registry injection also crosses checkpoint loading boundaries in classification inference and
+benchmarking, segmentation benchmarking, and post-training segmentation sample generation. An
+injected model must remain resolvable when its checkpoint is reloaded; registry objects themselves
+are not serialized into checkpoints. Video 3D backbone selection uses its own capability registry,
+so adding a native 3D implementation does not require a classification-model registration.
+
 Text embedding (`llama-cpp-python`, ChromaDB), legacy NLP CSV embedding (`pandas`,
 `llama-cpp-python`), and Grad-CAM are optional package extras. Their adapters remain lazy and
 raise actionable `MLXUserError` messages when the selected capability is not installed.
@@ -579,6 +602,13 @@ best-foreground-Dice checkpoint (falling back to best validation loss), selects 
 deterministic samples across the sorted split, and refreshes mode-owned original,
 ground-truth, prediction, overlay, and labeled-panel artifacts. Full test metrics remain the
 responsibility of `BenchmarkSegmentation`.
+
+`BenchmarkSegmentation` feeds each inference batch into a mode-owned metrics accumulator rather
+than retaining dataset-wide target, prediction, and probability tensors. Confusion, calibration,
+loss, MCC, and configured binary-threshold statistics remain exact; bounded per-class score
+histograms produce approximate ROC/PR curves and AUC/AP values with configurable resolution. Its
+memory use therefore depends on batch size, class count, and histogram resolution rather than
+dataset pixel count.
 
 `TrainAllSegmentationModels` freezes the sorted segmentation registry for one sequential,
 fail-fast local run. It requires scratch initialization, a complete test partition, and a new or

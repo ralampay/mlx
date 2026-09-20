@@ -122,7 +122,29 @@ def _train(config: dict[str, Any]):
     ).execute()
 
 
+def _list_losses(config):
+    from mlx.core.model_listing import ListComponentNames
+    from mlx.core.presentation import display_component_inventory
+    from mlx.modes.image_classification.losses import LOSS_DEFINITIONS
+    result = ListComponentNames(LOSS_DEFINITIONS).execute()
+    if config.get("output_format") != "json":
+        display_component_inventory(result, title="Available Losses")
+    return result
+
+
+def _list_cam_methods(config):
+    from mlx.core.model_listing import ListComponentNames
+    from mlx.core.presentation import display_component_inventory
+    from mlx.modes.image_classification.cam_registry import DEFAULT_CAM_REGISTRY
+    result = ListComponentNames(DEFAULT_CAM_REGISTRY.entries).execute()
+    if config.get("output_format") != "json":
+        display_component_inventory(result, title="CAM Methods")
+    return result
+
+
 ACTION_HANDLERS = {
+    "ls-cam-methods": _list_cam_methods,
+    "ls-losses": _list_losses,
     "benchmark": lambda config: BenchmarkImageClassification(
         BenchmarkImageClassificationRequest.from_config(config),
         reporter=_reporter(config),
@@ -153,7 +175,7 @@ def run_image_classification(mode_config: dict[str, Any]) -> Any:
     action = config.get("action") or DEFAULT_CONFIG["action"]
     config["action"] = action
     validate_dataset_source_options(config, action=action)
-    if action == "ls-models":
+    if action in {"ls-models", "ls-losses", "ls-cam-methods"}:
         return ACTION_HANDLERS[action](config)
 
     model_name = mode_config.get("model") or DEFAULT_MODEL

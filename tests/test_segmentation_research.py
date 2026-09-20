@@ -7,14 +7,18 @@ import cv2
 import numpy as np
 import pytest
 import torch
+from sklearn.metrics import matthews_corrcoef
 from torch import nn
 from torch.utils.data import TensorDataset
 
+from mlx.cli import build_parser
+from mlx.core.commands import CallbackWorkflowReporter
 from mlx.core.exceptions import MLXUserError
 from mlx.modes.segmentation import evaluation as segmentation_evaluation
 from mlx.modes.segmentation import train as segmentation_train
 from mlx.modes.segmentation.data import resolve_segmentation_evaluation_split
 from mlx.modes.segmentation.metrics import (
+    StreamingSegmentationMetrics,
     aggregate_confusion_metrics,
     boundary_metrics,
     class_metrics_from_confusion,
@@ -109,6 +113,170 @@ def test_probability_calibration_and_curves() -> None:
     assert curves["roc"]
     assert curves["precision_recall"]
     assert curves["calibration"]
+
+
+def test_streaming_metrics_match_exact_aggregates_across_batches() -> None:
+    targets = np.asarray(
+        [
+            [[0, 0], [1, 1]],
+            [[0, 1], [1, 0]],
+            [[1, 1], [0, 0]],
+        ]
+    )
+    foreground = np.asarray(
+        [
+            [[0.1, 0.3], [0.8, 0.9]],
+            [[0.2, 0.7], [0.6, 0.4]],
+            [[0.75, 0.95], [0.35, 0.05]],
+        ]
+    )
+    probabilities = np.stack((1.0 - foreground, foreground), axis=-1)
+    predictions = (foreground >= 0.6).astype(np.int64)
+    accumulator = StreamingSegmentationMetrics(
+        num_classes=2,
+        calibration_bins=5,
+        curve_bins=4096,
+        threshold_steps=5,
+        configured_threshold=0.6,
+    )
+
+    accumulator.update(targets[:2], predictions[:2], probabilities[:2])
+    accumulator.update(targets[2:], predictions[2:], probabilities[2:])
+    metrics, class_rows, curves, threshold_rows = accumulator.finalize(
+        ["background", "foreground"]
+    )
+
+    expected_matrix = confusion_matrix_from_arrays(targets, predictions, 2)
+    expected_rows = class_metrics_from_confusion(
+        expected_matrix, ["background", "foreground"]
+    )
+    expected_probability_metrics, _ = probability_metrics(
+        targets,
+        probabilities,
+        expected_rows,
+        calibration_bins=5,
+    )
+    expected_threshold_rows, expected_threshold_summary = threshold_sweep(
+        targets,
+        foreground,
+        threshold_steps=5,
+        configured_threshold=0.6,
+    )
+
+    assert np.array_equal(accumulator.confusion_matrix, expected_matrix)
+    assert class_rows[1]["dice"] == pytest.approx(expected_rows[1]["dice"])
+    assert metrics["multiclass_mcc"] == pytest.approx(
+        matthews_corrcoef(targets.reshape(-1), predictions.reshape(-1))
+    )
+    for key in (
+        "negative_log_likelihood",
+        "multiclass_brier_score",
+        "mean_confidence",
+        "mean_predictive_entropy",
+        "expected_calibration_error",
+        "maximum_calibration_error",
+        "brier_background",
+        "brier_foreground",
+    ):
+        assert metrics[key] == pytest.approx(expected_probability_metrics[key])
+    assert metrics["macro_roc_auc"] == pytest.approx(
+        expected_probability_metrics["macro_roc_auc"], abs=1 / 4096
+    )
+    assert metrics["macro_average_precision"] == pytest.approx(
+        expected_probability_metrics["macro_average_precision"], abs=1 / 4096
+    )
+    assert len(threshold_rows) == len(expected_threshold_rows)
+    for row, expected_row in zip(
+        threshold_rows, expected_threshold_rows, strict=True
+    ):
+        for key, expected_value in expected_row.items():
+            if np.isnan(expected_value):
+                assert np.isnan(row[key])
+            else:
+                assert row[key] == pytest.approx(expected_value)
+    for key, value in expected_threshold_summary.items():
+        assert metrics[key] == pytest.approx(value)
+    assert curves["roc"]
+    assert curves["precision_recall"]
+    assert curves["calibration"]
+
+
+def test_streaming_metric_storage_does_not_grow_with_batch_count() -> None:
+    accumulator = StreamingSegmentationMetrics(
+        num_classes=2,
+        calibration_bins=5,
+        curve_bins=32,
+        threshold_steps=5,
+        configured_threshold=0.5,
+    )
+    targets = np.asarray([[[0, 1], [1, 0]]])
+    foreground = np.asarray([[[0.1, 0.9], [0.8, 0.2]]])
+    probabilities = np.stack((1.0 - foreground, foreground), axis=-1)
+    predictions = probabilities.argmax(axis=-1)
+
+    storage_before = sum(
+        value.nbytes
+        for value in vars(accumulator).values()
+        if isinstance(value, np.ndarray)
+    )
+    for _ in range(100):
+        accumulator.update(targets, predictions, probabilities)
+    storage_after = sum(
+        value.nbytes
+        for value in vars(accumulator).values()
+        if isinstance(value, np.ndarray)
+    )
+
+    assert storage_after == storage_before
+    assert accumulator.pixel_count == 400
+
+
+def test_streaming_metrics_support_multiclass_data_with_an_absent_class() -> None:
+    targets = np.asarray([[[0, 1], [0, 1]]])
+    probabilities = np.asarray(
+        [
+            [
+                [[0.8, 0.1, 0.1], [0.1, 0.7, 0.2]],
+                [[0.2, 0.3, 0.5], [0.1, 0.8, 0.1]],
+            ]
+        ]
+    )
+    predictions = probabilities.argmax(axis=-1)
+    accumulator = StreamingSegmentationMetrics(
+        num_classes=3,
+        calibration_bins=5,
+        curve_bins=32,
+        threshold_steps=5,
+        configured_threshold=0.5,
+    )
+
+    accumulator.update(targets, predictions, probabilities)
+    metrics, class_rows, _, threshold_rows = accumulator.finalize(
+        ["background", "foreground", "absent"]
+    )
+
+    assert np.array_equal(
+        accumulator.confusion_matrix,
+        confusion_matrix_from_arrays(targets, predictions, 3),
+    )
+    assert metrics["multiclass_mcc"] == pytest.approx(
+        matthews_corrcoef(targets.reshape(-1), predictions.reshape(-1))
+    )
+    assert class_rows[2]["support"] == 0
+    assert np.isnan(metrics["roc_auc_absent"])
+    assert threshold_rows == []
+
+
+def test_benchmark_rejects_invalid_curve_bin_count() -> None:
+    command = segmentation_evaluation.BenchmarkSegmentation({"curve_bins": 1})
+
+    with pytest.raises(MLXUserError, match="--curve-bins must be at least 2"):
+        command._validate_config()
+
+
+def test_segmentation_curve_bins_cli_default_and_override() -> None:
+    assert build_parser().parse_args([]).curve_bins == 4096
+    assert build_parser().parse_args(["--curve-bins", "128"]).curve_bins == 128
 
 
 def test_threshold_sweep_reports_optima() -> None:
@@ -315,7 +483,7 @@ def test_benchmark_command_writes_predictions_and_research_package(
     split = tmp_path / "dataset" / "test"
     (split / "images").mkdir(parents=True)
     (split / "masks").mkdir()
-    for index in range(2):
+    for index in range(5):
         image = np.zeros((8, 8, 3), dtype=np.uint8)
         image[2:6, 2:6] = 255
         mask = np.zeros((8, 8), dtype=np.uint8)
@@ -342,9 +510,10 @@ def test_benchmark_command_writes_predictions_and_research_package(
         lambda config: (model, metadata),
     )
     output_dir = tmp_path / "benchmark"
+    events = []
     result = segmentation_evaluation.BenchmarkSegmentation(
         {
-            "batch_size": 1,
+            "batch_size": 2,
             "boundary_tolerance": 1,
             "calibration_bins": 5,
             "dataset_path": str(tmp_path / "dataset"),
@@ -355,14 +524,26 @@ def test_benchmark_command_writes_predictions_and_research_package(
             "save_images": True,
             "split": "test",
             "threshold_steps": 5,
-        }
+        },
+        reporter=CallbackWorkflowReporter(events.append),
     ).execute()
 
-    assert result["evaluated_images"] == 2
+    assert result["evaluated_images"] == 5
+    progress_events = [event for event in events if event.level == "progress"]
+    assert [event.current for event in progress_events] == [1, 2, 3]
+    assert [event.total for event in progress_events] == [3, 3, 3]
+    assert [event.message for event in progress_events] == [
+        "Benchmarked segmentation batch 1 of 3.",
+        "Benchmarked segmentation batch 2 of 3.",
+        "Benchmarked segmentation batch 3 of 3.",
+    ]
     assert (output_dir / "metrics.csv").is_file()
     assert (output_dir / "class_metrics.csv").is_file()
     assert (output_dir / "image_metrics.csv").is_file()
     assert (output_dir / "run_metadata.json").is_file()
-    assert len(list((output_dir / "predictions" / "masks").glob("*.png"))) == 2
-    assert len(list((output_dir / "predictions" / "overlays").glob("*.png"))) == 2
-    assert len(list((output_dir / "predictions" / "errors").glob("*.png"))) == 2
+    assert json.loads((output_dir / "run_metadata.json").read_text())[
+        "curve_approximation_bins"
+    ] == 4096
+    assert len(list((output_dir / "predictions" / "masks").glob("*.png"))) == 5
+    assert len(list((output_dir / "predictions" / "overlays").glob("*.png"))) == 5
+    assert len(list((output_dir / "predictions" / "errors").glob("*.png"))) == 5

@@ -101,6 +101,15 @@ def _benchmark(config: dict[str, Any]):
 
 
 def _list_models(config: dict[str, Any]):
+    if config.get("names_only"):
+        from mlx.modes.image_recognition_oc.algorithms import DEFAULT_ALGORITHM_REGISTRY
+        from mlx.core.model_listing import ListComponentNames
+        from mlx.core.presentation import display_component_inventory
+        result = ListComponentNames(DEFAULT_ALGORITHM_REGISTRY.algorithms).execute()
+        if config.get("output_format") != "json":
+            display_component_inventory(result, title="Available Models")
+        return result
+
     explicit = set(config.get("_explicit_options") or ())
     request_config = dict(config)
     if "model" not in explicit:

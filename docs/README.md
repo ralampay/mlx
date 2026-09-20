@@ -41,6 +41,7 @@ The repository documentation is split by CLI mode and backing package:
 | `mlx.modes.segmentation` | Semantic segmentation workflows for U-Net style models | [Segmentation](./segmentation/README.md) |
 | `mlx.modes.text_embedding` | GGUF embedding, Chroma indexing, and BEIR retrieval benchmarking | [Text embedding](./text-embedding.md) |
 | `mlx.modes.autoencoder` | Generic 1D vector autoencoder training and bottleneck export | [Autoencoder](./autoencoder.md) |
+| `mlx.modes.saliency_mapping` | Still-image single-channel salient-object detection | [Saliency mapping](./saliency-mapping/README.md) |
 | `mlx.core` | Shared commands, requests, errors, dataset staging, feature/streaming contracts, and UI helpers | [S3 dataset training](./s3-dataset-training.md) and [ARCHITECTURE.md](../ARCHITECTURE.md) |
 
 ## CLI Mapping
@@ -55,3 +56,4 @@ The repository documentation is split by CLI mode and backing package:
 | `segmentation` | `mlx.modes.segmentation` |
 | `text_embedding`, `text-embedding`, `nlp` | `mlx.modes.text_embedding` (`nlp` also retains legacy CSV options) |
 | `autoencoder` | `mlx.modes.autoencoder` |
+| `saliency_mapping`, `saliency-mapping` | `mlx.modes.saliency_mapping` |

@@ -51,6 +51,18 @@ def run_object_detection(config: dict[str, Any]) -> Any:
         )
 
     action = config.get("action") or "train"
+    if action == "ls-models" and config.get("names_only"):
+        from mlx.modes.object_detection.providers import get_provider
+        from mlx.core.model_listing import ListComponentNames
+        from mlx.core.presentation import display_component_inventory
+        provider = get_provider(config.get("provider", "ultralytics"))
+        names = getattr(provider, "model_names", None)
+        if names is None:
+            raise MLXUserError(f"Provider {provider.name} does not supply model-name metadata.")
+        result = ListComponentNames(names()).execute()
+        if config.get("output_format") != "json":
+            display_component_inventory(result, title="Detection Models")
+        return result
     is_json = config.get("output_format") == "json"
     reporter = NullWorkflowReporter() if is_json else RichWorkflowReporter()
 

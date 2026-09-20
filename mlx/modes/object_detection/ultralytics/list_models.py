@@ -7,11 +7,7 @@ from mlx.modes.object_detection.ultralytics.utils import (
 )
 
 
-CANONICAL_MODEL_NAMES = (
-    "draxnet-ave-yolo26",
-    "draxnet-sknet-yolo26",
-    "yolo26",
-)
+from mlx.modes.object_detection.ultralytics.catalog import CANONICAL_MODEL_NAMES
 
 
 class ListObjectDetectionModels:

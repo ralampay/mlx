@@ -13,6 +13,10 @@ from mlx.modes.object_detection.requests import (
 class UltralyticsProvider:
     name = "ultralytics"
 
+    def model_names(self):
+        from mlx.modes.object_detection.ultralytics.catalog import CANONICAL_MODEL_NAMES
+        return CANONICAL_MODEL_NAMES
+
     def train(self, request: TrainObjectDetectionRequest, reporter: WorkflowReporter):
         from mlx.modes.object_detection.ultralytics.training import (
             TrainUltralyticsObjectDetection,

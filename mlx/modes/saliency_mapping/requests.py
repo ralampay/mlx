@@ -7,7 +7,7 @@ from mlx.core.requests import ConfigRequest
 
 
 @dataclass(frozen=True)
-class SegmentationRequest(ConfigRequest):
+class SaliencyRequest(ConfigRequest):
     action: str = "test"
     model: Optional[str] = None
     model_path: Optional[str] = None
@@ -16,7 +16,6 @@ class SegmentationRequest(ConfigRequest):
     dataset_cache_dir: str = "~/.cache/mlx/datasets"
     output_path: Optional[str] = None
     input_img: str = "/tmp/image.jpg"
-    file_path: Optional[str] = None
     device: str = "cpu"
     width: int = 256
     height: int = 256
@@ -27,43 +26,31 @@ class SegmentationRequest(ConfigRequest):
     lr: Optional[float] = None
     colored: bool = True
     pretrained: bool = False
-    num_classes: int = 2
-    class_names: Optional[str] = None
     split: str = "test"
-    camera_index: int = 0
     overlay_alpha: float = 0.45
+    threshold_steps: int = 101
     mask_threshold: float = 0.5
-    display: bool = False
+    bce_weight: float = 1.0
+    ssim_weight: float = 1.0
+    iou_weight: float = 1.0
+    workers: int = 0
+    plots: bool = True
+    save_images: bool = True
     random_seed: Optional[int] = None
 
 
 @dataclass(frozen=True)
-class TrainSegmentationRequest(SegmentationRequest):
+class TrainSaliencyRequest(SaliencyRequest):
     action: str = "train"
 
 
 @dataclass(frozen=True)
-class BenchmarkSegmentationRequest(SegmentationRequest):
+class BenchmarkSaliencyRequest(SaliencyRequest):
     action: str = "benchmark"
-    boundary_tolerance: int = 2
-    calibration_bins: int = 15
-    curve_bins: int = 4096
-    threshold_steps: int = 101
-    plots: bool = True
 
 
 @dataclass(frozen=True)
-class InferSegmentationRequest(SegmentationRequest):
-    action: str = "infer-image"
-
-
-@dataclass(frozen=True)
-class SmokeTestSegmentationRequest(SegmentationRequest):
-    action: str = "test"
-
-
-@dataclass(frozen=True)
-class BuildSegmentationDatasetRequest(ConfigRequest):
+class BuildSaliencyDatasetRequest(ConfigRequest):
     dataset_path: str = ""
     output_path: Optional[str] = None
     train_count: Optional[int] = None

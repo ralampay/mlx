@@ -2,7 +2,7 @@
 
 MLX is a command-line toolkit for machine-learning workflows. It provides a shared
 CLI and project conventions while keeping object detection, image classification,
-one-class image recognition, video anomaly detection, segmentation, NLP, and tracking logic in
+one-class image recognition, video anomaly detection, segmentation, saliency mapping, NLP, and tracking logic in
 focused modules.
 
 ## Contents
@@ -18,6 +18,7 @@ focused modules.
 - [Segmentation](#segmentation)
 - [Text embeddings](#text-embeddings)
 - [Vector autoencoders](#vector-autoencoders)
+- [Saliency mapping](#saliency-mapping)
 - [Documentation](#documentation)
 
 ## Architecture
@@ -118,6 +119,7 @@ Available CLI modes are:
 | `segmentation` | `train`, `test`, `benchmark`, `infer-image`, `infer-camera`, `infer-video`, `build-dataset`, `ls-models` |
 | `text_embedding` (`text-embedding`, `nlp`) | `embed`, `benchmark` |
 | `autoencoder` | `train`, `embed`, `ls-models`, `ls-loss-functions` |
+| `saliency_mapping` (`saliency-mapping`) | `train`, `test`, `benchmark`, `infer-image`, `build-dataset`, `ls-models` |
 
 Hyphenated mode names such as `object-detection`, `image-classification`,
 `image-recognition-oc`, and `video-anomaly-detection` are also accepted. Run the following command
@@ -449,6 +451,29 @@ deterministic center crops for validation, test benchmarking, and samples.
 See the [segmentation guide](./docs/segmentation/README.md) for dataset format,
 models, metrics, artifacts, and inference workflows.
 
+## Saliency mapping
+
+Package: `mlx.modes.saliency_mapping`
+
+This still-image salient-object-detection mode reuses every registered segmentation
+U-Net encoder and decoder with a one-channel logits head. Sigmoid probabilities and
+grayscale targets remain continuous in `[0, 1]` rather than becoming class IDs.
+
+```bash
+python -m mlx --mode saliency-mapping --action ls-models
+python -m mlx --mode saliency-mapping --action test --model all-small
+python -m mlx --mode saliency-mapping --action train \
+  --model unet-drax_mobilenet_v3_large-average \
+  --dataset ./data/duts --output ./artifacts/saliency
+```
+
+Training uses weighted BCE-with-logits + SSIM + IoU and selects the best checkpoint
+by lowest validation MAE. Benchmarks export per-image and aggregate MAE, max/mean
+F-beta (`beta²=0.3`), threshold and precision-recall data, runtime measurements,
+continuous predictions, heatmaps, overlays, and sample panels. `all-small` has
+exactly the same members as segmentation, while `all` selects every registered
+saliency architecture. See the [saliency-mapping guide](./docs/saliency-mapping/README.md).
+
 ## Text embeddings
 
 Package: `mlx.modes.text_embedding`
@@ -510,3 +535,4 @@ loss contracts, and the built-in MSE, MAE, and Smooth L1 losses.
 - [Segmentation](./docs/segmentation/README.md)
 - [Text embedding and retrieval](./docs/text-embedding.md)
 - [Vector autoencoders](./docs/autoencoder.md)
+- [Saliency mapping](./docs/saliency-mapping/README.md)

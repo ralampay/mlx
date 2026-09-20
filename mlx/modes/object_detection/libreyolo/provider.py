@@ -13,6 +13,10 @@ from mlx.modes.object_detection.requests import (
 class LibreYOLOProvider:
     name = "libreyolo"
 
+    def model_names(self):
+        from mlx.modes.object_detection.libreyolo.utils import CANONICAL_MODEL_NAMES
+        return CANONICAL_MODEL_NAMES
+
     def train(self, request: TrainObjectDetectionRequest, reporter: WorkflowReporter):
         from mlx.modes.object_detection.libreyolo.training import TrainLibreYOLOObjectDetection
 

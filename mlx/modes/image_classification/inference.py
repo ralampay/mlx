@@ -19,12 +19,14 @@ class InferImageClassification:
         request: ImageClassificationRequest,
         *,
         reporter: WorkflowReporter | None = None,
+        model_registry=None,
     ) -> None:
+        self.model_registry = model_registry
         self.request = request
         self.reporter = reporter or NullWorkflowReporter()
 
     def execute(self) -> dict[str, Any]:
-        return _run_inference(self.request.to_config(), reporter=self.reporter)
+        return _run_inference(self.request.to_config(), reporter=self.reporter, model_registry=self.model_registry)
 
 
 def infer_image_classification(config: dict[str, Any]) -> dict[str, Any]:
@@ -41,9 +43,10 @@ def _run_inference(
     config: dict[str, Any],
     *,
     reporter: WorkflowReporter | None = None,
+    model_registry=None,
 ) -> dict[str, Any]:
     reporter = reporter or NullWorkflowReporter()
-    model, metadata = load_checkpoint_bundle(config)
+    model, metadata = load_checkpoint_bundle(config, **({"model_registry": model_registry} if model_registry is not None else {}))
     device = config.get("device", "cpu")
     model = model.to(device)
     model.eval()

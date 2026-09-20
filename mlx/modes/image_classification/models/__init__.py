@@ -60,7 +60,7 @@ def standard_model_names(registry=None) -> list[str]:
 def model_family_for(model_name: str, *, registry=None) -> str:
     if model_name in ONE_SHOT_MODEL_NAMES:
         return "one-shot"
-    if model_name in STANDARD_MODEL_NAMES or model_name in registered_standard_model_names(registry):
+    if ":" in model_name or model_name in STANDARD_MODEL_NAMES or model_name in registered_standard_model_names(registry):
         return "standard"
     available = ", ".join(supported_model_names())
     raise MLXUserError(f"Unsupported image-classification model '{model_name}'. Available models: {available}.")

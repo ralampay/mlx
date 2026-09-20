@@ -42,6 +42,10 @@ nlp = [
     "pandas",
     "llama-cpp-python"
 ]
+text-embedding = [
+    "llama-cpp-python",
+    "chromadb"
+]
 image-explainability = [
     "grad-cam"
 ]

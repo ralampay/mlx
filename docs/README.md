@@ -39,6 +39,8 @@ The repository documentation is split by CLI mode and backing package:
 | `mlx.modes.image_recognition_oc` | Normal-only still-image one-class recognition with replaceable backbones and SageMaker execution | [One-class image recognition](./image_recognition_oc/README.md), [AWS execution](./image_recognition_oc/aws-sagemaker.md) |
 | `mlx.modes.video_anomaly_detection` | Normal-only clip-native 3D CNN, Deep SVDD, and sequential SageMaker workflows | [Video anomaly detection](./video_anomaly_detection/README.md), [AWS training](./video_anomaly_detection/aws-sagemaker-training.md) |
 | `mlx.modes.segmentation` | Semantic segmentation workflows for U-Net style models | [Segmentation](./segmentation/README.md) |
+| `mlx.modes.text_embedding` | GGUF embedding, Chroma indexing, and BEIR retrieval benchmarking | [Text embedding](./text-embedding.md) |
+| `mlx.modes.autoencoder` | Generic 1D vector autoencoder training and bottleneck export | [Autoencoder](./autoencoder.md) |
 | `mlx.core` | Shared commands, requests, errors, dataset staging, feature/streaming contracts, and UI helpers | [S3 dataset training](./s3-dataset-training.md) and [ARCHITECTURE.md](../ARCHITECTURE.md) |
 
 ## CLI Mapping
@@ -51,3 +53,5 @@ The repository documentation is split by CLI mode and backing package:
 | `image_recognition_oc`, `image-recognition-oc` | `mlx.modes.image_recognition_oc` |
 | `video_anomaly_detection`, `video-anomaly-detection` | `mlx.modes.video_anomaly_detection` |
 | `segmentation` | `mlx.modes.segmentation` |
+| `text_embedding`, `text-embedding`, `nlp` | `mlx.modes.text_embedding` (`nlp` also retains legacy CSV options) |
+| `autoencoder` | `mlx.modes.autoencoder` |

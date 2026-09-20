@@ -27,7 +27,7 @@ command (`execute()`)
     ↓ composition
 models / data / metrics / artifacts / provider protocols
     ↓ integration boundary
-PyTorch, torchvision, OpenCV, Ultralytics, ONNX Runtime, llama.cpp
+PyTorch, torchvision, OpenCV, Ultralytics, ONNX Runtime, llama.cpp, ChromaDB
 ```
 
 Dependencies point downward. Models, datasets, and providers must not import runners or CLI
@@ -53,6 +53,7 @@ mlx/
 ├── cli_routing.py                immutable mode descriptors and lazy runner resolution
 ├── core/                         shared commands, requests, errors, UI, seeds, model summaries
 │   ├── artifacts.py             atomic serialization, hashes, and JSON normalization
+│   ├── vector_transforms.py     provider-neutral batch representation-transform contract
 │   ├── aws/                     shared SageMaker lifecycle infrastructure
 │   ├── datasets.py              S3 ZIP staging, safe extraction, cache, resolver protocol
 │   ├── presentation.py          shared Rich rendering for core infrastructure events
@@ -82,7 +83,11 @@ mlx/
     │   └── ultralytics/          Ultralytics implementation and compatibility exports
     ├── video_anomaly_detection/  normal-only clip data, 3D/legacy backbones, SVDD, research artifacts
     │   └── aws/                  sequential all-model SageMaker lifecycle and recovery
-    └── nlp/                      GGUF-backed CSV embedding command and Rich reporter
+    ├── text_embedding/           BEIR embedding, vector indexing, retrieval metrics, research artifacts
+    │   ├── embedding/            neutral provider protocol and lazy llama.cpp adapter
+    │   └── vector_store/         neutral store protocol, immutable registry, lazy Chroma adapter
+    ├── autoencoder/              generic 1D reconstruction training and bottleneck adapters
+    └── nlp/                      legacy GGUF-backed CSV embedding compatibility API
 ```
 
 The primary workflow commands are:
@@ -95,7 +100,8 @@ The primary workflow commands are:
 | Video anomaly detection | `TrainVideoAnomalyModel`, `BenchmarkVideoAnomalyModel`, `InferVideoAnomaly`, `ListVideoAnomalyModels`, AWS all-model submit/status/resume commands |
 | Object detection | `TrainObjectDetectionModel`, `FineTuneObjectDetectionModel`, `BenchmarkObjectDetectionModel`, `CreateObjectDetector`, `ConvertObjectDetectionModel`, `ListObjectDetectionModels`, `RunObjectDetectionStream`, AWS submit/status/stop/resume and best-model locator commands |
 | Tracking | `CreateTrackingAlgorithm`, `RunObjectDetectionTrackingCommand`, `RunTrackByDetectionCommand`, `RunTrackingVideo`, `ExportMOTFromClassAwareTracking`, `BenchmarkMOTTracking`, `ExportTrackingReplay` |
-| NLP | `EmbedCsvCommand` (`EmbedCsv` is the legacy path-returning API) |
+| Text embedding | `EmbedTextCommand`, `BenchmarkTextEmbeddingCommand`; legacy `EmbedCsvCommand` remains supported |
+| Autoencoder | `TrainAutoencoder`, `EmbedAutoencoder`, `ListAutoencoderModels`, `ListAutoencoderLosses` |
 
 Large commands should keep `execute()` readable by delegating cohesive steps to private methods
 or focused helpers. Stateless tensor transforms, metrics, serialization helpers, and model
@@ -485,8 +491,55 @@ Tracking, object-detection providers, image-classification custom models, tempor
 return a new registry for dependency injection. Historic registration calls also update their
 default registry for compatibility, while exported mappings remain read-only to callers.
 
-NLP (`pandas`, `llama-cpp-python`) and Grad-CAM are optional package extras. Their adapters remain
-lazy and raise actionable `MLXUserError` messages when the selected capability is not installed.
+Text embedding (`llama-cpp-python`, ChromaDB), legacy NLP CSV embedding (`pandas`,
+`llama-cpp-python`), and Grad-CAM are optional package extras. Their adapters remain lazy and
+raise actionable `MLXUserError` messages when the selected capability is not installed.
+
+## Text Embedding and Retrieval
+
+`text_embedding` is the canonical mode; `text-embedding` and `nlp` route to the same descriptor,
+while legacy NLP CSV options select the retained compatibility command. `EmbedTextCommand` loads a
+validated BEIR dataset, sends batched query and document text through `TextEmbeddingProvider`,
+applies optional provider-neutral L2 normalization, streams CSV batches, and inserts corpus
+vectors through `VectorStore`. The llama.cpp adapter owns GGUF loading and sequence-vector
+validation. The Chroma adapter owns persistence and converts cosine distance to a normalized
+higher-is-better score. Neither third-party package is imported by unrelated modes.
+
+BEIR parsing produces immutable corpus, query, relevance-judgment, and dataset values independently
+of embedding and retrieval. Document title/body composition and configurable query/document
+prefixes live at the workflow boundary rather than in the llama.cpp adapter. Embedding artifacts
+include portable copied qrels, manifests, model SHA-256, explicit normalization/prefix metadata,
+and a generic representation name. This serialization boundary allows future PCA or autoencoder
+tools to load, transform, export, and re-index vectors without changing embedding providers.
+
+`BenchmarkTextEmbeddingCommand` consumes the embedding artifact directory and persistent store; it
+never reloads the GGUF model. Provider-neutral metrics calculate precision, recall, reciprocal
+rank, average precision, DCG, and nDCG from normalized search results and parsed qrels. A focused
+writer owns aggregate/per-query tables, rankings, failures, provenance, and the deterministic
+Markdown report. A future `PgVectorStore` implements the same protocol and is registered in the
+immutable vector-store registry; neither command, dataset parsing, nor metric code changes.
+
+## Vector Autoencoders and Representation Transforms
+
+`mlx.core.vector_transforms.VectorRepresentationTransformer` is the narrow cross-mode contract for
+batch vector transformations. It exposes input/output dimensions, portable provenance, and a
+numeric `transform` operation. Text embedding accepts this contract after provider embedding and
+before final normalization, serialization, and indexing; it does not import PyTorch or an
+autoencoder model. The text runner lazily constructs the autoencoder adapter only when `--adapter`
+is supplied.
+
+The `autoencoder` mode owns numeric CSV parsing, reconstruction training, checkpoint schemas,
+model/loss registries, standalone bottleneck export, and Rich presentation. Its immutable lazy
+registries support built-in aliases and explicit `package.module:DefinitionClass` references.
+Definitions build models or loss modules from validated mappings, allowing custom experiments
+without adding selection branches to commands. Checkpoints retain the exact architecture import
+path and preprocessing contract so later encoding reconstructs the correct implementation.
+
+Input normalization is part of adapter provenance. Training detects normalized MLX embedding
+artifacts or accepts an explicit override; live GGUF vectors receive the same preprocessing before
+`encode()`. The existing text-embedding normalization option remains a final-representation step.
+Thus corpus exports, query exports, and vector-store records always share identical latent-vector
+semantics, while retrieval metrics and vector-store implementations remain unchanged.
 
 ## Presentation, Errors, and Compatibility
 

@@ -16,7 +16,8 @@ focused modules.
 - [One-class image recognition](#one-class-image-recognition)
 - [Video anomaly detection](#video-anomaly-detection)
 - [Segmentation](#segmentation)
-- [NLP embeddings](#nlp-embeddings)
+- [Text embeddings](#text-embeddings)
+- [Vector autoencoders](#vector-autoencoders)
 - [Documentation](#documentation)
 
 ## Architecture
@@ -69,7 +70,7 @@ Leave the environment when finished with:
 deactivate
 ```
 
-The development dependency set includes NumPy, pandas, SciPy, motmetrics, PyTorch,
+The development dependency set includes NumPy, pandas, SciPy, motmetrics, ChromaDB, PyTorch,
 torchvision, OpenCV, Rich, scikit-learn, ONNX Runtime, llama-cpp-python, the Ralampay
 Ultralytics fork, and the `release` branch of the Ralampay LibreYOLO fork.
 
@@ -83,6 +84,7 @@ python -m pip install ".[object-detection]"  # both providers
 python -m pip install ".[aws,object-detection]"  # SageMaker detection lifecycle
 python -m pip install ".[aws]"                   # SageMaker classification/video-anomaly lifecycle
 python -m pip install ".[nlp]"                   # GGUF CSV embedding
+python -m pip install ".[text-embedding]"        # BEIR embedding + Chroma retrieval
 python -m pip install ".[image-explainability]"  # Grad-CAM actions
 ```
 
@@ -114,7 +116,8 @@ Available CLI modes are:
 | `image_recognition_oc` | `train`, AWS `train-all`/`benchmark`/`resume`/`status`/`stop`, `infer-image`, `benchmark`, `ls-models` |
 | `video_anomaly_detection` | `train`, AWS `train-all`/`status`/`resume`, `benchmark`, `infer-video`, `ls-models` |
 | `segmentation` | `train`, `test`, `benchmark`, `infer-image`, `infer-camera`, `infer-video`, `build-dataset`, `ls-models` |
-| `nlp` | `embed` |
+| `text_embedding` (`text-embedding`, `nlp`) | `embed`, `benchmark` |
+| `autoencoder` | `train`, `embed`, `ls-models`, `ls-loss-functions` |
 
 Hyphenated mode names such as `object-detection`, `image-classification`,
 `image-recognition-oc`, and `video-anomaly-detection` are also accepted. Run the following command
@@ -446,25 +449,56 @@ deterministic center crops for validation, test benchmarking, and samples.
 See the [segmentation guide](./docs/segmentation/README.md) for dataset format,
 models, metrics, artifacts, and inference workflows.
 
-## NLP embeddings
+## Text embeddings
 
-Package: `mlx.modes.nlp`
+Package: `mlx.modes.text_embedding`
 
-The NLP module currently provides one command-style workflow: generating embeddings
-for a text column in a CSV file with a compatible GGUF embedding model through
-llama-cpp-python.
+The canonical workflow embeds BEIR-format retrieval datasets with a compatible GGUF
+sequence-embedding model, persists caller-generated vectors in Chroma, and benchmarks
+retrieval from those artifacts without loading the model again.
 
 ```bash
-python -m mlx --mode nlp --action embed \
-    --model-file ./models/embedding-model.gguf \
-    --input-file ./data/documents.csv \
-    --column-name content \
-    --output-file ./data/document-embeddings.csv
+python -m mlx --mode text-embedding --action embed \
+    --model ./models/multilingual-e5-small-q8_0.gguf \
+    --input ./datasets/scifact --output ./artifacts/scifact-e5-small \
+    --query-prefix "query: " --document-prefix "passage: "
+
+python -m mlx --mode text-embedding --action benchmark \
+    --input ./artifacts/scifact-e5-small \
+    --output ./results/scifact-e5-small
 ```
 
-The input column must contain non-empty text in every row. The output CSV contains
-the source content and generated embedding values. When `--output-file` is omitted,
-MLX derives an output name beside the input CSV.
+Install with `python -m pip install ".[text-embedding]"`. The historic
+`--mode nlp --model-file ... --input-file ...` CSV workflow remains supported.
+See the [text-embedding research guide](docs/text-embedding.md) for dataset layout,
+prefixes, normalization, artifacts, metrics, and extension boundaries.
+
+## Vector autoencoders
+
+Package: `mlx.modes.autoencoder`
+
+Train a one-dimensional reconstruction autoencoder from an MLX embedding CSV, then export its
+bottleneck representation or apply it directly during text embedding:
+
+```bash
+python -m mlx --mode autoencoder --action train \
+    --model simple --input ./artifacts/scifact/corpus_embeddings.csv \
+    --output ./artifacts/autoencoder-128 --input-dim 384 \
+    --hidden-dim 256 --bottleneck-dim 128 --loss mse
+
+python -m mlx --mode autoencoder --action embed \
+    --model simple --model-path ./artifacts/autoencoder-128/autoencoder.pth \
+    --input ./artifacts/scifact/query_embeddings.csv \
+    --output ./artifacts/scifact/query_embeddings_ae128.csv
+
+python -m mlx --mode text-embedding --action embed \
+    --model ./models/embedding-model.gguf \
+    --adapter ./artifacts/autoencoder-128/autoencoder.pth \
+    --input ./datasets/scifact --output ./artifacts/scifact-ae128
+```
+
+See the [autoencoder guide](docs/autoencoder.md) for checkpoints, preprocessing, custom model and
+loss contracts, and the built-in MSE, MAE, and Smooth L1 losses.
 
 ## Documentation
 
@@ -474,3 +508,5 @@ MLX derives an output name beside the input CSV.
 - [Image classification](./docs/image_classification/README.md)
 - [One-class image recognition](./docs/image_recognition_oc/README.md)
 - [Segmentation](./docs/segmentation/README.md)
+- [Text embedding and retrieval](./docs/text-embedding.md)
+- [Vector autoencoders](./docs/autoencoder.md)

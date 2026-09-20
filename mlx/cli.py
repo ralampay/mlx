@@ -60,6 +60,20 @@ def build_parser() -> RichArgumentParser:
     )
     parser.add_argument("--provider", default="ultralytics")
     parser.add_argument("--model", default=None)
+    parser.add_argument("--input", default=None, dest="input_path")
+    parser.add_argument("--adapter", default=None)
+    parser.add_argument("--input-dim", type=int, default=None, dest="input_dim")
+    parser.add_argument("--hidden-dim", type=int, default=256, dest="hidden_dim")
+    parser.add_argument("--bottleneck-dim", type=int, default=128, dest="bottleneck_dim")
+    parser.add_argument("--loss", default="mse")
+    parser.add_argument("--autoencoder-config", default=None, dest="autoencoder_config")
+    parser.add_argument("--loss-config", default=None, dest="loss_config")
+    parser.add_argument(
+        "--normalize-inputs",
+        action=argparse.BooleanOptionalAction,
+        default=None,
+        dest="normalize_inputs",
+    )
     parser.add_argument("--backbone", default=None)
     parser.add_argument("--height", type=int, default=256)
     parser.add_argument("--width", type=int, default=256)
@@ -78,6 +92,18 @@ def build_parser() -> RichArgumentParser:
         dest="drax_fusion_mode",
     )
     parser.add_argument("--batch-size", type=int, default=1, dest="batch_size")
+    parser.add_argument("--vector-store", default=None, dest="vector_store")
+    parser.add_argument("--top-k", type=int, default=100, dest="top_k")
+    parser.add_argument("--k-values", default="1,5,10,20,100", dest="k_values")
+    parser.add_argument("--query-prefix", default="", dest="query_prefix")
+    parser.add_argument("--document-prefix", default="", dest="document_prefix")
+    parser.add_argument(
+        "--normalize-embeddings",
+        action=argparse.BooleanOptionalAction,
+        default=False,
+        dest="normalize_embeddings",
+    )
+    parser.add_argument("--representation", default=None)
     parser.add_argument("--dataset", "--dataset-path", default="./tmp/dataset", dest="dataset_path")
     parser.add_argument("--dataset-s3-uri", default=None, dest="dataset_s3_uri")
     parser.add_argument(
@@ -333,6 +359,10 @@ def _render_help() -> None:
     usage.add_row("python -m mlx --mode video_anomaly_detection --action ls-models")
     usage.add_row("python -m mlx --mode video_anomaly_detection --action benchmark --model-path ./model.pth --dataset ./ped2-prepared/test --output ./benchmark")
     usage.add_row("python -m mlx --mode video_anomaly_detection --action infer-video --model-path ./model.pth --file-path ./sample.mp4 --output ./inference")
+    usage.add_row("python -m mlx --mode text-embedding --action embed --model ./model.gguf --input ./dataset --output ./artifacts")
+    usage.add_row("python -m mlx --mode text-embedding --action benchmark --input ./artifacts --output ./results")
+    usage.add_row("python -m mlx --mode autoencoder --action train --model simple --input ./corpus_embeddings.csv --output ./autoencoder --bottleneck-dim 128 --loss mse")
+    usage.add_row("python -m mlx --mode autoencoder --action embed --model-path ./autoencoder/autoencoder.pth --input ./corpus_embeddings.csv --output ./corpus_embeddings_ae128.csv")
     usage.add_row("python -m mlx --mode nlp --action embed --model-file ./model.gguf --input-file ./input.csv")
     console.print(usage)
 
@@ -358,7 +388,16 @@ def _render_help() -> None:
     )
     options.add_row("--rebuild-image", "False", "Force a new content-tagged SageMaker image build and ECR push.")
     options.add_row("--provider", "ultralytics", "Object-detection provider: ultralytics or libreyolo.")
-    options.add_row("--model", "None", "Provider-specific model identifier or architecture name; segmentation train also accepts all and all-small.")
+    options.add_row("--model", "None", "Provider-specific model identifier or architecture name; autoencoder accepts aliases or package.module:DefinitionClass.")
+    options.add_row("--input", "None", "BEIR/artifact input for text embedding, or an embedding CSV for autoencoder workflows.")
+    options.add_row("--adapter", "None", "Autoencoder checkpoint applied to GGUF vectors before text-embedding export and indexing.")
+    options.add_row("--input-dim", "inferred", "Optional expected vector width for autoencoder training.")
+    options.add_row("--hidden-dim", "256", "Hidden layer width for the simple autoencoder.")
+    options.add_row("--bottleneck-dim", "128", "Autoencoder bottleneck representation width.")
+    options.add_row("--loss", "mse", "Autoencoder reconstruction loss alias or package.module:DefinitionClass.")
+    options.add_row("--autoencoder-config", "None", "Optional JSON object with custom autoencoder-definition options.")
+    options.add_row("--loss-config", "None", "Optional JSON object with reconstruction-loss options.")
+    options.add_row("--normalize-inputs / --no-normalize-inputs", "manifest", "Control autoencoder training input L2 normalization; defaults to source-manifest provenance.")
     options.add_row("--backbone", "mode-specific", "Feature backbone used by one-class image recognition.")
     options.add_row("--action", "mode-specific", "Sub-action such as train, ls-models, infer-video, convert, benchmark, or build-dataset.")
     options.add_row("--dataset", "./tmp/dataset", "Local dataset source. Its layout and supported aliases are mode-specific.")
@@ -369,23 +408,30 @@ def _render_help() -> None:
     options.add_row("--val-count", "None", "Images per label assigned to the val split when building classification datasets.")
     options.add_row("--test-count", "None", "Images per label assigned to the test split when building classification datasets.")
     options.add_row("--train-ratio", "None", "Train split ratio applied within each label when building classification datasets.")
-    options.add_row("--val-ratio", "None", "Validation split ratio applied within each label when building classification datasets.")
+    options.add_row("--val-ratio", "None", "Validation split ratio for autoencoder training or classification dataset construction.")
     options.add_row("--test-ratio", "None", "Test split ratio applied within each label when building classification datasets.")
     options.add_row("--split-mode", "None", "Build-dataset split mode: counts or ratios. Ratio mode splits each label independently using the provided ratios.")
     options.add_row("--overwrite / --no-overwrite", "False", "Allow supported workflows to replace existing output artifacts without prompting.")
-    options.add_row("--model-path", "None", "Provider-compatible checkpoint path for inference, resume, warm starts, or ONNX conversion.")
+    options.add_row("--model-path", "None", "Provider-compatible checkpoint path for inference, resume, autoencoder embedding, warm starts, or ONNX conversion.")
     options.add_row("--model-s3-uri", "None", "Exact S3 .pt checkpoint used to initialize AWS object-detection fine-tuning.")
     options.add_row("--model-file", "None", "GGUF embedding model used by NLP embed.")
     options.add_row("--input-file", "None", "Input CSV used by NLP embed.")
     options.add_row("--output-file", "derived", "Output CSV used by NLP embed; defaults beside the input file.")
     options.add_row("--column-name", "content", "CSV text column used by NLP embed.")
+    options.add_row("--vector-store", "chroma", "Persistent vector-store provider for text embedding.")
+    options.add_row("--top-k", "100", "Maximum retrieval depth for text-embedding benchmarks.")
+    options.add_row("--k-values", "1,5,10,20,100", "Comma-separated retrieval metric cutoffs.")
+    options.add_row("--query-prefix", "empty", "Text prepended to every retrieval query before embedding.")
+    options.add_row("--document-prefix", "empty", "Text prepended to every corpus document before embedding.")
+    options.add_row("--normalize-embeddings", "False", "L2-normalize vectors before export and indexing.")
+    options.add_row("--representation", "original", "Generic embedding representation label recorded in research artifacts.")
     options.add_row("--file-path", "None", "Video path for file-based inference.")
     options.add_row("--input-img", "/tmp/image.jpg", "Input image for classification or one-class recognition inference.")
     options.add_row("--device", "cpu", "Execution device such as cpu or cuda:0.")
     options.add_row("--height / --width", "256 / 256", "Image size controls.")
     options.add_row("--transform", "resize", "Segmentation spatial transform: resize, random-crop, or center-crop. Random crops become center crops for validation and test.")
-    options.add_row("--batch-size", "1", "Training or evaluation batch size.")
-    options.add_row("--epochs", "100", "Training epoch count.")
+    options.add_row("--batch-size", "1", "Training or evaluation batch size; autoencoder mode defaults to 64.")
+    options.add_row("--epochs", "100", "Training epoch count; autoencoder mode defaults to 50.")
     options.add_row("--num-pairs", "100", "One-shot image-classification pairs per label for training or benchmarking.")
     options.add_row("--embedding-size", "4096", "Embedding width for any one-shot Siamese model.")
     options.add_row(
@@ -436,7 +482,7 @@ def _render_help() -> None:
         "False",
         "Apply supported image-training augmentations: RandomHorizontalFlip and RandomRotation(10).",
     )
-    options.add_row("--lr", "None", "Learning rate for supported training workflows.")
+    options.add_row("--lr", "None", "Learning rate for supported training workflows; autoencoder mode defaults to 0.001.")
     options.add_row("--amp / --no-amp", "True", "Toggle mixed precision for supported training providers.")
     options.add_row("--lr0", "None", "Override initial learning rate.")
     options.add_row("--optimizer", "auto", "Provider optimizer selection; auto uses the provider default.")

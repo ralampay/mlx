@@ -26,6 +26,14 @@ class ModeDescriptor:
 
 MODE_DESCRIPTORS: tuple[ModeDescriptor, ...] = (
     ModeDescriptor(
+        name="autoencoder",
+        aliases=(),
+        runner="mlx.modes.autoencoder.runner:run_autoencoder",
+        default_action="ls-models",
+        actions=("train", "embed", "ls-models", "ls-loss-functions"),
+        purpose="Generic one-dimensional vector autoencoder training and embedding",
+    ),
+    ModeDescriptor(
         name="object_detection",
         aliases=("object-detection",),
         runner="mlx.modes.object_detection.runner:run_object_detection",
@@ -74,12 +82,12 @@ MODE_DESCRIPTORS: tuple[ModeDescriptor, ...] = (
         purpose="Normal-only clip-level video anomaly detection",
     ),
     ModeDescriptor(
-        name="nlp",
-        aliases=(),
-        runner="mlx.modes.nlp.runner:run_nlp",
+        name="text_embedding",
+        aliases=("text-embedding", "nlp"),
+        runner="mlx.modes.text_embedding.runner:run_text_embedding",
         default_action="embed",
-        actions=("embed",),
-        purpose="Text embedding workflows for GGUF models and CSV data",
+        actions=("embed", "benchmark"),
+        purpose="GGUF text embedding and retrieval benchmarking workflows",
     ),
 )
 

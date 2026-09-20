@@ -2,13 +2,13 @@ from __future__ import annotations
 
 import json
 from dataclasses import dataclass
-from numbers import Real
 from pathlib import Path
 from typing import Any, Callable, Optional, Protocol
 
 from mlx.core.commands import NullWorkflowReporter, WorkflowReporter, emit
 from mlx.core.exceptions import MLXUserError
 from mlx.core.requests import ConfigRequest
+from mlx.modes.text_embedding.embedding.protocol import validate_sequence_embedding
 
 try:
     import pandas as pd
@@ -223,15 +223,7 @@ class _EmbeddingWorkflow:
 
     @staticmethod
     def _validate_embedding(result: Any, csv_row: int) -> list[float]:
-        if not isinstance(result, (list, tuple)) or not result:
-            raise MLXUserError(f"Model returned no embedding vector at CSV row {csv_row}.")
-        if any(isinstance(value, (list, tuple)) for value in result):
-            raise MLXUserError(
-                f"Model returned token-level embeddings at CSV row {csv_row}; use a GGUF model with sequence pooling."
-            )
-        if any(isinstance(value, bool) or not isinstance(value, Real) for value in result):
-            raise MLXUserError(f"Model returned a non-numeric embedding at CSV row {csv_row}.")
-        return [float(value) for value in result]
+        return validate_sequence_embedding(result, context=f"CSV row {csv_row}")
 
     def _write_output(
         self,

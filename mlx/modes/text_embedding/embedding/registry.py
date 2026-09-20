@@ -11,6 +11,7 @@ from mlx.core.extensions import load_reference
 class EmbeddingBackend:
     factory: str | Callable
     provenance: str
+    supports_pooling: bool = False
 
 
 @dataclass(frozen=True)
@@ -19,17 +20,18 @@ class EmbeddingBackendRegistry:
         "llama-cpp": EmbeddingBackend(
             "mlx.modes.text_embedding.embedding.llama_cpp:LlamaCppEmbeddingProvider",
             "llama-cpp-python",
+            supports_pooling=True,
         )
     })
 
     def __post_init__(self):
         object.__setattr__(self, "entries", MappingProxyType(dict(self.entries)))
 
-    def register(self, name: str, factory, *, provenance: str) -> "EmbeddingBackendRegistry":
+    def register(self, name: str, factory, *, provenance: str, supports_pooling: bool = False) -> "EmbeddingBackendRegistry":
         name = name.strip().lower()
         if not name or not provenance:
             raise ValueError("Embedding backends require a name and provenance.")
-        return EmbeddingBackendRegistry({**self.entries, name: EmbeddingBackend(factory, provenance)})
+        return EmbeddingBackendRegistry({**self.entries, name: EmbeddingBackend(factory, provenance, supports_pooling)})
 
     def resolve(self, name: str) -> EmbeddingBackend:
         try:

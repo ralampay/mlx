@@ -428,3 +428,262 @@ def test_embed_registered_backend_keeps_provenance(tmp_path):
     ).execute()
     manifest = json.loads((output / "embedding_manifest.json").read_text())
     assert manifest["model"]["backend"] == "custom-embedding-library"
+
+
+@pytest.mark.parametrize("option,values", [
+    ("pooling", ("auto", "mean", "cls", "last", "none")),
+    ("prompt-format", ("auto", "none", "e5")),
+])
+def test_embedding_option_choices(option, values):
+    from mlx.cli import CLIUsageError
+
+    assert getattr(build_parser().parse_args([]), option.replace("-", "_")) == "auto"
+    for value in values:
+        parsed = build_parser().parse_args([f"--{option}", value])
+        assert getattr(parsed, option.replace("-", "_")) == value
+    for invalid in ("invalid", "MEAN", ""):
+        with pytest.raises(CLIUsageError, match="invalid choice"):
+            build_parser().parse_args([f"--{option}", invalid])
+
+
+@pytest.fixture
+def pooling_binding(monkeypatch):
+    from types import SimpleNamespace
+
+    calls = []
+    constants = {f"LLAMA_POOLING_TYPE_{name.upper()}": object()
+                 for name in ("mean", "cls", "last", "none")}
+
+    class Model:
+        def __init__(self, **kwargs):
+            calls.append(kwargs)
+            self.resolved = kwargs.get("pooling_type", constants["LLAMA_POOLING_TYPE_CLS"])
+
+        def pooling_type(self):
+            return self.resolved
+
+        def n_ctx(self):
+            return 512
+
+        def embed(self, texts):
+            if self.resolved is constants["LLAMA_POOLING_TYPE_NONE"]:
+                return [[[1.0, 2.0], [3.0, 4.0]] for _ in texts]
+            return [[1.0, 2.0] for _ in texts]
+
+    binding = SimpleNamespace(Llama=Model, __version__="test-version", **constants)
+    monkeypatch.setitem(sys.modules, "llama_cpp", binding)
+    return binding, calls
+
+
+@pytest.mark.parametrize("pooling", ["mean", "cls", "last", "none"])
+def test_explicit_pooling_uses_exported_constant(tmp_path, pooling_binding, pooling):
+    binding, calls = pooling_binding
+    model = tmp_path / "model.gguf"
+    model.touch()
+    provider = LlamaCppEmbeddingProvider(model, pooling=pooling)
+    assert calls == [{"model_path": str(model), "embedding": True,
+                      "pooling_type": getattr(binding, f"LLAMA_POOLING_TYPE_{pooling.upper()}")}]
+    assert provider.runtime_metadata() == {
+        "pooling_effective": pooling, "context_length": 512,
+        "llama_cpp_python_version": "test-version",
+    }
+    if pooling == "none":
+        with pytest.raises(MLXUserError, match="token-level.*--pooling mean"):
+            provider.embed(["example"])
+
+
+@pytest.mark.parametrize("kwargs", [{}, {"pooling": "auto"}])
+def test_auto_preserves_constructor_and_reports_resolved_pooling(tmp_path, pooling_binding, kwargs):
+    _, calls = pooling_binding
+    model = tmp_path / "model.gguf"
+    model.touch()
+    provider = LlamaCppEmbeddingProvider(model, **kwargs)
+    assert calls == [{"model_path": str(model), "embedding": True}]
+    assert provider.runtime_metadata()["pooling_effective"] == "cls"
+
+
+@pytest.mark.parametrize("pooling,expected", [("auto", "model/default"), ("mean", "unknown")])
+def test_pooling_metadata_does_not_guess(tmp_path, pooling_binding, pooling, expected):
+    model = tmp_path / "model.gguf"
+    model.touch()
+    provider = LlamaCppEmbeddingProvider(model, pooling=pooling, model_factory=lambda **kw: object())
+    assert provider.runtime_metadata()["pooling_effective"] == expected
+    assert provider.runtime_metadata()["context_length"] is None
+
+
+def test_missing_pooling_constant_is_actionable(tmp_path, pooling_binding):
+    binding, calls = pooling_binding
+    del binding.LLAMA_POOLING_TYPE_MEAN
+    model = tmp_path / "model.gguf"
+    model.touch()
+    with pytest.raises(MLXUserError, match="compatible llama-cpp-python"):
+        LlamaCppEmbeddingProvider(model, pooling="mean")
+    assert not calls
+
+
+def test_loading_failure_preserves_cause_and_guidance(tmp_path, pooling_binding):
+    binding, calls = pooling_binding
+    original = RuntimeError("Failed to load model from file")
+
+    def fail(**kwargs):
+        calls.append(kwargs)
+        raise original
+
+    binding.Llama = fail
+    model = tmp_path / "model.gguf"
+    model.touch()
+    with pytest.raises(MLXUserError) as caught:
+        LlamaCppEmbeddingProvider(model)
+    assert caught.value.__cause__ is original
+    assert len(calls) == 1
+    for text in (str(original), "automatic pooling", "--pooling mean", "--pooling cls",
+                 "--pooling last", "Do not choose arbitrarily"):
+        assert text in str(caught.value)
+
+
+@pytest.mark.parametrize("requested", ["auto", "none", "e5"])
+def test_retrieval_formatter(requested):
+    from mlx.modes.text_embedding.formatting import resolve_text_formatter
+
+    formatter = resolve_text_formatter(requested)
+    assert formatter.format_query("example") == ("query: example" if requested == "e5" else "example")
+    assert formatter.format_document("example") == ("passage: example" if requested == "e5" else "example")
+
+
+@pytest.mark.parametrize("prefixes", [{"query_prefix": "query: "}, {"document_prefix": "passage: "}])
+def test_e5_rejects_custom_prefixes(prefixes):
+    from mlx.modes.text_embedding.formatting import resolve_text_formatter
+
+    with pytest.raises(MLXUserError, match="cannot be combined"):
+        resolve_text_formatter("e5", **prefixes)
+    assert resolve_text_formatter("auto", **prefixes).effective_format == "none"
+
+
+@pytest.mark.parametrize("legacy", [False, True])
+def test_configuration_survives_embedding_and_benchmark(tmp_path, pooling_binding, legacy):
+    dataset = write_beir(tmp_path / "scifact")
+    model = tmp_path / "e5.gguf"
+    model.touch()
+    output = tmp_path / "embeddings"
+    store = FakeVectorStore()
+    EmbedTextCommand(
+        EmbedTextRequest(model=str(model), input_path=str(dataset), output_path=str(output),
+                         pooling="mean", prompt_format="e5"),
+        vector_store_factory=lambda *a, **kw: store,
+    ).execute()
+    path = output / "embedding_manifest.json"
+    manifest = json.loads(path.read_text())
+    expected = {
+        "model_path": str(model.resolve()), "model_filename": model.name,
+        "pooling_requested": "mean", "pooling_effective": "mean",
+        "embedding_dimension": 2, "context_length": 512,
+        "prompt_format_requested": "e5", "prompt_format_effective": "e5",
+        "llama_cpp_python_version": "test-version",
+    }
+    assert manifest["embedding_configuration"] == expected
+    assert json.loads((output / "run_metadata.json").read_text())["embedding_configuration"] == expected
+    assert store.records[0].text == "passage: One\nalpha"
+    assert manifest["embedding"]["query_prefix"] == "query: "
+    if legacy:
+        del manifest["embedding_configuration"]
+        path.write_text(json.dumps(manifest))
+        expected = {}
+    results = tmp_path / "results"
+    BenchmarkTextEmbeddingCommand(
+        BenchmarkTextEmbeddingRequest(input_path=str(output), output_path=str(results), top_k=1, k_values=(1,)),
+        vector_store_factory=lambda *a, **kw: FakeVectorStore([VectorSearchResult("d1", 0.9)]),
+    ).execute()
+    for name in ("benchmark_manifest.json", "metrics.json", "run_metadata.json"):
+        assert json.loads((results / name).read_text())["embedding_configuration"] == expected
+    with (results / "metrics.csv").open() as stream:
+        row = next(csv.DictReader(stream))
+    assert row["pooling_effective"] == ("unknown" if legacy else "mean")
+    assert row["prompt_format_effective"] == ("unknown" if legacy else "e5")
+
+
+def test_backend_rejects_unsupported_pooling_before_output(tmp_path):
+    from mlx.modes.text_embedding.embedding.registry import EmbeddingBackendRegistry
+
+    model = tmp_path / "model.gguf"
+    model.touch()
+    output = tmp_path / "output"
+    registry = EmbeddingBackendRegistry().register("custom", lambda path: FakeEmbeddingProvider(), provenance="test")
+    with pytest.raises(MLXUserError, match="does not support explicit pooling"):
+        EmbedTextCommand(
+            EmbedTextRequest(model=str(model), input_path="unused", output_path=str(output),
+                             embedding_backend="custom", pooling="mean"),
+            backend_registry=registry,
+        ).execute()
+    assert not output.exists()
+
+
+def test_verbose_cli_preserves_exception_chain(monkeypatch, capsys):
+    import mlx.cli as cli
+
+    def fail(config):
+        try:
+            raise RuntimeError("underlying load failure")
+        except RuntimeError as exc:
+            raise MLXUserError("model failed") from exc
+
+    monkeypatch.setattr(cli, "resolve_mode_runner", lambda mode: fail)
+    assert cli.main(["--mode", "text-embedding", "--action", "embed", "--verbose", "--format", "json"]) == 1
+    stderr = capsys.readouterr().err
+    assert "Traceback" in stderr
+    assert "underlying load failure" in stderr
+    assert "model failed" in stderr
+
+
+@pytest.mark.parametrize("value", [None, [], "mean"])
+def test_invalid_configuration_manifest_has_actionable_error(value):
+    from mlx.modes.text_embedding.artifacts import EmbeddingArtifactReader
+
+    with pytest.raises(MLXUserError, match="invalid embedding_configuration"):
+        EmbeddingArtifactReader._validate_manifests({}, {"embedding_configuration": value})
+
+
+def test_old_constructor_supports_auto_but_rejects_explicit_pooling(tmp_path, pooling_binding):
+    model = tmp_path / "model.gguf"
+    model.touch()
+    assert LlamaCppEmbeddingProvider(model, model_factory=FakeLlama).embed(["a"]) == [[1.0, 1.0]]
+    with pytest.raises(MLXUserError, match="pooling_type support") as caught:
+        LlamaCppEmbeddingProvider(model, model_factory=FakeLlama, pooling="mean")
+    assert isinstance(caught.value.__cause__, TypeError)
+
+
+@pytest.mark.parametrize("field,value,message", [
+    ("pooling", "invalid", "--pooling must be"),
+    ("prompt_format", "invalid", "--prompt-format must be"),
+])
+def test_python_requests_validate_options(tmp_path, field, value, message):
+    model = tmp_path / "model.gguf"
+    model.touch()
+    output = tmp_path / "output"
+    with pytest.raises(MLXUserError, match=message):
+        EmbedTextCommand(EmbedTextRequest(
+            model=str(model), input_path="unused", output_path=str(output), **{field: value}
+        )).execute()
+    assert not output.exists()
+
+
+def test_embedding_failure_preserves_guidance_and_cause(tmp_path, pooling_binding):
+    model = tmp_path / "model.gguf"
+    model.touch()
+    provider = LlamaCppEmbeddingProvider(model)
+    original = RuntimeError("sequence embeddings unavailable")
+
+    def fail(texts):
+        raise original
+
+    provider._model.embed = fail
+    with pytest.raises(MLXUserError, match="--pooling mean") as caught:
+        provider.embed(["example"])
+    assert caught.value.__cause__ is original
+
+
+@pytest.mark.parametrize("config", [{"pooling": "mean"}, {"prompt_format": "e5"}])
+def test_legacy_csv_rejects_new_nondefault_options(config):
+    from mlx.modes.text_embedding.runner import run_text_embedding
+
+    with pytest.raises(MLXUserError, match="legacy CSV"):
+        run_text_embedding({"action": "embed", "input_file": "input.csv", **config})

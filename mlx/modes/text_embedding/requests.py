@@ -24,6 +24,8 @@ class EmbedTextRequest(ConfigRequest):
     adapter: Optional[str] = None
     trust_checkpoint_code: bool = False
     device: str = "cpu"
+    pooling: str = "auto"
+    prompt_format: str = "auto"
 
 
 @dataclass(frozen=True)

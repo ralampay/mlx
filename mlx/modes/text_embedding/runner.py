@@ -26,6 +26,11 @@ def _reporter(config):
 
 
 def _legacy_csv_embed(config: dict[str, Any]):
+    if config.get("pooling", "auto") != "auto" or config.get("prompt_format", "auto") != "auto":
+        raise MLXUserError(
+            "--pooling and --prompt-format require the BEIR workflow with --input; "
+            "legacy CSV embedding does not support these options."
+        )
     from mlx.modes.nlp.embedding import EmbedCsvCommand, EmbedCsvRequest
     from mlx.modes.nlp.presentation import RichEmbeddingReporter
 

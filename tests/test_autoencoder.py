@@ -339,6 +339,8 @@ def test_text_embedding_adapter_transforms_before_export_and_indexing(tmp_path: 
     assert store.records[0].vector == pytest.approx((1.0,))
     manifest = json.loads((output / "embedding_manifest.json").read_text())
     assert manifest["embedding"]["source_dimensions"] == 2
+    assert manifest["embedding_configuration"]["embedding_dimension"] == 2
+    assert manifest["embedding_configuration"]["pooling_effective"] == "unknown"
     assert manifest["embedding"]["dimensions"] == 1
     assert manifest["adapter"]["architecture"] == "fake"
     with (output / "query_embeddings.csv").open(newline="") as source:

@@ -13,7 +13,8 @@ python -m pip install ".[text-embedding]"
 ```
 
 The model must be a local `.gguf` file that supports llama.cpp sequence embeddings. MLX loads it
-with `Llama(model_path=..., embedding=True)`. Token-level output is rejected because retrieval
+with `Llama(model_path=..., embedding=True)` by default. Explicit pooling adds a
+`pooling_type` override. Token-level output is rejected because retrieval
 requires one fixed-width vector per query or document. No GPU is assumed.
 
 ## BEIR dataset layout
@@ -45,8 +46,8 @@ python -m mlx \
   --model ./models/multilingual-e5-small-q8_0.gguf \
   --input ./datasets/scifact \
   --output ./artifacts/scifact-e5-small \
-  --query-prefix "query: " \
-  --document-prefix "passage: "
+  --pooling mean \
+  --prompt-format e5
 ```
 
 Prefixes default to empty strings. They are configurable because E5-style models commonly require
@@ -70,6 +71,7 @@ A trained vector autoencoder may be inserted after GGUF embedding with `--adapte
 ```bash
 python -m mlx --mode text-embedding --action embed \
   --model ./models/multilingual-e5-small-q8_0.gguf \
+  --pooling mean --prompt-format e5 \
   --adapter ./artifacts/autoencoder-128/autoencoder.pth \
   --input ./datasets/scifact --output ./artifacts/scifact-e5-ae128
 ```
@@ -126,3 +128,76 @@ commands, BEIR loader, metrics, and artifact writers require no changes.
 
 Future PCA tooling can implement the same core vector-transform contract used by autoencoder
 checkpoints without entering dataset parsing, metrics, or vector-store adapters.
+
+## Pooling and model-specific formatting
+
+Sequence pooling reduces token representations to one fixed-width vector for a query or document.
+Some valid GGUF embedding models have missing or incompatible pooling metadata; an explicit
+`--pooling` can let llama.cpp load them with the architecture's intended pooling method.
+
+| Option | Meaning |
+| ------ | ------- |
+| `auto` | Let GGUF/llama.cpp determine pooling |
+| `mean` | Mean pooling over token representations |
+| `cls` | Use CLS/token-specific pooling |
+| `last` | Use the final token representation |
+| `none` | No sequence pooling |
+
+`auto` is the default and omits the constructor's pooling override, preserving existing model
+loading. MLX never retries with mean or any other method. Choose the method intended by the
+original model architecture: changing pooling changes the representation and experimental results.
+`none` is passed to llama.cpp, but token-level output is rejected by this retrieval workflow.
+MLX never manually averages token embeddings.
+
+`--prompt-format` accepts `auto`, `none`, or `e5`. Both `auto` (the default) and `none` leave the
+text unchanged unless you supply the existing custom prefixes. Automatic family detection is
+not attempted: filenames and architecture identifiers are not reliable evidence of prompt conventions.
+For multilingual-e5-small, multilingual-e5-base, and multilingual-e5-large, use `e5` to prepend
+`query: ` to queries and `passage: ` to documents, including non-English inputs. The document
+prefix precedes the combined title/body. Other models receive no E5 prefixes automatically.
+E5 formatting cannot be combined with nonempty `--query-prefix` or `--document-prefix`; choose
+one formatting method to prevent double prefixes. Input text is not inspected or stripped for
+existing prefixes, so pass unprefixed BEIR text when using the preset.
+
+```bash
+python -m mlx --mode text-embedding --action embed \
+  --model /home/ralampay/workspace/ai_models/embedding_models/multilingual-e5-small-q8_0.gguf \
+  --pooling mean --prompt-format e5 \
+  --input ~/Desktop/datasets/retrieval/scifact \
+  --output ~/Desktop/experiments/e5-scifact
+
+# Existing Gemma invocation: automatic pooling and unchanged text formatting.
+python -m mlx --mode text-embedding --action embed \
+  --model /path/to/working-gemma-model.gguf \
+  --input ~/Desktop/datasets/retrieval/scifact \
+  --output ~/Desktop/experiments/gemma-scifact
+
+python -m mlx --mode text-embedding --action benchmark \
+  --input ~/Desktop/experiments/e5-scifact \
+  --output ~/Desktop/experiments/e5-scifact-results
+```
+
+### Reproducibility and compatibility
+
+Embedding and run manifests include `embedding_configuration` with `model_path`, `model_filename`,
+`pooling_requested`, `pooling_effective`, `embedding_dimension`, `context_length`,
+`prompt_format_requested`, `prompt_format_effective`, and `llama_cpp_python_version`.
+The full model path records provenance; it is not required to reload the portable artifacts.
+`embedding_dimension` is the source model dimension; existing `embedding.dimensions` describes
+final vectors after any representation transform. Existing hashes, normalization, actual prefixes,
+and adapter provenance remain recorded.
+
+Effective pooling comes from the runtime library accessor, not the requested option. If unavailable,
+auto records `model/default` and explicit pooling records `unknown`. Unavailable context length or
+package version is null. Third-party providers without runtime metadata record unknown pooling.
+Benchmark JSON manifests/summaries retain the saved configuration; CSV and Markdown reports show
+requested/effective pooling and prompt format. Old manifests remain readable with unknown provenance.
+Benchmarking never reloads the model or applies a new pooling choice.
+
+The inspected llama-cpp-python 0.3.35 API supports `pooling_type`, named pooling constants,
+`pooling_type()` for resolved pooling, and `n_ctx()` for runtime context length. Dependencies remain
+unpinned; no historical minimum version is asserted. Older/incompatible builds missing a requested
+constant fail with upgrade guidance. GGUF architecture support still depends on the installed
+llama.cpp build; explicit pooling cannot repair every model-loading failure. Add `--verbose` to
+retain the chained Python traceback on stderr alongside the original underlying error.
+The new nondefault options apply to BEIR embedding, not the retained legacy CSV compatibility route.

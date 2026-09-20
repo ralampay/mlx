@@ -88,6 +88,7 @@ class EmbeddingArtifactWriter:
         adapter: Mapping[str, Any] | None,
         started_at: str,
         backend: str = "llama-cpp-python",
+        embedding_configuration: Mapping[str, Any] | None = None,
     ) -> None:
         qrels_name = "qrels.tsv"
         self._write_qrels(output_dir / qrels_name, dataset.qrels)
@@ -102,6 +103,7 @@ class EmbeddingArtifactWriter:
             "qrels": len(dataset.qrels),
         }
         embedding_manifest = {
+            "embedding_configuration": dict(embedding_configuration or {}),
             "schema_version": SCHEMA_VERSION,
             "model": {
                 "path": model_path.name,
@@ -129,6 +131,7 @@ class EmbeddingArtifactWriter:
                 "schema_version": SCHEMA_VERSION,
                 "mode": "text_embedding",
                 "action": "embed",
+                "embedding_configuration": dict(embedding_configuration or {}),
                 "started_at": started_at,
                 "completed_at": utc_timestamp(),
                 "python_version": platform.python_version(),
@@ -203,6 +206,8 @@ class EmbeddingArtifactReader:
 
     @staticmethod
     def _validate_manifests(dataset, manifest) -> None:
+        if not isinstance(manifest.get("embedding_configuration", {}), dict):
+            raise MLXUserError("Embedding manifest has an invalid embedding_configuration object.")
         for field in ("corpus_documents", "queries", "qrels"):
             if type(dataset.get(field)) is not int or dataset[field] < 1:
                 raise MLXUserError(f"Dataset manifest has an invalid {field} value.")
@@ -339,6 +344,11 @@ class BenchmarkArtifactWriter:
                 "similarity": summary["similarity"],
                 "queries": summary["query_count"],
                 "corpus_size": summary["corpus_size"],
+                **{
+                    key: summary.get("embedding_configuration", {}).get(key, "unknown")
+                    for key in ("pooling_requested", "pooling_effective",
+                                "prompt_format_requested", "prompt_format_effective")
+                },
                 **metrics,
             }],
         )
@@ -362,6 +372,7 @@ class BenchmarkArtifactWriter:
                 "schema_version": SCHEMA_VERSION,
                 "mode": "text_embedding",
                 "action": "benchmark",
+                "embedding_configuration": summary.get("embedding_configuration", {}),
                 "started_at": started_at,
                 "completed_at": utc_timestamp(),
                 "python_version": platform.python_version(),
@@ -383,6 +394,12 @@ class BenchmarkArtifactWriter:
     def _write_report(path: Path, summary: Mapping[str, Any], failures) -> None:
         metric_rows = "\n".join(
             f"| {name} | {value:.6f} |" for name, value in sorted(summary["metrics"].items())
+        )
+        configuration = summary.get("embedding_configuration", {})
+        configuration_rows = "\n".join(
+            f"- {key}: `{configuration.get(key, 'unknown')}`"
+            for key in ("pooling_requested", "pooling_effective",
+                        "prompt_format_requested", "prompt_format_effective")
         )
         artifacts = (
             "metrics.json", "metrics.csv", "query_metrics.csv", "rankings.jsonl",
@@ -407,6 +424,7 @@ class BenchmarkArtifactWriter:
 
 - Model: `{summary['model']}`
 - Model SHA-256: `{summary['model_sha256']}`
+{configuration_rows}
 
 ## Retrieval Configuration
 

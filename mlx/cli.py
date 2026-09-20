@@ -99,6 +99,8 @@ def build_parser() -> RichArgumentParser:
     parser.add_argument("--vector-store", default=None, dest="vector_store")
     parser.add_argument("--top-k", type=int, default=100, dest="top_k")
     parser.add_argument("--k-values", default="1,5,10,20,100", dest="k_values")
+    parser.add_argument("--pooling", choices=("auto", "mean", "cls", "last", "none"), default="auto")
+    parser.add_argument("--prompt-format", choices=("auto", "none", "e5"), default="auto")
     parser.add_argument("--query-prefix", default="", dest="query_prefix")
     parser.add_argument("--document-prefix", default="", dest="document_prefix")
     parser.add_argument(
@@ -437,6 +439,8 @@ def _render_help() -> None:
     options.add_row("--vector-store", "chroma", "Persistent vector-store provider for text embedding.")
     options.add_row("--top-k", "100", "Maximum retrieval depth for text-embedding benchmarks.")
     options.add_row("--k-values", "1,5,10,20,100", "Comma-separated retrieval metric cutoffs.")
+    options.add_row("--pooling", "auto", "GGUF pooling: auto, mean, cls, last, none.")
+    options.add_row("--prompt-format", "auto", "Retrieval text format: auto (none), none, e5.")
     options.add_row("--query-prefix", "empty", "Text prepended to every retrieval query before embedding.")
     options.add_row("--document-prefix", "empty", "Text prepended to every corpus document before embedding.")
     options.add_row("--normalize-embeddings", "False", "L2-normalize vectors before export and indexing.")
@@ -647,6 +651,10 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
             print_warning("Action cancelled.")
         return 1
     except MLXUserError as exc:
+        if config.get("verbose"):
+            import traceback
+
+            traceback.print_exc(file=sys.stderr)
         if config.get("output_format") == "json":
             print(json.dumps({"error": str(exc)}), file=sys.stderr)
         else:

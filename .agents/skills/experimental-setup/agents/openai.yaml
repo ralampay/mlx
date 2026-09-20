@@ -1,0 +1,7 @@
+interface:
+  display_name: "Experimental Setup"
+  short_description: "Design reproducible ML experiments with copy-pasteable commands and concrete artifacts."
+  default_prompt: "Design a reproducible experiment using the current repository and provide copy-pasteable commands."
+
+policy:
+  allow_implicit_invocation: false

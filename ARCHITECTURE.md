@@ -561,6 +561,31 @@ the benchmark summary and manifest report their count. Artifact readers validate
 structures and exported IDs before index access. Retrieval results must have unique known IDs,
 finite best-first scores, and respect the requested depth. Chroma reload checks cosine metadata.
 
+Text embedding accepts `pooling` (`auto`, `mean`, `cls`, `last`, `none`) and
+`prompt_format` (`auto`, `none`, `e5`) on `EmbedTextRequest`. Both default to `auto`.
+The existing immutable backend registry declares optional `supports_pooling`; opted-in factories
+accept a `pooling` keyword for explicit choices. Default construction retains the single-path
+factory contract. Unsupported explicit pooling is rejected before output creation.
+The llama.cpp adapter alone maps named constants, omits the override for auto, validates sequence
+vectors, and exposes optional `runtime_metadata()` returning `pooling_effective`, `context_length`,
+and `llama_cpp_python_version`. Providers without this method remain compatible and report unknown
+runtime settings. No token averaging or alternate-pooling retry is permitted.
+
+The mode-local `RetrievalTextFormatter` provides query/document formatting after title/body
+composition. Its resolver supplies identity/custom-prefix formatting or E5 role prefixes.
+Prompt-format auto deliberately resolves to none without filename detection. E5 conflicts with
+nonempty custom prefixes and fails before model construction. Dataset values remain unmodified.
+
+Additive `embedding_configuration` provenance is stored in embedding/run manifests and copied into
+benchmark manifests, run metadata, and JSON summaries; benchmark tables/reports expose pooling and
+prompt-format choices. Runtime pooling is read through the binding's public accessor, with
+`model/default` for unresolved auto and `unknown` for unresolved explicit pooling. Missing context
+and version are null. Source embedding dimension and existing transformed dimensions remain distinct.
+Old artifact schemas remain readable without fabricated configuration. Benchmark manifests also
+retain the original embedding settings (including custom prefixes and normalization).
+The CLI renders chained errors to stderr under `--verbose`; model errors retain their original
+cause and actionable pooling guidance. Legacy CSV embedding rejects nondefault new options.
+
 ## Vector Autoencoders and Representation Transforms
 
 `mlx.core.vector_transforms.VectorRepresentationTransformer` is the narrow cross-mode contract for

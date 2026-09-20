@@ -17,6 +17,7 @@ from mlx.modes.text_embedding.artifacts import (
     utc_timestamp,
 )
 from mlx.modes.text_embedding.data import BeirDatasetLoader
+from mlx.modes.text_embedding.formatting import RetrievalTextFormatter, resolve_text_formatter
 from mlx.modes.text_embedding.embedding.registry import DEFAULT_EMBEDDING_BACKENDS, EmbeddingBackendRegistry
 from mlx.modes.text_embedding.metric_registry import DEFAULT_METRIC_REGISTRY, RetrievalMetricRegistry
 from mlx.modes.text_embedding.embedding.protocol import TextEmbeddingProvider
@@ -64,7 +65,7 @@ class EmbedTextCommand:
         *,
         reporter: WorkflowReporter | None = None,
         dataset_loader: BeirDatasetLoader | None = None,
-        provider_factory: Callable[[Path], TextEmbeddingProvider] | None = None,
+        provider_factory: Callable[..., TextEmbeddingProvider] | None = None,
         backend_registry: EmbeddingBackendRegistry = DEFAULT_EMBEDDING_BACKENDS,
         vector_store_factory: VectorStoreFactory | None = None,
         vector_store_registry: VectorStoreRegistry = DEFAULT_VECTOR_STORE_REGISTRY,
@@ -86,6 +87,15 @@ class EmbedTextCommand:
     def execute(self) -> EmbedTextResult:
         model_path, input_path = self._validate_request()
         backend = self.backend_registry.resolve(self.request.embedding_backend)
+        if self.request.pooling != "auto" and not backend.supports_pooling:
+            raise MLXUserError(
+                f"Embedding backend '{self.request.embedding_backend}' does not support explicit pooling."
+            )
+        formatter = resolve_text_formatter(
+            self.request.prompt_format,
+            query_prefix=self.request.query_prefix,
+            document_prefix=self.request.document_prefix,
+        )
         provider_factory = self.provider_factory or self.backend_registry.factory(self.request.embedding_backend)
         factory = self.vector_store_factory or self.vector_store_registry.resolve(
             self.request.vector_store
@@ -105,7 +115,8 @@ class EmbedTextCommand:
                 "queries": len(dataset.queries),
             },
         )
-        provider = provider_factory(model_path)
+        options = {"pooling": self.request.pooling} if self.request.pooling != "auto" else {}
+        provider = provider_factory(model_path, **options)
         vector_store_path = output_dir / "vector_store"
         vector_store_path.mkdir(parents=True, exist_ok=True)
         store = factory(vector_store_path, collection="corpus", create=True)
@@ -114,8 +125,8 @@ class EmbedTextCommand:
         try:
             self.artifact_writer.initialize_csv(corpus_csv, kind="corpus")
             self.artifact_writer.initialize_csv(query_csv, kind="query")
-            self._embed_corpus(dataset, provider, store, corpus_csv)
-            self._embed_queries(dataset, provider, query_csv)
+            self._embed_corpus(dataset, provider, store, corpus_csv, formatter)
+            self._embed_queries(dataset, provider, query_csv, formatter)
         finally:
             store.close()
         dimensions = self._dimensions
@@ -130,13 +141,14 @@ class EmbedTextCommand:
             dimensions=dimensions,
             normalized=self.request.normalize_embeddings,
             vector_store=self.request.vector_store,
-            query_prefix=self.request.query_prefix,
-            document_prefix=self.request.document_prefix,
+            query_prefix=formatter.query_prefix,
+            document_prefix=formatter.document_prefix,
             representation=self.request.representation,
             source_dimensions=self._source_dimensions,
             adapter=(dict(self.transformer.provenance) if self.transformer else None),
             started_at=started_at,
             backend=backend.provenance,
+            embedding_configuration=self._embedding_configuration(model_path, provider, formatter),
         )
         result = EmbedTextResult(
             output_dir=output_dir,
@@ -153,7 +165,26 @@ class EmbedTextCommand:
         )
         return result
 
+    def _embedding_configuration(
+        self, model_path: Path, provider: TextEmbeddingProvider, formatter: RetrievalTextFormatter
+    ) -> dict[str, Any]:
+        metadata_reader = getattr(provider, "runtime_metadata", None)
+        runtime = metadata_reader() if callable(metadata_reader) else {}
+        return {
+            "model_path": str(model_path.resolve()),
+            "model_filename": model_path.name,
+            "pooling_requested": self.request.pooling,
+            "pooling_effective": runtime.get("pooling_effective", "unknown"),
+            "embedding_dimension": self._source_dimensions,
+            "context_length": runtime.get("context_length"),
+            "prompt_format_requested": self.request.prompt_format,
+            "prompt_format_effective": formatter.effective_format,
+            "llama_cpp_python_version": runtime.get("llama_cpp_python_version"),
+        }
+
     def _validate_request(self) -> tuple[Path, Path]:
+        if self.request.pooling not in ("auto", "mean", "cls", "last", "none"):
+            raise MLXUserError("--pooling must be one of: auto, mean, cls, last, none.")
         if not self.request.model:
             raise MLXUserError("Text embedding requires --model pointing to a model file.")
         if not self.request.input_path:
@@ -174,12 +205,12 @@ class EmbedTextCommand:
             raise MLXUserError(f"GGUF embedding model not found: {model}")
         return model, Path(self.request.input_path).expanduser()
 
-    def _embed_corpus(self, dataset, provider, store, path: Path) -> None:
+    def _embed_corpus(self, dataset, provider, store, path: Path, formatter: RetrievalTextFormatter) -> None:
         total = len(dataset.corpus)
         for start in range(0, total, self.request.batch_size):
             documents = dataset.corpus[start : start + self.request.batch_size]
             texts = [
-                self.request.document_prefix + document_embedding_text(document)
+                formatter.format_document(document_embedding_text(document))
                 for document in documents
             ]
             vectors = self._embed_batch(provider, texts)
@@ -205,11 +236,11 @@ class EmbedTextCommand:
             )
             self._emit_progress("corpus", min(start + len(documents), total), total)
 
-    def _embed_queries(self, dataset, provider, path: Path) -> None:
+    def _embed_queries(self, dataset, provider, path: Path, formatter: RetrievalTextFormatter) -> None:
         total = len(dataset.queries)
         for start in range(0, total, self.request.batch_size):
             queries = dataset.queries[start : start + self.request.batch_size]
-            texts = [self.request.query_prefix + query.text for query in queries]
+            texts = [formatter.format_query(query.text) for query in queries]
             vectors = self._embed_batch(provider, texts)
             records = tuple(
                 EmbeddedText(query.id, query.text, vector, {"dataset": dataset.name})
@@ -393,7 +424,9 @@ class BenchmarkTextEmbeddingCommand:
         model = embedding_manifest["model"]
         embedding = embedding_manifest["embedding"]
         representation = self.request.representation or embedding.get("representation", "original")
+        embedding_configuration = embedding_manifest.get("embedding_configuration", {})
         summary = {
+            "embedding_configuration": embedding_configuration,
             "dataset": dataset_manifest["name"],
             "model": model["path"],
             "model_sha256": model["sha256"],
@@ -408,6 +441,8 @@ class BenchmarkTextEmbeddingCommand:
             "metrics": aggregate,
         }
         manifest = {
+            "embedding_configuration": embedding_configuration,
+            "embedding": dict(embedding),
             "schema_version": SCHEMA_VERSION,
             "dataset": dataset_manifest["name"],
             "model_sha256": model["sha256"],

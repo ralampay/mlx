@@ -145,19 +145,9 @@ def l2_normalize_tensor(values: torch.Tensor) -> torch.Tensor:
     return values / norms
 
 
-def load_json_object(path: str | None, *, purpose: str) -> dict[str, Any]:
-    if path is None:
-        return {}
-    source = Path(path).expanduser()
-    if not source.is_file():
-        raise MLXUserError(f"{purpose} configuration file not found: {source}")
-    try:
-        value = json.loads(source.read_text(encoding="utf-8"))
-    except (OSError, UnicodeError, json.JSONDecodeError) as exc:
-        raise MLXUserError(f"Unable to read {purpose} configuration '{source}': {exc}") from exc
-    if not isinstance(value, dict):
-        raise MLXUserError(f"{purpose} configuration must be a JSON object.")
-    return value
+def load_json_object(path, *, purpose: str) -> dict[str, Any]:
+    from mlx.core.configuration import load_component_options
+    return load_component_options(path, purpose=purpose)
 
 
 __all__ = [

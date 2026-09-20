@@ -2,9 +2,7 @@ from __future__ import annotations
 
 from dataclasses import asdict, dataclass
 
-from mlx.modes.video_anomaly_detection.models.classification_compat import (
-    standard_backbone_names,
-)
+from mlx.modes.video_anomaly_detection.models.backbone3d import DEFAULT_BACKBONE_3D_REGISTRY
 
 
 @dataclass(frozen=True)
@@ -17,9 +15,9 @@ class VideoAnomalyModelVariant:
         return asdict(self)
 
 
-def video_anomaly_model_variants() -> tuple[VideoAnomalyModelVariant, ...]:
+def video_anomaly_model_variants(registry=None) -> tuple[VideoAnomalyModelVariant, ...]:
     variants: list[VideoAnomalyModelVariant] = []
-    for model_name in standard_backbone_names():
+    for model_name in sorted((registry or DEFAULT_BACKBONE_3D_REGISTRY).entries):
         fusion_modes = ("average", "sknet") if model_name.startswith("drax") else (None,)
         for fusion_mode in fusion_modes:
             variant_id = (

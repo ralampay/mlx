@@ -4,6 +4,7 @@ from typing import Any
 
 from mlx.core.commands import NullWorkflowReporter
 from mlx.core.exceptions import MLXUserError
+from mlx.core.configuration import load_component_options
 from mlx.modes.autoencoder.commands import (
     EmbedAutoencoder,
     ListAutoencoderLosses,
@@ -24,6 +25,9 @@ def _reporter(config):
 
 def _train(config: dict[str, Any]):
     values = _mode_defaults(config, training=True)
+    values["loss"] = values.get("loss") or "mse"
+    for key in ("autoencoder_config", "loss_config"):
+        values[key] = load_component_options(values.get(key), purpose=key)
     return TrainAutoencoder(
         AutoencoderTrainRequest.from_config(values), reporter=_reporter(config)
     ).execute()
@@ -73,6 +77,7 @@ def _list_losses(config: dict[str, Any]):
 ACTION_HANDLERS = {
     "embed": _embed,
     "ls-loss-functions": _list_losses,
+    "ls-losses": _list_losses,
     "ls-models": _list_models,
     "train": _train,
 }

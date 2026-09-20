@@ -9,39 +9,36 @@ from typing import Mapping
 from torch import nn
 
 from mlx.core.exceptions import MLXUserError
+from mlx.core.extensions import load_reference
+from mlx.modes.image_classification.models.catalog import TORCHVISION_MODELS, BUILTIN_BUILDERS
 
 
 @dataclass(frozen=True)
 class StandardModelRegistry:
-    builders: Mapping[str, Callable] = field(default_factory=dict)
+    builders: Mapping[str, Callable | str] = field(default_factory=dict)
+    feature_adapters: Mapping[str, Callable | str] = field(default_factory=dict)
 
     def __post_init__(self) -> None:
         object.__setattr__(self, "builders", MappingProxyType(dict(self.builders)))
+        object.__setattr__(self, "feature_adapters", MappingProxyType(dict(self.feature_adapters)))
 
-    def register(self, name: str, builder: Callable) -> "StandardModelRegistry":
+    def register(self, name: str, builder: Callable | str, *, feature_adapter=None) -> "StandardModelRegistry":
         normalized = name.strip().lower()
         if not normalized:
             raise ValueError("Standard model name cannot be empty.")
         builders = dict(self.builders)
         builders[normalized] = builder
-        return StandardModelRegistry(builders)
+        adapters = dict(self.feature_adapters)
+        if feature_adapter is not None:
+            adapters[normalized] = feature_adapter
+        return StandardModelRegistry(builders, adapters)
 
 
-_COMPAT_STANDARD_MODEL_BUILDERS: dict[str, Callable] = {}
+_COMPAT_STANDARD_MODEL_BUILDERS: dict[str, Callable | str] = dict(BUILTIN_BUILDERS)
 CUSTOM_STANDARD_MODEL_BUILDERS = MappingProxyType(_COMPAT_STANDARD_MODEL_BUILDERS)
 DEFAULT_STANDARD_MODEL_REGISTRY = StandardModelRegistry(_COMPAT_STANDARD_MODEL_BUILDERS)
 
-SUPPORTED_TORCHVISION_MODELS = {
-    "resnet18",
-    "resnet50",
-    "densenet121",
-    "mobilenet_v3_large",
-    "efficientnet_b0",
-    "convnext_small",
-    "convnext_base",
-    "convnext_large",
-    "convnext_tiny",
-}
+SUPPORTED_TORCHVISION_MODELS = frozenset(TORCHVISION_MODELS)
 
 
 def register_standard_model(
@@ -80,6 +77,8 @@ def build_standard_model(
 ):
     custom_builder = (registry or DEFAULT_STANDARD_MODEL_REGISTRY).builders.get(model_name)
     if custom_builder is not None:
+        if isinstance(custom_builder, str):
+            custom_builder = load_reference(custom_builder, kind="classification model")
         builder_params = {
             "num_classes": num_classes,
             "colored": colored,
@@ -113,35 +112,9 @@ def build_standard_model(
 
 
 def _build_torchvision_model(*, model_name: str, torchvision_models, pretrained: bool):
-    if model_name == "resnet18":
-        weights = torchvision_models.ResNet18_Weights.DEFAULT if pretrained else None
-        return torchvision_models.resnet18(weights=weights), "conv1"
-    if model_name == "resnet50":
-        weights = torchvision_models.ResNet50_Weights.DEFAULT if pretrained else None
-        return torchvision_models.resnet50(weights=weights), "conv1"
-    if model_name == "densenet121":
-        weights = torchvision_models.DenseNet121_Weights.DEFAULT if pretrained else None
-        return torchvision_models.densenet121(weights=weights), "features.conv0"
-    if model_name == "mobilenet_v3_large":
-        weights = torchvision_models.MobileNet_V3_Large_Weights.DEFAULT if pretrained else None
-        return torchvision_models.mobilenet_v3_large(weights=weights), "features.0.0"
-    if model_name == "efficientnet_b0":
-        weights = torchvision_models.EfficientNet_B0_Weights.DEFAULT if pretrained else None
-        return torchvision_models.efficientnet_b0(weights=weights), "features.0.0"
-    if model_name == "convnext_tiny":
-        weights = torchvision_models.ConvNeXt_Tiny_Weights.DEFAULT if pretrained else None
-        return torchvision_models.convnext_tiny(weights=weights), "features.0.0"
-    if model_name == "convnext_small":
-        weights = torchvision_models.ConvNeXt_Small_Weights.DEFAULT if pretrained else None
-        return torchvision_models.convnext_small(weights=weights), "features.0.0"
-    if model_name == "convnext_base":
-        weights = torchvision_models.ConvNeXt_Base_Weights.DEFAULT if pretrained else None
-        return torchvision_models.convnext_base(weights=weights), "features.0.0"
-    if model_name == "convnext_large":
-        weights = torchvision_models.ConvNeXt_Large_Weights.DEFAULT if pretrained else None
-        return torchvision_models.convnext_large(weights=weights), "features.0.0"
-
-    raise MLXUserError(f"Unsupported standard image-classification model '{model_name}'.")
+    spec = TORCHVISION_MODELS[model_name]
+    weights = getattr(torchvision_models, spec.weights).DEFAULT if pretrained else None
+    return getattr(torchvision_models, spec.constructor)(weights=weights), spec.stem
 
 
 def _replace_stem_conv(model, stem_attr: str) -> None:
@@ -164,30 +137,9 @@ def _replace_stem_conv(model, stem_attr: str) -> None:
 
 
 def _replace_classifier_head(model, model_name: str, num_classes: int) -> None:
-    if model_name.startswith("resnet"):
-        model.fc = nn.Linear(model.fc.in_features, num_classes)
-        return
-    if model_name == "densenet121":
-        model.classifier = nn.Linear(model.classifier.in_features, num_classes)
-        return
-    if model_name == "mobilenet_v3_large":
-        model.classifier = nn.Sequential(
-            model.classifier[0],
-            model.classifier[1],
-            model.classifier[2],
-            nn.Linear(model.classifier[3].in_features, num_classes),
-        )
-        return
-    if model_name == "efficientnet_b0":
-        model.classifier = nn.Sequential(
-            model.classifier[0],
-            nn.Linear(model.classifier[1].in_features, num_classes),
-        )
-        return
-    if model_name.startswith("convnext_"):
-        model.classifier[2] = nn.Linear(model.classifier[2].in_features, num_classes)
-        return
-    raise MLXUserError(f"Unsupported standard image-classification model '{model_name}'.")
+    head_path = TORCHVISION_MODELS[model_name].head
+    head = _resolve_module_attr(model, head_path)
+    _assign_module_attr(model, head_path, nn.Linear(head.in_features, num_classes))
 
 
 def _resolve_module_attr(model, attr_path: str):

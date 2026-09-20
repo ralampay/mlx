@@ -2,6 +2,9 @@ from __future__ import annotations
 
 import copy
 from types import MappingProxyType
+from dataclasses import dataclass, field
+from typing import Mapping, Callable
+from mlx.core.extensions import load_reference
 from typing import Any
 
 import torch
@@ -251,19 +254,32 @@ BACKBONE_3D_REGISTRY = MappingProxyType({
 })
 
 
+@dataclass(frozen=True)
+class Backbone3DRegistry:
+    entries: Mapping[str, Callable | str] = field(default_factory=lambda: BACKBONE_3D_REGISTRY)
+
+    def __post_init__(self):
+        object.__setattr__(self, "entries", MappingProxyType(dict(self.entries)))
+
+    def register(self, name, builder):
+        if not name.strip():
+            raise ValueError("3D backbone name cannot be empty.")
+        return Backbone3DRegistry({**self.entries, name.strip().lower(): builder})
+
+    def resolve(self, name):
+        reference = self.entries.get(name)
+        if reference is None:
+            raise MLXUserError(f"Model '{name}' has no 3D video-anomaly backbone. Available models: {', '.join(sorted(self.entries))}.")
+        return load_reference(reference, kind="3D backbone") if isinstance(reference, str) else reference
+
+
+DEFAULT_BACKBONE_3D_REGISTRY = Backbone3DRegistry()
+
+
 def build_spatiotemporal_backbone_3d(
-    model_name: str, config: dict[str, Any]
+    model_name: str, config: dict[str, Any], *, registry: Backbone3DRegistry | None = None
 ) -> InflatedImageBackbone3D:
-    if not is_standard_backbone(model_name):
-        raise MLXUserError(
-            f"Model '{model_name}' is a one-shot/Siamese model and cannot be inflated to 3D."
-        )
-    backbone_type = BACKBONE_3D_REGISTRY.get(model_name)
-    if backbone_type is None:
-        supported = ", ".join(sorted(BACKBONE_3D_REGISTRY))
-        raise MLXUserError(
-            f"Model '{model_name}' has no 3D video-anomaly backbone. Available models: {supported}."
-        )
+    backbone_type = (registry or DEFAULT_BACKBONE_3D_REGISTRY).resolve(model_name)
     return backbone_type(model_name, config)
 
 

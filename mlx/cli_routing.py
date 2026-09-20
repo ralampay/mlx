@@ -30,7 +30,7 @@ MODE_DESCRIPTORS: tuple[ModeDescriptor, ...] = (
         aliases=(),
         runner="mlx.modes.autoencoder.runner:run_autoencoder",
         default_action="ls-models",
-        actions=("train", "embed", "ls-models", "ls-loss-functions"),
+        actions=("train", "embed", "ls-models", "ls-loss-functions", "ls-losses"),
         purpose="Generic one-dimensional vector autoencoder training and embedding",
     ),
     ModeDescriptor(
@@ -54,7 +54,7 @@ MODE_DESCRIPTORS: tuple[ModeDescriptor, ...] = (
         aliases=("image-classification",),
         runner="mlx.modes.image_classification.runner:run_image_classification",
         default_action="test",
-        actions=("train", "test", "benchmark", "resume", "status", "stop", "infer-image", "cam", "build-dataset", "ls-models"),
+        actions=("train", "test", "benchmark", "resume", "status", "stop", "infer-image", "cam", "build-dataset", "ls-models", "ls-losses", "ls-cam-methods"),
         purpose="One-shot and standard image-classification workflows",
     ),
     ModeDescriptor(
@@ -70,7 +70,7 @@ MODE_DESCRIPTORS: tuple[ModeDescriptor, ...] = (
         aliases=(),
         runner="mlx.modes.segmentation.runner:run_segmentation",
         default_action="test",
-        actions=("train", "test", "benchmark", "infer-image", "infer-camera", "infer-video", "build-dataset", "ls-models"),
+        actions=("train", "test", "benchmark", "infer-image", "infer-camera", "infer-video", "build-dataset", "ls-models", "ls-losses"),
         purpose="Semantic segmentation workflows for U-Net style models",
     ),
     ModeDescriptor(
@@ -86,7 +86,7 @@ MODE_DESCRIPTORS: tuple[ModeDescriptor, ...] = (
         aliases=("text-embedding", "nlp"),
         runner="mlx.modes.text_embedding.runner:run_text_embedding",
         default_action="embed",
-        actions=("embed", "benchmark"),
+        actions=("embed", "benchmark", "ls-metrics", "ls-vector-stores", "ls-embedding-backends"),
         purpose="GGUF text embedding and retrieval benchmarking workflows",
     ),
 )

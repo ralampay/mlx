@@ -36,43 +36,31 @@ from mlx.modes.image_classification.models.adapters import (
 from mlx.modes.image_classification.models.joint_svdd import JointDeepSVDDClassifier
 from mlx.modes.image_classification.ood.deep_svdd import validate_svdd_config
 
+from mlx.modes.image_classification.models.catalog import BUILTIN_STANDARD_NAMES
+
 DEFAULT_MODEL = "resnet18"
-STANDARD_MODEL_NAMES = {
-    "convnext_base",
-    "convnext_large",
-    "convnext_small",
-    "convnext_tiny",
-    "densenet121",
-    "drax_mobilenet_v3_large",
-    "draxnet",
-    "efficientnet_b0",
-    "mobilenet_v3_large",
-    "resnet18",
-    "resnet50",
-}
+STANDARD_MODEL_NAMES = BUILTIN_STANDARD_NAMES
 SIAMESE_BACKBONE_MODELS = {
     f"siamese-{model_name}": model_name for model_name in STANDARD_MODEL_NAMES
 }
 ONE_SHOT_MODEL_NAMES = {"siamese-le-net", *SIAMESE_BACKBONE_MODELS}
 
-register_standard_model("draxnet", build_draxnet)
-register_standard_model("drax_mobilenet_v3_large", build_drax_mobilenet_v3_large)
 
 
-def supported_model_names() -> list[str]:
-    return sorted(ONE_SHOT_MODEL_NAMES | STANDARD_MODEL_NAMES | set(registered_standard_model_names()))
+def supported_model_names(registry=None) -> list[str]:
+    return sorted(ONE_SHOT_MODEL_NAMES | STANDARD_MODEL_NAMES | set(registered_standard_model_names(registry)))
 
 
-def standard_model_names() -> list[str]:
+def standard_model_names(registry=None) -> list[str]:
     """Return capability-selected standard models from the authoritative registry."""
 
-    return [name for name in supported_model_names() if model_family_for(name) == "standard"]
+    return [name for name in supported_model_names(registry) if model_family_for(name, registry=registry) == "standard"]
 
 
-def model_family_for(model_name: str) -> str:
+def model_family_for(model_name: str, *, registry=None) -> str:
     if model_name in ONE_SHOT_MODEL_NAMES:
         return "one-shot"
-    if model_name in STANDARD_MODEL_NAMES or model_name in registered_standard_model_names():
+    if model_name in STANDARD_MODEL_NAMES or model_name in registered_standard_model_names(registry):
         return "standard"
     available = ", ".join(supported_model_names())
     raise MLXUserError(f"Unsupported image-classification model '{model_name}'. Available models: {available}.")
@@ -83,8 +71,9 @@ def build_image_classification_model(
     config: dict[str, Any],
     *,
     num_classes: int | None = None,
+    registry: StandardModelRegistry | None = None,
 ):
-    family = model_family_for(model_name)
+    family = model_family_for(model_name, registry=registry)
     if family == "one-shot":
         embedding_size = int(config.get("embedding_size", 4096))
         if embedding_size < 1:
@@ -102,6 +91,7 @@ def build_image_classification_model(
             colored=config.get("colored", True),
             pretrained=bool(config.get("pretrained", False)),
             config=config,
+            **({"registry": registry} if registry is not None else {}),
         )
         try:
             return SiameseBackbone(backbone, embedding_size=embedding_size)
@@ -120,10 +110,11 @@ def build_image_classification_model(
         colored=config.get("colored", True),
         pretrained=bool(config.get("pretrained", False)),
         config=config,
+        **({"registry": registry} if registry is not None else {}),
     )
     if config.get("ood_method", "none") == "none":
         return model
-    adapter = build_feature_adapter(model_name, model)
+    adapter = build_feature_adapter(model_name, model, registry=registry)
     return JointDeepSVDDClassifier(
         adapter,
         feature_dim=adapter.feature_dim,

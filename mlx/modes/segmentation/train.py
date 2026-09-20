@@ -24,6 +24,7 @@ from mlx.modes.segmentation.metrics import (
     metric_slug,
 )
 from mlx.modes.segmentation.models import build_segmentation_model
+from mlx.modes.segmentation.losses import build_loss
 from mlx.modes.segmentation.research import (
     write_csv,
     write_json,
@@ -47,7 +48,11 @@ class TrainSegmentationModel:
         config: dict[str, Any] | SegmentationRequest,
         *,
         reporter: WorkflowReporter | None = None,
+        model_registry=None,
+        loss_factory=build_loss,
     ) -> None:
+        self.model_registry = model_registry
+        self.loss_factory = loss_factory
         if isinstance(config, SegmentationRequest):
             config = config.to_config()
         self.config = dict(config)
@@ -101,8 +106,9 @@ class TrainSegmentationModel:
             self.model_name,
             self.config,
             num_classes=self.num_classes,
+            **({"registry": self.model_registry} if self.model_registry is not None else {}),
         ).to(self.device)
-        criterion = nn.CrossEntropyLoss()
+        criterion = self.loss_factory(self.config).to(self.device)
         optimizer = optim.Adam(model.parameters(), lr=self.learning_rate)
         start_epoch, best_val_loss, best_dice, history = self._prepare_state(
             model,

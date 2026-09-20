@@ -266,7 +266,7 @@ def resolve_train_output_paths(config: dict[str, Any], *, model_name: str) -> di
     }
 
 
-def load_checkpoint_bundle(config: dict[str, Any]) -> tuple[Any, dict[str, Any]]:
+def load_checkpoint_bundle(config: dict[str, Any], *, model_registry=None) -> tuple[Any, dict[str, Any]]:
     model_path = config.get("model_path")
     if not model_path:
         raise MLXUserError("This action requires --model-path pointing to a checkpoint.")
@@ -282,7 +282,7 @@ def load_checkpoint_bundle(config: dict[str, Any]) -> tuple[Any, dict[str, Any]]
         )
 
     model_name = config.get("model") or checkpoint.get("model_name") or DEFAULT_MODEL
-    family = model_family_for(model_name)
+    family = model_family_for(model_name, registry=model_registry)
     checkpoint_family = checkpoint.get("family")
     if checkpoint_family and checkpoint_family != family:
         raise MLXUserError(
@@ -314,6 +314,7 @@ def load_checkpoint_bundle(config: dict[str, Any]) -> tuple[Any, dict[str, Any]]
         model_name,
         runtime_config,
         num_classes=num_classes,
+        **({"registry": model_registry} if model_registry is not None else {}),
     )
     try:
         model.load_state_dict(checkpoint["state_dict"])

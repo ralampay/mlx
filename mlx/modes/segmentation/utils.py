@@ -246,7 +246,7 @@ def load_training_checkpoint(
     }
 
 
-def load_checkpoint_bundle(config: dict[str, Any]) -> tuple[Any, dict[str, Any]]:
+def load_checkpoint_bundle(config: dict[str, Any], *, model_registry=None) -> tuple[Any, dict[str, Any]]:
     model_path = config.get("model_path")
     if not model_path:
         raise MLXUserError("This action requires --model-path pointing to a checkpoint.")
@@ -286,6 +286,7 @@ def load_checkpoint_bundle(config: dict[str, Any]) -> tuple[Any, dict[str, Any]]
         model_name,
         runtime_config,
         num_classes=runtime_config["num_classes"],
+        **({"registry": model_registry} if model_registry is not None else {}),
     )
     model.load_state_dict(checkpoint["state_dict"])
 

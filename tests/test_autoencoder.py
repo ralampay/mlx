@@ -57,7 +57,7 @@ def write_embeddings(path: Path, vectors=None) -> Path:
 
 def test_autoencoder_mode_and_cli_options_parse() -> None:
     descriptor = resolve_mode_descriptor("autoencoder")
-    assert descriptor.actions == ("train", "embed", "ls-models", "ls-loss-functions")
+    assert descriptor.actions == ("train", "embed", "ls-models", "ls-loss-functions", "ls-losses")
     config = _build_config(
         build_parser().parse_args(
             [
@@ -150,7 +150,7 @@ def test_builtin_losses_are_correct_and_listed() -> None:
     assert [item["name"] for item in ListAutoencoderLosses().execute()] == [
         "mae", "mse", "smooth-l1"
     ]
-    assert [item["name"] for item in ListAutoencoderModels().execute()] == ["simple"]
+    assert [item["name"] for item in ListAutoencoderModels().execute()] == ["simple", "tiny"]
 
 
 def test_external_model_and_loss_definition_import_paths(monkeypatch) -> None:

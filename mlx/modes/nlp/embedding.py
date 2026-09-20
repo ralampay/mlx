@@ -10,15 +10,16 @@ from mlx.core.exceptions import MLXUserError
 from mlx.core.requests import ConfigRequest
 from mlx.modes.text_embedding.embedding.protocol import validate_sequence_embedding
 
-try:
-    import pandas as pd
-except ImportError:  # pragma: no cover - exercised in installations missing extras
-    pd = None
+# Kept as an injection seam for historic callers; the library is loaded on use.
+Llama = None
 
-try:
-    from llama_cpp import Llama
-except ImportError:  # pragma: no cover - exercised in installations missing extras
-    Llama = None
+
+def _pandas():
+    try:
+        import pandas
+    except ImportError as exc:
+        raise MLXUserError("NLP embed requires pandas. Install MLX with the 'nlp' extra.") from exc
+    return pandas
 
 
 @dataclass(frozen=True)
@@ -41,12 +42,14 @@ class EmbeddingModel(Protocol):
 
 
 def _load_embedding_model(model_path: Path) -> EmbeddingModel:
-    if Llama is None:
-        raise MLXUserError(
-            "NLP embed requires llama-cpp-python. Install MLX with the 'nlp' extra."
-        )
+    factory = Llama
+    if factory is None:
+        try:
+            from llama_cpp import Llama as factory
+        except ImportError as exc:
+            raise MLXUserError("NLP embed requires llama-cpp-python. Install MLX with the 'nlp' extra.") from exc
     try:
-        return Llama(model_path=str(model_path), embedding=True)
+        return factory(model_path=str(model_path), embedding=True)
     except Exception as exc:
         raise MLXUserError(
             f"Unable to load embedding model '{model_path}': {exc}. "
@@ -152,8 +155,7 @@ class _EmbeddingWorkflow:
         return input_path.parent / filename
 
     def _read_input(self, input_path: Path):
-        if pd is None:
-            raise MLXUserError("NLP embed requires pandas. Install MLX with the 'nlp' extra.")
+        pd = _pandas()
         try:
             return pd.read_csv(input_path)
         except (OSError, UnicodeError, ValueError, pd.errors.ParserError) as exc:
@@ -231,7 +233,7 @@ class _EmbeddingWorkflow:
         contents: list[str],
         embeddings: list[list[float]],
     ) -> None:
-        output = pd.DataFrame(
+        output = _pandas().DataFrame(
             {
                 "content": contents,
                 "embeddings": [

@@ -153,7 +153,16 @@ def load_video_anomaly_checkpoint(
     device: str = "cpu",
     model_name: str | None = None,
     model_factory=build_video_anomaly_model,
+    temporal_registry=None,
+    backbone_3d_registry=None,
 ):
+    from functools import partial
+    options = {}
+    if temporal_registry is not None:
+        options["temporal_registry"] = temporal_registry
+    if backbone_3d_registry is not None:
+        options["backbone_3d_registry"] = backbone_3d_registry
+    model_factory = partial(model_factory, **options)
     path = Path(model_path).expanduser()
     if not path.is_file():
         raise MLXUserError(f"Video-anomaly checkpoint not found: {path}")

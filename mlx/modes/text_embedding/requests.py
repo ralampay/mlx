@@ -15,6 +15,7 @@ class EmbedTextRequest(ConfigRequest):
     input_path: Optional[str] = None
     output_path: Optional[str] = None
     vector_store: str = "chroma"
+    embedding_backend: str = "llama-cpp"
     query_prefix: str = ""
     document_prefix: str = ""
     normalize_embeddings: bool = False
@@ -31,6 +32,7 @@ class BenchmarkTextEmbeddingRequest(ConfigRequest):
     vector_store: Optional[str] = None
     top_k: int = 100
     k_values: tuple[int, ...] = DEFAULT_K_VALUES
+    metrics: tuple[str, ...] = ("precision", "recall", "mrr", "map", "ndcg")
     representation: Optional[str] = None
 
 

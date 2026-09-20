@@ -3,6 +3,10 @@ from __future__ import annotations
 import math
 from dataclasses import dataclass
 from typing import Mapping, Sequence
+from mlx.core.exceptions import MLXUserError
+from mlx.modes.text_embedding.metric_registry import (
+    RetrievalMetricContext, RetrievalMetricRegistry, DEFAULT_METRIC_REGISTRY, DEFAULT_METRICS,
+)
 
 
 def precision_at_k(relevances: Sequence[int], k: int) -> float:
@@ -68,19 +72,27 @@ def compute_query_metrics(
     retrieved_document_ids: Sequence[str],
     qrels: Mapping[str, int],
     k_values: Sequence[int],
+    *, metric_names: Sequence[str] = DEFAULT_METRICS,
+    registry: RetrievalMetricRegistry = DEFAULT_METRIC_REGISTRY,
 ) -> QueryMetricResult:
     relevances = [max(0, int(qrels.get(identifier, 0))) for identifier in retrieved_document_ids]
     ideal = [int(value) for value in qrels.values() if value > 0]
     relevant_count = len(ideal)
     values: dict[str, float] = {}
     retrieved_relevant: dict[int, int] = {}
+    context = RetrievalMetricContext(tuple(relevances), tuple(ideal), relevant_count)
+    selected = [(name, registry.resolve(name)) for name in metric_names]
     for k in k_values:
+        _validate_k(k)
         retrieved_relevant[k] = sum(value > 0 for value in relevances[:k])
-        values[f"precision@{k}"] = precision_at_k(relevances, k)
-        values[f"recall@{k}"] = recall_at_k(relevances, relevant_count, k)
-        values[f"mrr@{k}"] = reciprocal_rank_at_k(relevances, k)
-        values[f"map@{k}"] = average_precision_at_k(relevances, relevant_count, k)
-        values[f"ndcg@{k}"] = ndcg_at_k(relevances, ideal, k)
+        for name, metric in selected:
+            try:
+                value = float(metric(context, k))
+            except (TypeError, ValueError, RuntimeError) as exc:
+                raise MLXUserError(f"Retrieval metric '{name}' failed: {exc}") from exc
+            if not math.isfinite(value):
+                raise MLXUserError(f"Retrieval metric '{name}' returned a non-finite value.")
+            values[f"{name}@{k}"] = value
     best_rank = next(
         (rank for rank, value in enumerate(relevances, start=1) if value > 0),
         None,

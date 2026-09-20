@@ -211,16 +211,25 @@ class TrainVideoAnomalyModel:
         reporter: WorkflowReporter | None = None,
         model_factory=build_video_anomaly_model,
         dataset_factory=VideoClipDataset,
+        temporal_registry=None,
+        backbone_3d_registry=None,
     ) -> None:
         self.request = request
         self.reporter = reporter or NullWorkflowReporter()
-        self.model_factory = model_factory
+        from functools import partial
+        options = {}
+        if temporal_registry is not None:
+            options["temporal_registry"] = temporal_registry
+        if backbone_3d_registry is not None:
+            options["backbone_3d_registry"] = backbone_3d_registry
+        self.model_factory = partial(model_factory, **options)
+        self.backbone_3d_registry = backbone_3d_registry
         self.dataset_factory = dataset_factory
 
     def execute(self) -> dict[str, Any]:
         config = self.request.to_config()
         _apply_resume_backbone_compatibility(config)
-        _validate_training_config(config)
+        _validate_training_config(config, backbone_3d_registry=self.backbone_3d_registry)
         seed_everything(config.get("random_seed"))
         paths = resolve_training_paths(config)
         paths["output_dir"].mkdir(parents=True, exist_ok=True)
@@ -620,12 +629,15 @@ def _history_row(epoch, train_loss, train_scores, val_scores, learning_rate):
     }
 
 
-def _validate_training_config(config: dict[str, Any]) -> None:
+def _validate_training_config(config: dict[str, Any], *, backbone_3d_registry=None) -> None:
     if not config.get("model"):
         raise MLXUserError("Video anomaly training requires --model.")
     from mlx.modes.video_anomaly_detection.models.classification_compat import is_standard_backbone
 
-    if not is_standard_backbone(str(config["model"])):
+    if str(config.get("backbone_mode", "3d")) == "3d":
+        from mlx.modes.video_anomaly_detection.models.backbone3d import DEFAULT_BACKBONE_3D_REGISTRY
+        (backbone_3d_registry or DEFAULT_BACKBONE_3D_REGISTRY).resolve(str(config["model"]))
+    elif not is_standard_backbone(str(config["model"])):
         raise MLXUserError(
             "Video anomaly detection supports standard backbones only; "
             "Siamese models are excluded."

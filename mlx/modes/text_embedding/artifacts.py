@@ -87,6 +87,7 @@ class EmbeddingArtifactWriter:
         source_dimensions: int,
         adapter: Mapping[str, Any] | None,
         started_at: str,
+        backend: str = "llama-cpp-python",
     ) -> None:
         qrels_name = "qrels.tsv"
         self._write_qrels(output_dir / qrels_name, dataset.qrels)
@@ -105,7 +106,7 @@ class EmbeddingArtifactWriter:
             "model": {
                 "path": model_path.name,
                 "sha256": sha256_file(model_path),
-                "backend": "llama-cpp-python",
+                "backend": backend,
             },
             "dataset": dataset_manifest,
             "embedding": {

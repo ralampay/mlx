@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from functools import partial
+from types import MappingProxyType
 from typing import Any
 
 import torch
@@ -214,6 +216,20 @@ class DraxMobileNetEncoder(SequentialStageEncoder):
         return outputs
 
 
+def _sequential_encoder(model, channels, *, stage_ends):
+    return SequentialStageEncoder(model.features, stage_ends=stage_ends, output_channels=channels)
+
+
+ENCODER_FACTORIES = MappingProxyType({
+    "residual": ResidualEncoder,
+    "densenet": DenseNetEncoder,
+    "mobilenet": partial(_sequential_encoder, stage_ends=(1, 4, 7, 13, 17)),
+    "efficientnet": partial(_sequential_encoder, stage_ends=(1, 3, 4, 6, 9)),
+    "convnext": partial(_sequential_encoder, stage_ends=(2, 4, 6, 8)),
+    "drax_mobilenet": DraxMobileNetEncoder,
+})
+
+
 def build_segmentation_encoder(
     model_name: str,
     config: dict[str, Any],
@@ -243,33 +259,10 @@ def build_segmentation_encoder(
         model_config,
         num_classes=1,
     )
-    if spec.encoder_family == "residual":
-        return ResidualEncoder(classifier, spec.output_channels)
-    if spec.encoder_family == "densenet":
-        return DenseNetEncoder(classifier, spec.output_channels)
-    if spec.encoder_family == "mobilenet":
-        return SequentialStageEncoder(
-            classifier.features,
-            stage_ends=(1, 4, 7, 13, 17),
-            output_channels=spec.output_channels,
-        )
-    if spec.encoder_family == "efficientnet":
-        return SequentialStageEncoder(
-            classifier.features,
-            stage_ends=(1, 3, 4, 6, 9),
-            output_channels=spec.output_channels,
-        )
-    if spec.encoder_family == "convnext":
-        return SequentialStageEncoder(
-            classifier.features,
-            stage_ends=(2, 4, 6, 8),
-            output_channels=spec.output_channels,
-        )
-    if spec.encoder_family == "drax_mobilenet":
-        return DraxMobileNetEncoder(classifier, spec.output_channels)
-    raise MLXUserError(
-        f"U-Net backbone '{model_name}' has unsupported encoder family '{spec.encoder_family}'."
-    )
+    encoder_factory = ENCODER_FACTORIES.get(spec.encoder_family)
+    if encoder_factory is None:
+        raise MLXUserError(f"U-Net backbone '{model_name}' has unsupported encoder family '{spec.encoder_family}'.")
+    return encoder_factory(classifier, spec.output_channels)
 
 
 __all__ = [

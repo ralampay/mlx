@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import hashlib
 
-import cv2
 import numpy as np
 from rich.table import Table
 
@@ -16,6 +15,8 @@ def annotate_tracks(
     result: TrackingFrameResult,
 ) -> np.ndarray:
     """Render current track observations without mutating the source frame."""
+
+    import cv2
 
     annotated = frame.copy()
     visible_tracks = tuple(
@@ -49,6 +50,8 @@ def _draw_label(
     color: tuple[int, int, int],
 ) -> None:
     x, y = origin
+    import cv2
+
     font = cv2.FONT_HERSHEY_SIMPLEX
     scale = 0.5
     thickness = 1

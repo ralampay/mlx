@@ -30,7 +30,9 @@ class GenerateSegmentationSamples:
         output_dir: str | Path,
         sample_limit: int = 16,
         reporter: WorkflowReporter | None = None,
+        model_registry=None,
     ) -> None:
+        self.model_registry = model_registry
         self.config = dict(config)
         self.checkpoint_path = Path(checkpoint_path)
         self.test_split_path = Path(test_split_path)
@@ -43,7 +45,7 @@ class GenerateSegmentationSamples:
             raise MLXUserError("Segmentation sample limit must be at least 1.")
 
         checkpoint_config = {**self.config, "model_path": str(self.checkpoint_path)}
-        model, metadata = load_checkpoint_bundle(checkpoint_config)
+        model, metadata = load_checkpoint_bundle(checkpoint_config, **({"model_registry": self.model_registry} if self.model_registry is not None else {}))
         device = str(self.config.get("device", "cpu"))
         model = model.to(device)
         model.eval()

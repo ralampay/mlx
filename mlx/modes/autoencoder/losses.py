@@ -7,7 +7,7 @@ from typing import Any, Mapping, Protocol, runtime_checkable
 from torch import nn
 
 from mlx.core.exceptions import MLXUserError
-from mlx.modes.autoencoder.models import _load_definition
+from mlx.modes.autoencoder.model_registry import _load_definition
 
 
 @runtime_checkable
@@ -68,19 +68,24 @@ BUILTIN_LOSSES: Mapping[str, str] = MappingProxyType(
 @dataclass(frozen=True)
 class ReconstructionLossRegistry:
     entries: Mapping[str, str] = field(default_factory=lambda: BUILTIN_LOSSES)
+    descriptions: Mapping[str, str] = field(default_factory=lambda: {
+        "mae": MAELossDefinition.description, "mse": MSELossDefinition.description,
+        "smooth-l1": SmoothL1LossDefinition.description,
+    })
 
     def __post_init__(self) -> None:
+        object.__setattr__(self, "descriptions", MappingProxyType(dict(self.descriptions)))
         object.__setattr__(
             self,
             "entries",
             MappingProxyType({str(key).strip().lower(): str(value) for key, value in self.entries.items()}),
         )
 
-    def register(self, name: str, definition_path: str) -> "ReconstructionLossRegistry":
+    def register(self, name: str, definition_path: str, *, description: str = "") -> "ReconstructionLossRegistry":
         normalized = name.strip().lower()
         if not normalized or ":" not in definition_path:
             raise ValueError("Loss registration requires a name and package.module:DefinitionClass path.")
-        return ReconstructionLossRegistry({**self.entries, normalized: definition_path})
+        return ReconstructionLossRegistry({**self.entries, normalized: definition_path}, {**self.descriptions, normalized: description})
 
     def names(self) -> tuple[str, ...]:
         return tuple(sorted(self.entries))

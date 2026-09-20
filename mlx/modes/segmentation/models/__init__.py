@@ -17,8 +17,10 @@ from mlx.modes.segmentation.models.backbones import (
 )
 from mlx.modes.segmentation.models.unet import BackboneUNet, UNet
 
+from mlx.modes.segmentation.models.registry import SegmentationModelRegistry, DEFAULT_SEGMENTATION_REGISTRY
+
 DEFAULT_MODEL = "unet"
-MODEL_NAMES = {"unet", *BACKBONE_SPECS}
+MODEL_NAMES = frozenset(DEFAULT_SEGMENTATION_REGISTRY.entries)
 SMALL_MODEL_NAMES = frozenset(
     {
         "unet-mobilenet_v3_large",
@@ -30,8 +32,8 @@ SMALL_MODEL_NAMES = frozenset(
 MODEL_GROUP_NAMES = frozenset({"all", "all-small"})
 
 
-def supported_model_names() -> list[str]:
-    return sorted(MODEL_NAMES)
+def supported_model_names(registry=None) -> list[str]:
+    return sorted((registry or DEFAULT_SEGMENTATION_REGISTRY).entries)
 
 
 def grouped_model_names(group_name: str) -> list[str]:
@@ -48,23 +50,12 @@ def build_segmentation_model(
     config: dict[str, Any],
     *,
     num_classes: int,
+    registry: SegmentationModelRegistry | None = None,
 ):
-    if model_name not in MODEL_NAMES:
-        available = ", ".join(supported_model_names())
-        raise MLXUserError(
-            f"Unsupported segmentation model '{model_name}'. Available models: {available}."
-        )
-
-    if model_name == "unet":
-        return UNet(
-            in_channels=3 if config.get("colored", True) else 1,
-            num_classes=num_classes,
-        )
-
+    builder = (registry or DEFAULT_SEGMENTATION_REGISTRY).resolve(model_name)
     try:
-        encoder = build_segmentation_encoder(model_name, config)
-        return BackboneUNet(encoder, num_classes=num_classes)
-    except ValueError as exc:
+        return builder(model_name, config, num_classes=num_classes)
+    except (ValueError, TypeError) as exc:
         raise MLXUserError(f"Cannot build segmentation model '{model_name}': {exc}") from exc
 
 

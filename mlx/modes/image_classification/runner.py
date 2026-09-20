@@ -69,6 +69,15 @@ def _reporter(config: dict[str, Any]):
 
 
 def _list_models(config: dict[str, Any]):
+    if config.get("names_only"):
+        from mlx.modes.image_classification.models import supported_model_names
+        from mlx.core.model_listing import ListComponentNames
+        from mlx.core.presentation import display_component_inventory
+        result = ListComponentNames(supported_model_names()).execute()
+        if config.get("output_format") != "json":
+            display_component_inventory(result, title="Available Models")
+        return result
+
     summaries = ListImageClassificationModels(config).execute()
     if config.get("output_format") != "json":
         print_model_parameter_table(summaries, title="Image Classification Models")

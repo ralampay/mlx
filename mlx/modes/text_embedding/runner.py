@@ -4,8 +4,6 @@ from typing import Any
 
 from mlx.core.commands import NullWorkflowReporter
 from mlx.core.exceptions import MLXUserError
-from mlx.modes.nlp.embedding import EmbedCsvCommand, EmbedCsvRequest
-from mlx.modes.nlp.presentation import RichEmbeddingReporter
 from mlx.modes.text_embedding.commands import (
     BenchmarkTextEmbeddingCommand,
     EmbedTextCommand,
@@ -27,6 +25,9 @@ def _reporter(config):
 
 
 def _legacy_csv_embed(config: dict[str, Any]):
+    from mlx.modes.nlp.embedding import EmbedCsvCommand, EmbedCsvRequest
+    from mlx.modes.nlp.presentation import RichEmbeddingReporter
+
     is_json = config.get("output_format") == "json"
     return EmbedCsvCommand(
         EmbedCsvRequest.from_config({**config, "present": not is_json}),
@@ -63,7 +64,11 @@ def _embed(config: dict[str, Any]):
 
 def _benchmark(config: dict[str, Any]):
     values = _parse_k_values(config.get("k_values", DEFAULT_K_VALUES))
-    request = BenchmarkTextEmbeddingRequest.from_config({**config, "k_values": values})
+    from mlx.modes.text_embedding.metric_registry import DEFAULT_METRICS
+    metrics = config.get("metrics") or DEFAULT_METRICS
+    if isinstance(metrics, str):
+        metrics = tuple(name.strip().lower() for name in metrics.split(",") if name.strip())
+    request = BenchmarkTextEmbeddingRequest.from_config({**config, "k_values": values, "metrics": tuple(metrics)})
     return BenchmarkTextEmbeddingCommand(request, reporter=_reporter(config)).execute()
 
 
@@ -78,7 +83,28 @@ def _parse_k_values(value) -> tuple[int, ...]:
     return tuple(sorted(set(values)))
 
 
-ACTION_HANDLERS = {"embed": _embed, "benchmark": _benchmark}
+def _list_components(config):
+    from mlx.core.model_listing import ListComponentNames
+    from mlx.core.presentation import display_component_inventory
+    from mlx.modes.text_embedding.metric_registry import DEFAULT_METRIC_REGISTRY
+    from mlx.modes.text_embedding.vector_store.registry import DEFAULT_VECTOR_STORE_REGISTRY
+    from mlx.modes.text_embedding.embedding.registry import DEFAULT_EMBEDDING_BACKENDS
+    inventories = {
+        "ls-metrics": DEFAULT_METRIC_REGISTRY.entries,
+        "ls-vector-stores": DEFAULT_VECTOR_STORE_REGISTRY.names,
+        "ls-embedding-backends": DEFAULT_EMBEDDING_BACKENDS.entries,
+    }
+    result = ListComponentNames(inventories[config["action"]]).execute()
+    if config.get("output_format") != "json":
+        display_component_inventory(result)
+    return result
+
+
+ACTION_HANDLERS = {
+    "embed": _embed, "benchmark": _benchmark,
+    "ls-metrics": _list_components, "ls-vector-stores": _list_components,
+    "ls-embedding-backends": _list_components,
+}
 
 
 def run_text_embedding(config: dict[str, Any]) -> Any:

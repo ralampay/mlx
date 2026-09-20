@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import hashlib
 
-import cv2
 import numpy as np
 from rich.panel import Panel
 from rich.table import Table
@@ -99,6 +98,8 @@ def print_benchmark_result(result: ObjectDetectionBenchmarkResult) -> None:
 
 
 def annotate_detections(frame: np.ndarray, result: DetectionResult) -> np.ndarray:
+    import cv2
+
     annotated = frame.copy()
     for detection in result.detections:
         x1, y1, x2, y2 = (int(round(value)) for value in detection.xyxy)

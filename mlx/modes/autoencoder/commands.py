@@ -13,6 +13,7 @@ from mlx.core.artifacts import atomic_torch_save, write_csv, write_json_atomic
 from mlx.core.commands import NullWorkflowReporter, WorkflowReporter, emit
 from mlx.core.exceptions import MLXUserError
 from mlx.core.random import seed_everything
+from mlx.modes.autoencoder.contracts import validate_model, validate_loss
 from mlx.modes.autoencoder.adapter import AutoencoderRepresentationTransformer
 from mlx.modes.autoencoder.artifacts import (
     checkpoint_payload,
@@ -228,8 +229,6 @@ class TrainAutoencoder:
             raise MLXUserError("Autoencoder training requires --output.")
         if self.request.input_dim is not None and self.request.input_dim < 2:
             raise MLXUserError("--input-dim must be at least 2.")
-        if self.request.hidden_dim < self.request.bottleneck_dim:
-            raise MLXUserError("--hidden-dim must be at least --bottleneck-dim.")
         if self.request.bottleneck_dim < 1:
             raise MLXUserError("--bottleneck-dim must be positive.")
         if self.request.epochs < 1 or self.request.batch_size < 1:
@@ -251,25 +250,8 @@ class TrainAutoencoder:
         return source_normalized or self.request.normalize_inputs is True
 
     def _validate_model(self, model, input_dimensions: int) -> None:
-        if not isinstance(model, torch.nn.Module):
-            raise MLXUserError("Autoencoder definitions must build a torch.nn.Module.")
-        if int(getattr(model, "input_dimensions", -1)) != input_dimensions:
-            raise MLXUserError("Autoencoder model returned an unexpected input dimension.")
-        if int(getattr(model, "bottleneck_dimensions", -1)) != self.request.bottleneck_dim:
-            raise MLXUserError("Autoencoder model returned an unexpected bottleneck dimension.")
-        if not callable(getattr(model, "encode", None)) or not callable(getattr(model, "decode", None)):
-            raise MLXUserError("Autoencoder models must implement encode() and decode().")
-        try:
-            with torch.no_grad():
-                probe = torch.zeros(2, input_dimensions)
-                encoded = model.encode(probe)
-                reconstructed = model(probe)
-        except (RuntimeError, TypeError, ValueError) as exc:
-            raise MLXUserError(f"Autoencoder model failed its shape probe: {exc}") from exc
-        if encoded.shape != (2, self.request.bottleneck_dim):
-            raise MLXUserError("Autoencoder encode() returned an invalid bottleneck shape.")
-        if reconstructed.shape != probe.shape:
-            raise MLXUserError("Autoencoder forward() must reconstruct the input shape.")
+        validate_model(model, input_dimensions=input_dimensions,
+                       bottleneck_dimensions=self.request.bottleneck_dim)
 
     def _loaders(self, vectors, normalize_inputs: bool):
         if len(vectors) < 2:
@@ -312,8 +294,7 @@ class TrainAutoencoder:
                 loss = criterion(model(values), values)
             except (RuntimeError, TypeError, ValueError) as exc:
                 raise MLXUserError(f"Autoencoder training step failed: {exc}") from exc
-            if not torch.isfinite(loss):
-                raise MLXUserError("Autoencoder training produced a non-finite loss.")
+            validate_loss(loss, training=True)
             loss.backward()
             optimizer.step()
             total += float(loss.item()) * values.shape[0]
@@ -333,8 +314,7 @@ class TrainAutoencoder:
                 loss = criterion(model(values), values)
             except (RuntimeError, TypeError, ValueError) as exc:
                 raise MLXUserError(f"Autoencoder validation step failed: {exc}") from exc
-            if not torch.isfinite(loss):
-                raise MLXUserError("Autoencoder validation produced a non-finite loss.")
+            validate_loss(loss, training=False)
             total += float(loss.item()) * values.shape[0]
             count += values.shape[0]
         if not count:
@@ -455,7 +435,7 @@ class ListAutoencoderModels:
         return tuple(
             {
                 "name": name,
-                "description": self.registry.resolve(name)[0].description,
+                "description": self.registry.descriptions.get(name, ""),
             }
             for name in self.registry.names()
         )
@@ -469,7 +449,7 @@ class ListAutoencoderLosses:
         return tuple(
             {
                 "name": name,
-                "description": self.registry.resolve(name)[0].description,
+                "description": self.registry.descriptions.get(name, ""),
             }
             for name in self.registry.names()
         )

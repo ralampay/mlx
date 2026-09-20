@@ -97,6 +97,8 @@ def build_video_anomaly_model(
     *,
     backbone_factory: ImageFeatureBackboneFactory = build_default_frame_backbone,
     backbone_3d_factory=build_spatiotemporal_backbone_3d,
+    temporal_registry=None,
+    backbone_3d_registry=None,
 ) -> VideoAnomalyModel | VideoAnomaly3DModel:
     backbone_mode = str(config.get("backbone_mode", "3d"))
     if backbone_mode == "3d":
@@ -107,7 +109,7 @@ def build_video_anomaly_model(
                 "--clip-length must be at least --backbone-temporal-kernel-size "
                 "for a 3D backbone."
             )
-        backbone = backbone_3d_factory(model_name, config)
+        backbone = backbone_3d_factory(model_name, config, **({"registry": backbone_3d_registry} if backbone_3d_registry is not None else {}))
         return VideoAnomaly3DModel(
             backbone,
             DeepSVDDHead(
@@ -126,6 +128,7 @@ def build_video_anomaly_model(
         embedding_dim=int(config.get("temporal_embedding_dim", 128)),
         kernel_size=int(config.get("temporal_kernel_size", 3)),
         dropout=float(config.get("temporal_dropout", 0.0)),
+        registry=temporal_registry,
     )
     return VideoAnomalyModel(
         frame_backbone,

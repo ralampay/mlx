@@ -215,3 +215,14 @@ __all__ = [
     "RichTrainingMetricsRenderer",
     "TrainingMetricSpec",
 ]
+
+def display_component_inventory(values, *, title="Available Components"):
+    """Render lightweight discovery results without constructing components."""
+    from rich.table import Table
+    from mlx.core.ui import console
+    table = Table(title=title)
+    table.add_column("Name")
+    table.add_column("Description")
+    for value in values:
+        table.add_row(value.name, value.description)
+    console.print(table)

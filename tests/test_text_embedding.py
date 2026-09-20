@@ -66,7 +66,7 @@ def test_mode_aliases_and_exact_cli_forms_parse() -> None:
     canonical = resolve_mode_descriptor("text_embedding")
     assert resolve_mode_descriptor("text-embedding") is canonical
     assert resolve_mode_descriptor("nlp") is canonical
-    assert canonical.actions == ("embed", "benchmark")
+    assert canonical.actions == ("embed", "benchmark", "ls-metrics", "ls-vector-stores", "ls-embedding-backends")
 
     embed = _build_config(build_parser().parse_args(
         "--mode text-embedding --action embed --model model.gguf --input ./dataset --output ./output".split()

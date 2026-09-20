@@ -17,7 +17,8 @@ from mlx.modes.text_embedding.artifacts import (
     utc_timestamp,
 )
 from mlx.modes.text_embedding.data import BeirDatasetLoader
-from mlx.modes.text_embedding.embedding.llama_cpp import LlamaCppEmbeddingProvider
+from mlx.modes.text_embedding.embedding.registry import DEFAULT_EMBEDDING_BACKENDS, EmbeddingBackendRegistry
+from mlx.modes.text_embedding.metric_registry import DEFAULT_METRIC_REGISTRY, RetrievalMetricRegistry
 from mlx.modes.text_embedding.embedding.protocol import TextEmbeddingProvider
 from mlx.modes.text_embedding.metrics import (
     QueryMetricResult,
@@ -64,6 +65,7 @@ class EmbedTextCommand:
         reporter: WorkflowReporter | None = None,
         dataset_loader: BeirDatasetLoader | None = None,
         provider_factory: Callable[[Path], TextEmbeddingProvider] | None = None,
+        backend_registry: EmbeddingBackendRegistry = DEFAULT_EMBEDDING_BACKENDS,
         vector_store_factory: VectorStoreFactory | None = None,
         vector_store_registry: VectorStoreRegistry = DEFAULT_VECTOR_STORE_REGISTRY,
         artifact_writer: EmbeddingArtifactWriter | None = None,
@@ -72,7 +74,8 @@ class EmbedTextCommand:
         self.request = request
         self.reporter = reporter or NullWorkflowReporter()
         self.dataset_loader = dataset_loader or BeirDatasetLoader()
-        self.provider_factory = provider_factory or LlamaCppEmbeddingProvider
+        self.backend_registry = backend_registry
+        self.provider_factory = provider_factory
         self.vector_store_factory = vector_store_factory
         self.vector_store_registry = vector_store_registry
         self.artifact_writer = artifact_writer or EmbeddingArtifactWriter()
@@ -97,7 +100,8 @@ class EmbedTextCommand:
                 "queries": len(dataset.queries),
             },
         )
-        provider = self.provider_factory(model_path)
+        provider_factory = self.provider_factory or self.backend_registry.factory(self.request.embedding_backend)
+        provider = provider_factory(model_path)
         factory = self.vector_store_factory or self.vector_store_registry.resolve(
             self.request.vector_store
         )
@@ -131,6 +135,7 @@ class EmbedTextCommand:
             source_dimensions=self._source_dimensions,
             adapter=(dict(self.transformer.provenance) if self.transformer else None),
             started_at=started_at,
+            backend=self.backend_registry.resolve(self.request.embedding_backend).provenance,
         )
         result = EmbedTextResult(
             output_dir=output_dir,
@@ -149,7 +154,7 @@ class EmbedTextCommand:
 
     def _validate_request(self) -> tuple[Path, Path]:
         if not self.request.model:
-            raise MLXUserError("Text embedding requires --model pointing to a GGUF model.")
+            raise MLXUserError("Text embedding requires --model pointing to a model file.")
         if not self.request.input_path:
             raise MLXUserError("Text embedding requires --input pointing to a BEIR dataset.")
         if not self.request.output_path:
@@ -166,8 +171,6 @@ class EmbedTextCommand:
         model = Path(self.request.model).expanduser()
         if not model.is_file():
             raise MLXUserError(f"GGUF embedding model not found: {model}")
-        if model.suffix.lower() != ".gguf":
-            raise MLXUserError(f"Embedding model must be a .gguf file: {model}")
         return model, Path(self.request.input_path).expanduser()
 
     def _embed_corpus(self, dataset, provider, store, path: Path) -> None:
@@ -295,6 +298,7 @@ class BenchmarkTextEmbeddingCommand:
         *,
         reporter: WorkflowReporter | None = None,
         artifact_reader: EmbeddingArtifactReader | None = None,
+        metric_registry: RetrievalMetricRegistry = DEFAULT_METRIC_REGISTRY,
         artifact_writer: BenchmarkArtifactWriter | None = None,
         vector_store_factory: VectorStoreFactory | None = None,
         vector_store_registry: VectorStoreRegistry = DEFAULT_VECTOR_STORE_REGISTRY,
@@ -302,12 +306,17 @@ class BenchmarkTextEmbeddingCommand:
         self.request = request
         self.reporter = reporter or NullWorkflowReporter()
         self.artifact_reader = artifact_reader or EmbeddingArtifactReader()
+        self.metric_registry = metric_registry
         self.artifact_writer = artifact_writer or BenchmarkArtifactWriter()
         self.vector_store_factory = vector_store_factory
         self.vector_store_registry = vector_store_registry
 
     def execute(self) -> BenchmarkTextEmbeddingResult:
         self._validate_request()
+        if not self.request.metrics:
+            raise MLXUserError("Select at least one retrieval metric.")
+        for name in self.request.metrics:
+            self.metric_registry.resolve(name)
         artifacts = self.artifact_reader.load(str(self.request.input_path))
         embedding_manifest = artifacts["embedding_manifest"]
         dataset_manifest = artifacts["dataset_manifest"]
@@ -340,7 +349,8 @@ class BenchmarkTextEmbeddingCommand:
                     raise MLXUserError("Vector store returned results outside best-first score order.")
                 qrels = qrels_by_query.get(query.id, {})
                 metrics = compute_query_metrics(
-                    [result.id for result in results], qrels, self.request.k_values
+                    [result.id for result in results], qrels, self.request.k_values,
+                    metric_names=self.request.metrics, registry=self.metric_registry,
                 )
                 metric_results.append(metrics)
                 query_rows.append(self._query_row(query, metrics))
@@ -392,6 +402,7 @@ class BenchmarkTextEmbeddingCommand:
             "vector_store_provider": requested_provider,
             "similarity": summary["similarity"],
             "k_values": list(self.request.k_values),
+            "metrics": list(self.request.metrics),
             "corpus_documents": corpus_size,
             "queries": len(artifacts["queries"]),
             "relevance_judgments": len(artifacts["qrels"]),
@@ -446,9 +457,9 @@ class BenchmarkTextEmbeddingCommand:
             "query": query.text,
             "relevant_count": metrics.relevant_count,
             "retrieved_relevant_at_10": metrics.retrieved_relevant.get(10, 0),
-            "recall_at_10": metrics.values.get("recall@10", 0.0),
-            "reciprocal_rank": metrics.values.get("mrr@10", 0.0),
-            "ndcg_at_10": metrics.values.get("ndcg@10", 0.0),
+            "recall_at_10": metrics.values.get("recall@10"),
+            "reciprocal_rank": metrics.values.get("mrr@10"),
+            "ndcg_at_10": metrics.values.get("ndcg@10"),
             "best_relevant_rank": metrics.best_relevant_rank,
         }
         row.update(metrics.values)

@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from importlib import import_module
+from mlx.core.extensions import load_reference
 from dataclasses import dataclass, field
 from types import MappingProxyType
 from typing import Any, Mapping, Protocol, Sequence
@@ -77,7 +77,7 @@ def register_provider(
     *,
     registry: ProviderRegistry | None = None,
 ) -> ProviderRegistry:
-    """Return an extended registry without mutating process-wide provider state."""
+    """Extend an injected registry; omitted registry retains legacy global registration."""
 
     global DEFAULT_PROVIDER_REGISTRY
     updated = (registry or DEFAULT_PROVIDER_REGISTRY).register(name, factory_path)
@@ -101,10 +101,8 @@ def get_provider(
             f"Unsupported object-detection provider '{name}'. Available providers: {available}."
         )
 
-    module_name, attribute_name = factory_path.split(":", 1)
     try:
-        module = import_module(module_name)
-        factory = getattr(module, attribute_name)
+        factory = load_reference(factory_path, kind=f"object-detection provider {normalized}")
         return factory()
     except MLXUserError:
         raise

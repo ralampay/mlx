@@ -10,6 +10,7 @@ from torch.utils.data import DataLoader
 
 from mlx.core.commands import NullWorkflowReporter, WorkflowReporter, emit
 from mlx.core.exceptions import MLXUserError
+from mlx.modes.image_classification.losses import build_loss
 from mlx.modes.image_classification.data import (
     load_one_shot_datasets,
     load_standard_classification_datasets,
@@ -66,7 +67,11 @@ class TrainImageClassificationModel:
         request: ImageClassificationRequest,
         *,
         reporter: WorkflowReporter | None = None,
+        model_registry=None,
+        loss_factory=build_loss,
     ) -> None:
+        self.model_registry = model_registry
+        self.loss_factory = loss_factory
         self.request = request
         self.reporter = reporter or NullWorkflowReporter()
 
@@ -75,7 +80,7 @@ class TrainImageClassificationModel:
         if int(config.get("epochs", 0)) < 1:
             raise MLXUserError("--epochs must be at least 1 for image-classification training.")
         model_name = resolve_model_name(config)
-        family = model_family_for(model_name)
+        family = model_family_for(model_name, registry=self.model_registry)
         validate_svdd_config(config)
         if family == "one-shot":
             if config.get("ood_method", "none") != "none":
@@ -83,9 +88,9 @@ class TrainImageClassificationModel:
                     "Deep SVDD is supported only for standard image-classification models, "
                     "not one-shot models."
                 )
-            _train_one_shot(model_name, config, reporter=self.reporter)
+            _train_one_shot(model_name, config, reporter=self.reporter, model_registry=self.model_registry, loss_factory=self.loss_factory)
             return
-        _train_standard(model_name, config, reporter=self.reporter)
+        _train_standard(model_name, config, reporter=self.reporter, model_registry=self.model_registry, loss_factory=self.loss_factory)
 
 
 class SmokeTestImageClassificationModel:
@@ -131,6 +136,8 @@ def _train_one_shot(
     config: dict[str, Any],
     *,
     reporter: WorkflowReporter | None = None,
+    model_registry=None,
+    loss_factory=build_loss,
 ) -> None:
     reporter = reporter or NullWorkflowReporter()
     device = config["device"]
@@ -148,8 +155,8 @@ def _train_one_shot(
 
     emit(reporter, "info", f"Starting one-shot training on device={device} for {epochs} epochs")
 
-    model = build_image_classification_model(model_name, config).to(device)
-    criterion = nn.BCELoss()
+    model = build_image_classification_model(model_name, config, **({"registry": model_registry} if model_registry is not None else {})).to(device)
+    criterion = loss_factory(config, default="bce").to(device)
     optimizer = optim.Adam(model.parameters(), lr=learning_rate)
     start_epoch, best_val_loss, history = _prepare_training_state(
         config,
@@ -245,6 +252,8 @@ def _train_standard(
     config: dict[str, Any],
     *,
     reporter: WorkflowReporter | None = None,
+    model_registry=None,
+    loss_factory=build_loss,
 ) -> None:
     reporter = reporter or NullWorkflowReporter()
     device = config["device"]
@@ -279,9 +288,10 @@ def _train_standard(
         model_name,
         config,
         num_classes=len(classes),
+        **({"registry": model_registry} if model_registry is not None else {}),
     ).to(device)
 
-    criterion = nn.CrossEntropyLoss()
+    criterion = loss_factory(config).to(device)
     optimizer = optim.Adam(model.parameters(), lr=learning_rate)
     train_loader = DataLoader(train_dataset, batch_size=batch_size, shuffle=True, num_workers=2)
     val_loader = DataLoader(val_dataset, batch_size=batch_size, shuffle=False, num_workers=2)

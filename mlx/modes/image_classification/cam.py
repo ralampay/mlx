@@ -275,20 +275,8 @@ def display_cam_results(results: Iterable[CamResult], *, delay: int = 0) -> None
 
 
 def _resolve_cam_class(method: str):
-    try:
-        from pytorch_grad_cam import AblationCAM, GradCAM, ScoreCAM
-    except ImportError as exc:
-        raise MLXUserError("Image explanations require the 'image-explainability' extra.") from exc
-
-    classes = {
-        "gradcam": GradCAM,
-        "ablationcam": AblationCAM,
-        "scorecam": ScoreCAM,
-    }
-    try:
-        return classes[method]
-    except KeyError as exc:
-        raise MLXUserError("Unsupported CAM method. Choose gradcam, ablationcam, or scorecam.") from exc
+    from mlx.modes.image_classification.cam_registry import DEFAULT_CAM_REGISTRY
+    return DEFAULT_CAM_REGISTRY.resolve(method)
 
 
 def _resolve_standard_target_index(model: nn.Module, input_tensor: torch.Tensor, target_index: int | None) -> int:

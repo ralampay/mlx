@@ -40,6 +40,12 @@ class RichArgumentParser(argparse.ArgumentParser):
         raise CLIUsageError(message)
 
 
+def _boolean_value(value: str) -> bool:
+    if value.lower() not in {"true", "false"}:
+        raise argparse.ArgumentTypeError("Expected True or False.")
+    return value.lower() == "true"
+
+
 def build_parser() -> RichArgumentParser:
     parser = RichArgumentParser(add_help=False, prog="python -m mlx")
     parser.add_argument("-h", "--help", action="store_true", dest="help")
@@ -177,6 +183,8 @@ def build_parser() -> RichArgumentParser:
         dest="validation_max_detections",
     )
     parser.add_argument("--tracker", default="bytetrack")
+    parser.add_argument("--real-time-results", type=_boolean_value, nargs="?", const=True, default=True)
+    parser.add_argument("--no-real-time-results", action="store_false", dest="real_time_results")
     parser.add_argument("--tracker-config", default=None, dest="tracker_config")
     parser.add_argument("--tracking-jsonl", default=None, dest="tracking_jsonl")
     parser.add_argument(
@@ -200,6 +208,11 @@ def build_parser() -> RichArgumentParser:
     )
     parser.add_argument("--camera-index", type=int, default=0, dest="camera_index")
     parser.add_argument("--pretrained", action=argparse.BooleanOptionalAction, default=False)
+    parser.add_argument("--distiller", default=None, help="Local teacher .pt checkpoint for LibreYOLO feature distillation.")
+    parser.add_argument("--distill-loss", choices=("cwd", "mgd"), default=None)
+    parser.add_argument("--distill-weight", type=float, default=None)
+    parser.add_argument("--distill-temperature", type=float, default=None)
+    parser.add_argument("--distill-mask-ratio", type=float, default=None)
     parser.add_argument(
         "--incremental-adapter",
         action=argparse.BooleanOptionalAction,
@@ -332,6 +345,7 @@ def _render_help() -> None:
     usage.add_row("python -m mlx --mode object_detection --provider libreyolo --action train --dataset coco8 --model yolo9-t")
     usage.add_row("python -m mlx --mode object_detection --action train --dataset coco8 --model yolo26")
     usage.add_row("python -m mlx --mode object_detection --action benchmark --dataset ./dataset --model-path ./best.pt --split test --output ./benchmark")
+    usage.add_row("python -m mlx --mode track --action benchmark --dataset ./benchmarks --model-path ./best.pt --track-class-id 0 --output ./tracking-results")
     usage.add_row("python -m mlx --mode object_detection --platform aws --action train --config ./aws-training.yaml")
     usage.add_row("python -m mlx --mode object_detection --provider libreyolo --action fine-tune --model yolo9-s-drax-b5 --model-path ./best.pt --dataset ./dataset")
     usage.add_row("python -m mlx --mode object_detection --platform aws --action fine-tune --config ./aws-fine-tune.yaml")
@@ -472,8 +486,12 @@ def _render_help() -> None:
     options.add_row("--ground-truth / --gt-file", "None", "Optional 10-column MOTChallenge ground-truth file used for tracking benchmarks.")
     options.add_row("--track-class-id", "all", "Repeatable detector class ID included in tracking; all classes are used by default.")
     options.add_row("--benchmark-iou", "0.5", "Minimum box IoU used for MOT benchmark matching.")
+    options.add_row("--real-time-results [True/False] / --no-real-time-results", "True", "Tracking benchmark: compile lossless input videos, display trajectories, and save annotated videos. False evaluates original inputs without visualization.")
     options.add_row("--camera-index", "0", "Camera index for webcam inference.")
     options.add_row("--pretrained / --no-pretrained", "False", "Toggle supported pretrained model initialization.")
+    options.add_row("--distiller", "None", "Local LibreYOLO teacher checkpoint; enables feature distillation for train/fine-tune.")
+    options.add_row("--distill-loss / --distill-weight", "cwd / method default", "Feature loss and its positive weight; requires --distiller.")
+    options.add_row("--distill-temperature / --distill-mask-ratio", "1.0 / 0.65", "CWD temperature or MGD masking fraction; requires --distiller.")
     options.add_row(
         "--incremental-adapter / --no-incremental-adapter",
         "False",
@@ -615,6 +633,8 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
         descriptor = resolve_mode_descriptor(config["mode"])
         if config.get("action") is None:
             config["action"] = descriptor.default_action
+        from mlx.modes.object_detection.distillation import validate_distillation_options
+        validate_distillation_options(config)
         if config.get("output_format") == "json":
             seed_everything(config.get("random_seed"))
         else:

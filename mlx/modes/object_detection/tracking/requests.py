@@ -49,3 +49,11 @@ class TrackingRequest:
             "width": self.width,
             "confidence": self.confidence,
         }
+
+
+@dataclass(frozen=True)
+class TrackingBenchmarkRequest:
+    dataset_path: str
+    tracking: TrackingRequest
+    split: str | None = None
+    real_time_results: bool = True

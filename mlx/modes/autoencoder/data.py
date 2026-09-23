@@ -8,7 +8,7 @@ from pathlib import Path
 from typing import Any, Mapping, Sequence
 
 import torch
-from torch.utils.data import Dataset
+from torch.utils.data import BatchSampler, Dataset
 
 from mlx.core.exceptions import MLXUserError
 
@@ -138,6 +138,31 @@ class VectorDataset(Dataset):
         return self.values[index]
 
 
+class MergeSingletonBatchSampler(BatchSampler):
+    """Retain every sample, merging a trailing singleton into the previous batch."""
+
+    def __init__(self, sampler, batch_size: int) -> None:
+        if batch_size < 2 or len(sampler) < 2:
+            raise ValueError("Similarity batching requires batch size and partition size >= 2.")
+        super().__init__(sampler, batch_size, drop_last=False)
+
+    def __iter__(self):
+        pending = None
+        for batch in super().__iter__():
+            if pending is not None:
+                if len(batch) == 1:
+                    yield pending + batch
+                    return
+                yield pending
+            pending = batch
+        if pending is not None:
+            yield pending
+
+    def __len__(self):
+        count = super().__len__()
+        return count - int(len(self.sampler) % self.batch_size == 1)
+
+
 def l2_normalize_tensor(values: torch.Tensor) -> torch.Tensor:
     norms = torch.linalg.vector_norm(values, dim=1, keepdim=True)
     if torch.any(norms == 0):
@@ -154,6 +179,7 @@ __all__ = [
     "EmbeddingCsvLoader",
     "EmbeddingCsvTable",
     "VectorDataset",
+    "MergeSingletonBatchSampler",
     "l2_normalize_tensor",
     "load_json_object",
 ]

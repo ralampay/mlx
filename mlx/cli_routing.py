@@ -46,7 +46,7 @@ MODE_DESCRIPTORS: tuple[ModeDescriptor, ...] = (
         aliases=("tracking",),
         runner="mlx.modes.object_detection.tracking.runner:run_tracking",
         default_action="run",
-        actions=("run", "export-mot", "ls-trackers"),
+        actions=("run", "benchmark", "build-dataset", "export-mot", "ls-trackers"),
         purpose="Provider-neutral video tracking and MOT benchmarking",
     ),
     ModeDescriptor(

@@ -191,6 +191,8 @@ def load_aws_training_config(
         aws = {**aws, "model_s3_uri": cli_config.get("model_s3_uri")}
 
     training.setdefault("provider", "ultralytics")
+    from mlx.modes.object_detection.distillation import validate_distillation_options
+    validate_distillation_options({**training, "platform": "aws"})
     training.setdefault("device", "auto")
     training.setdefault("save_period", -1)
     if not training.get("model"):

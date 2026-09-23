@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from contextlib import ExitStack
 from pathlib import Path
 from typing import Any
 
@@ -41,6 +42,8 @@ from mlx.modes.object_detection.data import object_detection_dataset_root
 
 def run_object_detection(config: dict[str, Any]) -> Any:
     config = with_explicit_options(config)
+    from mlx.modes.object_detection.distillation import validate_distillation_options
+    validate_distillation_options(config)
     if config.get("platform", "local") == "aws":
         from mlx.modes.object_detection.aws.runner import run_aws_object_detection
 
@@ -141,21 +144,27 @@ def run_object_detection(config: dict[str, Any]) -> Any:
             camera_index=stream_request.camera_index,
             file_path=stream_request.file_path,
         )
-        sink = (
-            NullFrameSink()
-            if is_json
-            else OpenCVFrameSink(
-                title=f"MLX Object Detection ({stream_request.source.title()})",
-                delay_ms=1 if stream_request.source == "camera" else 10,
+        with ExitStack() as setup:
+            setup.callback(source.release)
+            sink = (
+                NullFrameSink()
+                if is_json
+                else OpenCVFrameSink(
+                    title=f"MLX Object Detection ({stream_request.source.title()})",
+                    delay_ms=1 if stream_request.source == "camera" else 10,
+                )
             )
-        )
-        return RunObjectDetectionStream(
-            detector=detector,
-            frame_source=source,
-            frame_sink=sink,
-            renderer=annotate_detections,
-            reporter=reporter,
-        ).execute()
+            setup.callback(sink.close)
+            command = RunObjectDetectionStream(
+                detector=detector,
+                frame_source=source,
+                frame_sink=sink,
+                renderer=annotate_detections,
+                reporter=reporter,
+            )
+            # The constructed command owns both ports during execution.
+            setup.pop_all()
+        return command.execute()
 
     available = "benchmark, convert, fine-tune, infer-camera, infer-video, ls-models, train"
     raise MLXUserError(

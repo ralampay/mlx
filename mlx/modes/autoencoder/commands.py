@@ -7,7 +7,7 @@ from typing import Any, Mapping
 
 import torch
 from torch.optim import Adam
-from torch.utils.data import DataLoader, Subset
+from torch.utils.data import DataLoader, RandomSampler, SequentialSampler, Subset
 
 from mlx.core.artifacts import atomic_torch_save, write_csv, write_json_atomic
 from mlx.core.commands import NullWorkflowReporter, WorkflowReporter, emit
@@ -25,6 +25,7 @@ from mlx.modes.autoencoder.artifacts import (
 )
 from mlx.modes.autoencoder.data import (
     EmbeddingCsvLoader,
+    MergeSingletonBatchSampler,
     VectorDataset,
     l2_normalize_tensor,
     load_json_object,
@@ -111,6 +112,7 @@ class TrainAutoencoder:
         loss_options = load_json_object(self.request.loss_config, purpose="loss")
         loss_definition, loss_path = self.loss_registry.resolve(self.request.loss)
         try:
+            loss_options = {**getattr(loss_definition, "default_config", {}), **loss_options}
             criterion = loss_definition.build(loss_options)
         except MLXUserError:
             raise
@@ -125,7 +127,10 @@ class TrainAutoencoder:
             criterion.to(self.request.device)
         except (RuntimeError, ValueError) as exc:
             raise MLXUserError(f"Unable to initialize autoencoder on device '{self.request.device}': {exc}") from exc
-        train_loader, validation_loader = self._loaders(table.vectors, normalize_inputs)
+        train_loader, validation_loader = self._loaders(
+            table.vectors, normalize_inputs,
+            minimum_batch_size=getattr(criterion, "minimum_batch_size", 1),
+        )
         output_dir = prepare_output_directory(str(self.request.output_path))
         started_at = utc_timestamp()
         emit(
@@ -253,7 +258,7 @@ class TrainAutoencoder:
         validate_model(model, input_dimensions=input_dimensions,
                        bottleneck_dimensions=self.request.bottleneck_dim)
 
-    def _loaders(self, vectors, normalize_inputs: bool):
+    def _loaders(self, vectors, normalize_inputs: bool, *, minimum_batch_size: int = 1):
         if len(vectors) < 2:
             raise MLXUserError("Autoencoder training requires at least two vectors.")
         dataset = VectorDataset(vectors)
@@ -267,6 +272,33 @@ class TrainAutoencoder:
         )
         validation = Subset(dataset, indices[:validation_count])
         training = Subset(dataset, indices[validation_count:])
+        if type(minimum_batch_size) is not int or minimum_batch_size not in (1, 2):
+            raise MLXUserError("Autoencoder losses may request minimum_batch_size 1 or 2.")
+        if minimum_batch_size == 2:
+            if self.request.batch_size < 2:
+                raise MLXUserError("This autoencoder loss requires --batch-size of at least 2.")
+            if min(len(training), len(validation)) < 2:
+                raise MLXUserError(
+                    "This autoencoder loss requires at least two vectors in each training and "
+                    "validation partition. Provide more vectors or adjust --val-ratio."
+                )
+            return (
+                DataLoader(
+                    training,
+                    batch_sampler=MergeSingletonBatchSampler(
+                        RandomSampler(training, generator=generator), self.request.batch_size,
+                    ),
+                    num_workers=self.request.workers,
+                    generator=generator,
+                ),
+                DataLoader(
+                    validation,
+                    batch_sampler=MergeSingletonBatchSampler(
+                        SequentialSampler(validation), self.request.batch_size,
+                    ),
+                    num_workers=self.request.workers,
+                ),
+            )
         return (
             DataLoader(
                 training,
@@ -283,6 +315,13 @@ class TrainAutoencoder:
             ),
         )
 
+    @staticmethod
+    def _evaluate_loss(model, criterion, values):
+        if getattr(criterion, "requires_latent", False):
+            latent = model.encode(values)
+            return criterion(model.decode(latent), values, latent=latent)
+        return criterion(model(values), values)
+
     def _train_epoch(self, model, loader, criterion, optimizer) -> float:
         model.train()
         total = 0.0
@@ -291,7 +330,7 @@ class TrainAutoencoder:
             values = values.to(self.request.device)
             optimizer.zero_grad()
             try:
-                loss = criterion(model(values), values)
+                loss = self._evaluate_loss(model, criterion, values)
             except (RuntimeError, TypeError, ValueError) as exc:
                 raise MLXUserError(f"Autoencoder training step failed: {exc}") from exc
             validate_loss(loss, training=True)
@@ -311,7 +350,7 @@ class TrainAutoencoder:
         for values in loader:
             values = values.to(self.request.device)
             try:
-                loss = criterion(model(values), values)
+                loss = self._evaluate_loss(model, criterion, values)
             except (RuntimeError, TypeError, ValueError) as exc:
                 raise MLXUserError(f"Autoencoder validation step failed: {exc}") from exc
             validate_loss(loss, training=False)

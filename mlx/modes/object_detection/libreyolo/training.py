@@ -21,6 +21,8 @@ from mlx.modes.object_detection.libreyolo.utils import (
     resolve_model_spec,
 )
 from mlx.modes.object_detection.requests import TrainObjectDetectionRequest
+from mlx.modes.object_detection.distillation import validate_distillation_options
+from mlx.modes.object_detection.libreyolo.distillation import PrepareDistillationRun
 
 
 class TrainLibreYOLOObjectDetection:
@@ -38,6 +40,7 @@ class TrainLibreYOLOObjectDetection:
         self.reporter = reporter or NullWorkflowReporter()
 
     def execute(self) -> dict[str, Any]:
+        validate_distillation_options({"provider": "libreyolo", **self.config})
         if self.config.get("loss_clip") is not None:
             raise MLXUserError(
                 "--loss-clip is not supported by LibreYOLO training. "
@@ -85,6 +88,8 @@ class TrainLibreYOLOObjectDetection:
             explicit_weights=explicit_weights,
         )
         initialization_weights = explicit_weights or auto_warm_start
+        if self.config.get("distiller") and auto_warm_start is not None:
+            raise MLXUserError("Distillation requires explicit fine-tuning weights or a full resume checkpoint; choose a new output directory for scratch training.")
 
         if auto_resume is not None:
             emit(self.reporter, "info", f"Continuing LibreYOLO training from checkpoint: {auto_resume}")
@@ -118,11 +123,14 @@ class TrainLibreYOLOObjectDetection:
                 resume=auto_resume is not None,
                 allow_pretrained=auto_resume is None and initialization_weights is None,
             )
+            train_kwargs.update(PrepareDistillationRun(
+                self.config, project_dir / run_name, auto_resume
+            ).execute())
             emit(self.reporter, "info", "Starting LibreYOLO training loop...")
             raw_results = model.train(**train_kwargs)
         except (
             AttributeError,
-            FileNotFoundError,
+            OSError,
             ImportError,
             TypeError,
             ValueError,

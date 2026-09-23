@@ -37,6 +37,8 @@ class TrainObjectDetectionModel:
         self.reporter = reporter or NullWorkflowReporter()
 
     def execute(self) -> Any:
+        from mlx.modes.object_detection.distillation import validate_distillation_options
+        validate_distillation_options(self.request.to_config())
         if self.request.validate_after_training:
             _validate_post_training_benchmark(self.request)
         provider = self.provider or get_provider(self.request.provider)
@@ -210,8 +212,10 @@ class RunObjectDetectionStream:
                     stopped_by_user = True
                     break
         finally:
-            self.frame_source.release()
-            self.frame_sink.close()
+            try:
+                self.frame_source.release()
+            finally:
+                self.frame_sink.close()
 
         emit(
             self.reporter,

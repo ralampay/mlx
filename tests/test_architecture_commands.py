@@ -257,6 +257,93 @@ def test_legacy_ultralytics_detection_type_is_a_neutral_reexport() -> None:
     assert LegacyDetection is Detection
 
 
+@pytest.mark.parametrize("failure_stage", ["read", "predict", "render", "show", "release", "close"])
+def test_stream_failure_closes_both_ports_and_propagates_error(monkeypatch, failure_stage):
+    source = FakeFrameSource()
+    sink = FakeFrameSink()
+    detector = FakeDetector()
+    events = []
+    failure = RuntimeError(f"{failure_stage} failed")
+
+    def fail(*args):
+        raise failure
+
+    def renderer(frame, result):
+        return frame
+
+    if failure_stage == "render":
+        renderer = fail
+    else:
+        target = {
+            "read": source, "predict": detector, "show": sink,
+            "release": source, "close": sink,
+        }[failure_stage]
+        monkeypatch.setattr(target, failure_stage, fail)
+
+    with pytest.raises(RuntimeError) as caught:
+        RunObjectDetectionStream(
+            detector=detector,
+            frame_source=source,
+            frame_sink=sink,
+            renderer=renderer,
+            reporter=CallbackWorkflowReporter(events.append),
+        ).execute()
+
+    assert caught.value is failure
+    assert source.released or failure_stage == "release"
+    assert sink.closed or failure_stage == "close"
+    assert events == []
+
+
+@pytest.mark.parametrize("failure_stage", ["sink", "command"])
+def test_detection_runner_cleans_up_failed_stream_setup(monkeypatch, failure_stage):
+    from mlx.modes.object_detection import runner
+
+    source = FakeFrameSource()
+    sink = FakeFrameSink()
+    failure = MLXUserError("Stream setup failed")
+
+    def fail(**kwargs):
+        raise failure
+
+    monkeypatch.setattr(runner.CreateObjectDetector, "execute", lambda self: FakeDetector())
+    monkeypatch.setattr(runner, "OpenCVFrameSource", lambda **kwargs: source)
+    monkeypatch.setattr(runner, "OpenCVFrameSink", lambda **kwargs: sink)
+    monkeypatch.setattr(
+        runner, "OpenCVFrameSink" if failure_stage == "sink" else "RunObjectDetectionStream", fail
+    )
+
+    with pytest.raises(MLXUserError) as caught:
+        runner.run_object_detection({"action": "infer-camera"})
+
+    assert caught.value is failure
+    assert source.released
+    assert sink.closed is (failure_stage == "command")
+
+
+@pytest.mark.parametrize("output_format", ["rich", "json"])
+def test_detection_runner_transfers_ports_to_stream_once(monkeypatch, output_format):
+    from mlx.modes.object_detection import runner
+
+    source = FakeFrameSource()
+    sink = FakeFrameSink()
+    cleanup = []
+    monkeypatch.setattr(source, "release", lambda: cleanup.append("source"))
+    monkeypatch.setattr(sink, "close", lambda: cleanup.append("sink"))
+    monkeypatch.setattr(runner.CreateObjectDetector, "execute", lambda self: FakeDetector())
+    monkeypatch.setattr(runner, "OpenCVFrameSource", lambda **kwargs: source)
+    monkeypatch.setattr(runner, "OpenCVFrameSink", lambda **kwargs: sink)
+    monkeypatch.setattr(runner, "NullFrameSink", lambda: sink)
+    monkeypatch.setattr(runner, "annotate_detections", lambda frame, result: frame)
+
+    result = runner.run_object_detection({
+        "action": "infer-camera", "output_format": output_format,
+    })
+
+    assert result.frames_processed == 2
+    assert cleanup == ["source", "sink"]
+
+
 def test_benchmark_command_is_in_public_object_detection_api() -> None:
     from mlx.modes.object_detection import (
         BenchmarkObjectDetectionModel as PublicBenchmarkCommand,

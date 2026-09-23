@@ -30,8 +30,8 @@ Available losses are shown with:
 python -m mlx --mode autoencoder --action ls-loss-functions
 ```
 
-Built-ins are `mse`, `mae`, and `smooth-l1`. Smooth L1 accepts a positive `beta` through a JSON
-configuration file:
+Built-ins are `mse`, `mae`, `smooth-l1`, and `mse-similarity`. Smooth L1 accepts a positive
+`beta` through a JSON configuration file:
 
 ```json
 {"beta": 0.5}
@@ -41,6 +41,52 @@ configuration file:
 python -m mlx --mode autoencoder --action train ... \
   --loss smooth-l1 --loss-config ./smooth-l1.json
 ```
+
+## Similarity-preserving reconstruction
+
+`mse-similarity` adds a latent-space geometry term to reconstruction MSE. For a batch
+of original vectors `X`, encoder outputs `Z`, and decoded vectors `X_hat`, the objective is:
+
+```text
+MSE(X_hat, X) + similarity_weight * mean_{i != j}[(cos(X_i, X_j) - cos(Z_i, Z_j))^2]
+```
+
+It uses ordinary embedding CSVs, without query/document pairs or relevance labels. Original
+similarities are detached targets. Feature dimensions can differ; each similarity matrix is
+batch-by-batch. Normalization applies only inside the similarity term and does not change
+reconstruction targets or the saved input-normalization contract. Zero vectors use an epsilon
+norm floor (`1e-8`), giving zero similarity; they carry no meaningful angular target.
+
+```bash
+python -m mlx --mode autoencoder --action train \
+  --model simple --input ./artifacts/scifact/corpus_embeddings.csv \
+  --output ./artifacts/autoencoder-similarity-128 \
+  --hidden-dim 256 --bottleneck-dim 128 --loss mse-similarity \
+  --epochs 50 --batch-size 64 --val-ratio 0.2 --seed 42
+```
+
+The default `similarity_weight` is `1.0`. To change it, pass `--loss-config` with a JSON
+file such as `{"similarity_weight": 0.1}`. The weight must be finite and nonnegative;
+unknown configuration keys are rejected. Zero weight reduces to ordinary MSE with the
+existing batching behavior. The effective configuration is saved in checkpoint/manifest metadata.
+
+For positive weight, batch size and both split sizes must be at least two. If needed, provide
+more vectors or adjust `--val-ratio`. A trailing singleton is merged into the preceding batch
+in both training and validation, retaining every sample; this can exceed `--batch-size` by one.
+Training shuffles with the configured seed, while validation order is fixed. Memory usage for
+similarity matrices is quadratic in batch size. Half-precision similarity calculations are
+promoted to float32, including under autocast.
+
+`train_loss` and `val_loss` record the combined objective, averaged across batches by sample
+count. Best-checkpoint selection uses that validation objective, not a retrieval metric.
+Compare original embeddings, MSE-only compression, and similarity-preserving compression at the
+same bottleneck dimension using held-out retrieval evaluation. Batch composition affects the
+geometry term, so keep batch size and seed fixed for comparisons. Better retrieval is not guaranteed.
+
+This is a cosine-matrix adaptation of
+[similarity-preserving knowledge distillation (Tung and Mori, 2019)](https://arxiv.org/abs/1907.09682)
+and [relational knowledge distillation (Park et al., 2019)](https://arxiv.org/abs/1904.05068),
+combined with autoencoder reconstruction. It is not an exact reproduction of either paper's loss.
 
 ## Normalization
 
@@ -110,6 +156,15 @@ class WeightedReconstructionLossDefinition:
 
 Select it with
 `--loss my_package.losses:WeightedReconstructionLossDefinition --loss-config ./weights.json`.
+Built modules may opt into latent-aware training with `requires_latent = True` and a
+`forward(reconstruction, target, *, latent)` signature. The trainer then calls `encode()` once
+and decodes that same latent tensor; such models must implement their reconstruction path as
+`decode(encode(inputs))`. Existing two-argument losses continue using `model(inputs)`.
+A module may declare `minimum_batch_size = 2` to request singleton-merging batches (default: 1;
+only 1 and 2 are supported). Definitions may provide a `default_config` mapping, merged with
+explicit options before construction and serialization. These optional capabilities work for
+registry-injected and import-path definitions without loss-name checks in the trainer.
+
 Applications can also extend and inject `ReconstructionLossRegistry`. Import-path extensions are
 explicit trusted Python code and must remain importable whenever their checkpoints are loaded.
 ## Checkpoint trust

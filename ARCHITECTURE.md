@@ -102,7 +102,7 @@ The primary workflow commands are:
 | Saliency mapping | `TrainSaliencyModel`, `TrainSaliencyModelGroup`, `GenerateSaliencySamples`, `SmokeTestSaliencyModels`, `BenchmarkSaliencyMapping`, `BenchmarkSaliencyModelGroup`, `InferSaliencyImage`, `BuildSaliencyDataset`, `ListSaliencyModels` |
 | Video anomaly detection | `TrainVideoAnomalyModel`, `BenchmarkVideoAnomalyModel`, `InferVideoAnomaly`, `ListVideoAnomalyModels`, AWS all-model submit/status/resume commands |
 | Object detection | `TrainObjectDetectionModel`, `FineTuneObjectDetectionModel`, `BenchmarkObjectDetectionModel`, `CreateObjectDetector`, `ConvertObjectDetectionModel`, `ListObjectDetectionModels`, `RunObjectDetectionStream`, AWS submit/status/stop/resume and best-model locator commands |
-| Tracking | `CreateTrackingAlgorithm`, `RunObjectDetectionTrackingCommand`, `RunTrackByDetectionCommand`, `RunTrackingVideo`, `ExportMOTFromClassAwareTracking`, `BenchmarkMOTTracking`, `ExportTrackingReplay` |
+| Tracking | `CreateTrackingAlgorithm`, `RunObjectDetectionTrackingCommand`, `RunTrackByDetectionCommand`, `RunTrackingVideo`, `PrepareTrackingBenchmarks`, `CompileTrackingVideo`, `BenchmarkTrackingDataset`, `ExportMOTFromClassAwareTracking`, `BenchmarkMOTTracking`, `ExportTrackingReplay` |
 | Text embedding | `EmbedTextCommand`, `BenchmarkTextEmbeddingCommand`; legacy `EmbedCsvCommand` remains supported |
 | Autoencoder | `TrainAutoencoder`, `EmbedAutoencoder`, `ListAutoencoderModels`, `ListAutoencoderLosses` |
 
@@ -241,6 +241,37 @@ and geometry through the optional
 and decoded frame shapes remain authoritative for replay canvas dimensions. This interface
 segregation keeps fake, camera, and future non-OpenCV sources portable.
 
+Tracking's `build-dataset` action invokes `PrepareTrackingBenchmarks`: source-specific
+MOT image and PersonPath22 adapters describe media, normalized annotations, and conversion
+provenance. The command copies into temporary sequence directories and publishes them only
+after manifest/MOT validation. Inputs are independent copies, not links. The preparation report
+records unavailable, unlabeled, and invalid sequences; conflicting duplicate identities are
+rejected rather than arbitrarily merged. Dataset preparation never downloads missing sources.
+
+`data.TrackingSequence` is the version-1 manifest contract: dataset/split/name, relative media
+and ground-truth paths, media kind, geometry, FPS, and increasing zero-based source frame indices.
+Evaluation frame IDs are contiguous and one-based. `SequenceFrameSource` owns numeric image
+ordering and sequential video selection. PersonPath22 selects explicitly annotated frames and
+visible person boxes; manifests document the simplified policy and identity mappings.
+
+`BenchmarkTrackingDataset` accepts a typed `TrackingBenchmarkRequest` and composes existing
+tracking sessions and MOT evaluation per sequence, reusing the detector but resetting the tracker.
+The runner injects display and trajectory rendering factories. In the default visual path,
+`CompileTrackingVideo` writes FFV1 AVI and verifies its decoded pixels against the selected source
+frames before inference. The video integration boundary owns encoding and the composed saved/live
+frame sink. `TrackingTrajectoryRenderer` owns only bounded presentation history (60 observations
+per identity, expired after 60 absent frames). No histories enter tracking algorithms.
+
+`real_time_results=False` bypasses compilation and all rendering while retaining the same frame
+selection and evaluation. `display=False` suppresses only the live window; JSON CLI output also
+suppresses the window. Each sequence retains the existing tracking/replay/metric artifacts;
+visual runs add `compiled.avi` and `annotated.mp4`. Root JSON/CSV summaries contain per-sequence
+results without averaging percentages, and metadata records settings, manifest/model hashes,
+and completion status. Cancellation skips the interrupted sequence's metrics and stops the batch.
+The evaluator remains MLX's existing MOT evaluator, not an implementation of official dataset
+protocols or crowd-region suppression. Input, codec, annotation, and filesystem failures are
+reported as contextual `MLXUserError` instances. `track run` remains compatible.
+
 To add another provider:
 
 1. create `mlx.modes.object_detection.<provider>/provider.py` without importing it globally;
@@ -287,6 +318,21 @@ For `yolox-drax-mobilenet-v3-large`, the training request forwards the optional
 The provider validates their dependency, while LibreYOLO owns adapter attachment, foundation
 freezing, BatchNorm mode handling, and optimizer construction. Other providers do not implement
 this family-specific training behavior.
+
+Local detector feature distillation is configured by typed training-request fields
+`distiller`, `distill_loss`, `distill_weight`, `distill_temperature`, and
+`distill_mask_ratio`. Mode-owned validation rejects unsupported actions/platforms
+and providers before dataset staging. `TrainLibreYOLOObjectDetection` composes
+`PrepareDistillationRun`, which resolves teacher identity, validates resume
+provenance, and translates options to LibreYOLO training arguments. LibreYOLO owns
+teacher freezing, feature taps, losses, and optimizer integration; no teacher is
+added to MLX inference or model definitions. `distillation.json` records teacher
+SHA-256 and effective loss settings beside the run checkpoints. Scratch/fine-tune
+script entrypoints protect against accidental automatic recovery. The local shell
+entrypoint accepts model, teacher/student paths, local or S3 data, and training
+options; CLI overrides environment defaults, and relative paths remain relative
+to the caller. It only composes the existing CLI workflow. See
+[local distillation](docs/object_detection/distillation.md) for usage.
 
 ## One-Class Image Recognition
 
@@ -610,6 +656,22 @@ references and exact references in a caller-supplied registry are trusted; other
 `trust_checkpoint_code=True` (`--trust-checkpoint-code`). This authorizes Python imports, not a
 sandbox, and must be used only for trusted code. Existing built-in checkpoints remain compatible.
 
+Autoencoder loss definitions may expose `default_config`; the composition in `TrainAutoencoder`
+merges explicit options over these defaults and persists the effective mapping. Existing
+reconstruction losses keep their `(prediction, target)` interface and `model(inputs)` path.
+Loss modules opting into `requires_latent` receive `(prediction, target, *, latent)` after one
+`encode()` and corresponding `decode()` call. This opt-in contract requires reconstruction to
+follow `decode(encode(inputs))`; dispatch is capability-based, not tied to a loss name.
+
+The mode-owned `mse-similarity` objective combines reconstruction MSE with off-diagonal cosine
+matrix matching between detached input vectors and latent vectors. Its default similarity weight
+is 1.0. Positive weight requests `minimum_batch_size = 2`; zero weight uses the legacy MSE path.
+Loss modules may request minimum batch size 1 (default) or 2. `MergeSingletonBatchSampler` in the
+mode's data module merges trailing singletons without dropping samples. Commands validate batch
+and partition sizes before output creation and use the same loss evaluator in training and
+validation. Input CSVs and inference contracts are unchanged; stored total validation loss remains
+the checkpoint-selection criterion, rather than a measured retrieval score.
+
 Native classification, segmentation, and autoencoder training share scalar tensor loss validation
 in `mlx.core.losses`; objective definitions and target semantics remain mode-owned.
 
@@ -636,7 +698,10 @@ provider-native object-detection progress remains owned by its provider.
 Detection streaming and
 tracking video execution support headless use through injected presentation boundaries:
 `RunObjectDetectionStream` accepts injected detector, frame source, frame sink, renderer, and
-reporter objects. `RunTrackingVideo` accepts an optional paired frame sink and tracking renderer;
+reporter objects. The detection runner owns frame-port cleanup until command construction
+succeeds, including display-setup failures. The stream command then owns both ports and attempts
+sink cleanup even if source release fails; setup and execution errors continue to propagate.
+`RunTrackingVideo` accepts an optional paired frame sink and tracking renderer;
 without them it writes tracking artifacts headlessly. The tracking CLI injects an OpenCV sink and
 a mode-owned renderer by default, while `--no-display` leaves both absent. The renderer consumes
 only `TrackingFrameResult` values and draws current observations with stable track-ID colors,

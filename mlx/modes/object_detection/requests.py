@@ -27,6 +27,11 @@ class TrainObjectDetectionRequest(ObjectDetectionRequest):
     use_best: bool = True
     run_name: Optional[str] = None
     pretrained: bool = False
+    distiller: Optional[str] = None
+    distill_loss: Optional[str] = None
+    distill_weight: Optional[float] = None
+    distill_temperature: Optional[float] = None
+    distill_mask_ratio: Optional[float] = None
     incremental_adapter: bool = False
     incremental_adapter_train_only: bool = False
     incremental_adapter_type: Optional[str] = None

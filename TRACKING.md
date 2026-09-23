@@ -79,6 +79,68 @@ Pass `--overwrite` to replace existing artifacts.
 
 ## Live Tracking Visualization
 
+### Dataset benchmarking with trajectories
+
+Prepare independent local benchmark copies from the downloaded DanceTrack, PETS2009,
+and PersonPath22 folders:
+
+```bash
+python -m mlx --mode track --action build-dataset \
+    --dataset ~/Desktop/tracking-datasets \
+    --output ~/Desktop/tracking-datasets/benchmarks
+```
+
+Preparation preserves original data and includes every complete labeled local sequence.
+`preparation.json` lists included and omitted sequences. Missing HiEve data, unlabeled
+DanceTrack test sequences, and missing or invalid PersonPath22 inputs are reported explicitly.
+The destination must be new; preparation does not replace an existing dataset.
+
+Benchmark all prepared sequences, a dataset, a split folder, or a single sequence:
+
+```bash
+python -m mlx --mode track --action benchmark \
+    --dataset ~/Desktop/tracking-datasets/benchmarks/DanceTrack/val \
+    --provider ultralytics --model-path ./best.pt \
+    --tracker bytetrack --confidence 0.1 --track-class-id 0 \
+    --output ./tracking-benchmark
+```
+
+`--real-time-results True` is the default. Each sequence is compiled to a lossless
+`compiled.avi` before inference; its decoded pixels are checked against the originals.
+Tracking overlays show boxes, IDs, and the latest 60 trajectory points on the actual
+frames. The same visualization is saved to `annotated.mp4`. Separate videos and fresh
+trackers preserve sequence boundaries. Processing evaluates every selected frame and is
+not required to keep pace with the source FPS. Lossless intermediates can require substantial
+space; MLX checks a conservative uncompressed-size estimate before compiling each sequence.
+
+Use `--real-time-results False` (or `--no-real-time-results`) to evaluate original
+frames/videos directly without compilation, a window, or annotated output. Use
+`--no-display` to keep video generation without a window. `--format json` also suppresses
+the window. `--split train`, `--split val`, or `--split test` filters sequences only when
+explicitly supplied; otherwise all discovered splits are evaluated.
+
+Each result sequence directory contains `tracks.txt`, `tracks.jsonl`, `metrics.json`,
+`replay.json`, and `replay.html`, plus the two videos in visual mode. Root `summary.json`
+and `summary.csv` compare sequences; `run_metadata.json` records settings and provenance.
+MOTA, IDF1, mean matched IoU, precision, recall, and error counts are finalized after
+each complete sequence. Pressing `q` or `Esc` saves partial tracks/video, marks the batch
+incomplete, skips that sequence's metrics, and stops further sequences. `--overwrite`
+replaces generated artifacts, including removal of stale metrics/videos from prior runs.
+
+These are **MLX MOT results, not official dataset leaderboard scores**. PersonPath22 uses
+visible person boxes and only explicitly annotated source frames, remapped to consecutive
+evaluation frames with 5 FPS playback. Crowd-only regions are excluded without suppressing
+predictions inside them; individually identified occluded/background people remain included.
+Frames with no annotation entries are not inferred to be labeled empty frames. Source identity
+and frame mappings are retained in each `sequence.json`. Image sequences use `seqinfo.ini`
+FPS when available and a documented 30 FPS playback fallback otherwise.
+
+For Python callers, use `TrackingBenchmarkRequest` and `BenchmarkTrackingDataset.execute()`;
+inject `TrackingTrajectoryRenderer` as `renderer_factory` when enabling visual results.
+Display is an optional injected sink factory, so reusable workflows do not require a terminal.
+
+### Single-video tracking
+
 The tracking CLI opens an OpenCV playback window by default. Every currently
 observed track is drawn with a stable per-ID color and an overlay containing:
 

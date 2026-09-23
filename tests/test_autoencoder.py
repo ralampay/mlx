@@ -146,9 +146,9 @@ def test_builtin_losses_are_correct_and_listed() -> None:
     assert mse(prediction, target).item() == pytest.approx(2.0)
     assert mae(prediction, target).item() == pytest.approx(1.0)
     assert smooth(prediction, target).item() == pytest.approx(0.75)
-    assert DEFAULT_LOSS_REGISTRY.names() == ("mae", "mse", "smooth-l1")
+    assert DEFAULT_LOSS_REGISTRY.names() == ("mae", "mse", "mse-similarity", "smooth-l1")
     assert [item["name"] for item in ListAutoencoderLosses().execute()] == [
-        "mae", "mse", "smooth-l1"
+        "mae", "mse", "mse-similarity", "smooth-l1"
     ]
     assert [item["name"] for item in ListAutoencoderModels().execute()] == ["simple", "tiny"]
 
@@ -187,12 +187,14 @@ def test_external_model_and_loss_definition_import_paths(monkeypatch) -> None:
     assert losses.resolve("custom-loss")[0].build({})(prediction := torch.ones(1), prediction).item() == 0
 
 
-def test_train_checkpoint_and_standalone_embed_workflow(tmp_path: Path) -> None:
+@pytest.mark.parametrize("loss", ["mse", "mse-similarity"])
+def test_train_checkpoint_and_standalone_embed_workflow(tmp_path: Path, loss: str) -> None:
     source = write_embeddings(tmp_path / "vectors.csv")
     output = tmp_path / "training"
     result = TrainAutoencoder(
         AutoencoderTrainRequest(
             model="simple",
+            loss=loss,
             input_path=str(source),
             output_path=str(output),
             input_dim=4,
@@ -206,6 +208,10 @@ def test_train_checkpoint_and_standalone_embed_workflow(tmp_path: Path) -> None:
         )
     ).execute()
     assert result.checkpoint_path.is_file()
+    checkpoint = torch.load(result.checkpoint_path, weights_only=True)
+    assert checkpoint["loss"] == loss
+    if loss == "mse-similarity":
+        assert checkpoint["loss_config"] == {"similarity_weight": 1.0}
     assert {path.name for path in output.iterdir()} == {
         "autoencoder.pth", "training.csv", "autoencoder_manifest.json", "run_metadata.json"
     }

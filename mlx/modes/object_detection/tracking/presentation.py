@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import hashlib
+from collections import deque
 
 import numpy as np
 from rich.table import Table
@@ -8,6 +9,36 @@ from rich.table import Table
 from mlx.core.ui import console
 from mlx.modes.object_detection.tracking.evaluation import TrackingBenchmarkResult
 from mlx.modes.object_detection.tracking.models import TrackingFrameResult
+
+
+class TrackingTrajectoryRenderer:
+    """Per-sequence, bounded presentation history; never changes tracker state."""
+
+    def __init__(self, trail_length: int = 60):
+        if trail_length < 1:
+            raise ValueError("Trajectory length must be at least one observation.")
+        self.trail_length = trail_length
+        self._history = {}
+        self._last_seen = {}
+
+    def __call__(self, frame: np.ndarray, result: TrackingFrameResult) -> np.ndarray:
+        import cv2
+        for track_id, last_seen in tuple(self._last_seen.items()):
+            if result.frame_index - last_seen >= self.trail_length:
+                del self._last_seen[track_id]
+                del self._history[track_id]
+        annotated = annotate_tracks(frame, result)
+        for track in result.tracks:
+            if track.last_seen_frame != result.frame_index:
+                continue
+            box = track.bounding_box
+            center = (round((box.x1 + box.x2) / 2), round((box.y1 + box.y2) / 2))
+            history = self._history.setdefault(track.track_id, deque(maxlen=self.trail_length))
+            history.append(center)
+            self._last_seen[track.track_id] = result.frame_index
+            if len(history) > 1:
+                cv2.polylines(annotated, [np.asarray(history, dtype=np.int32)], False, _color_for_track(track.track_id), 2)
+        return annotated
 
 
 def annotate_tracks(
@@ -111,6 +142,19 @@ def print_tracking_benchmark(result: TrackingBenchmarkResult) -> None:
     )
     for name, value in rows:
         table.add_row(name, value)
+    console.print(table)
+
+
+def print_tracking_dataset_benchmark(rows: tuple[dict, ...]) -> None:
+    table = Table(title="Tracking Dataset Benchmark")
+    for column in ("Sequence", "Status", "MOTA", "IDF1", "Precision", "Recall"):
+        table.add_column(column)
+    for row in rows:
+        values = [row.get(name) for name in ("mota", "idf1", "precision", "recall")]
+        table.add_row(
+            row["sequence"], row["status"],
+            *("—" if value is None else _format_metric(value) for value in values),
+        )
     console.print(table)
 
 

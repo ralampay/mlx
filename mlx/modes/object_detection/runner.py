@@ -56,6 +56,22 @@ def run_object_detection(config: dict[str, Any]) -> Any:
         )
 
     action = config.get("action") or "train"
+    if action in {"adapter-verify", "adapter-prepare", "adapter-experiment", "adapter-report"}:
+        from mlx.modes.object_detection.adapter_experiment import (
+            AdapterExperimentRequest, RunAdapterExperiment,
+        )
+        from mlx.modes.object_detection.libreyolo.adapter_backend import VerifyFoundationCheckpoint
+        from mlx.modes.object_detection.adapter_data import prepare_adapter_dataset
+        from mlx.modes.object_detection.adapter_report import GenerateAdapterReport
+        if action == "adapter-report":
+            return GenerateAdapterReport(Path(config.get("output_path") or "results/yolox-l-adapters")).execute()
+        request = AdapterExperimentRequest.from_config(config)
+        if action == "adapter-verify":
+            _, info = VerifyFoundationCheckpoint(request.model, request.checkpoint).execute()
+            return info
+        if action == "adapter-prepare":
+            return prepare_adapter_dataset(request.dataset, request.output / "dataset", seed=42)
+        return RunAdapterExperiment(request).execute()
     if action == "ls-models" and config.get("names_only"):
         from mlx.modes.object_detection.providers import get_provider
         from mlx.core.model_listing import ListComponentNames
@@ -166,7 +182,7 @@ def run_object_detection(config: dict[str, Any]) -> Any:
             setup.pop_all()
         return command.execute()
 
-    available = "benchmark, convert, fine-tune, infer-camera, infer-video, ls-models, train"
+    available = "adapter-experiment, adapter-prepare, adapter-report, adapter-verify, benchmark, convert, fine-tune, infer-camera, infer-video, ls-models, train"
     raise MLXUserError(
         f"Unsupported action '{action}' for object-detection. Available actions: {available}."
     )

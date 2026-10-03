@@ -49,6 +49,11 @@ The neutral source is split by responsibility:
 - `ultralytics/`: Ultralytics training, conversion, model resolution, and decoding.
 - `tracking/`: detector-neutral online tracking types, protocol, and per-frame command.
 
+The [YOLOX-L adapter experiment guide](./yolox_adapters.md) covers the
+foundation checkpoint, deterministic ACDC split, adapter conditions, and
+runnable research commands. The package boundaries are described in
+[ARCHITECTURE.md](../../ARCHITECTURE.md).
+
 ## AWS SageMaker Managed Spot Training
 
 AWS training is asynchronous and uses Managed Spot by default. The dataset ZIP and checkpoint

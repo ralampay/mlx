@@ -382,6 +382,8 @@ class SageMakerTrainingService:
         role_arn: Optional[str] = None,
         resume: bool = False,
         fine_tune: Optional[bool] = None,
+        comparison_validation_s3_uri: Optional[str] = None,
+        job_name: Optional[str] = None,
     ) -> AwsTrainingSubmission:
         run_id = run_id or uuid4().hex
         request = training or self.config.training
@@ -393,7 +395,7 @@ class SageMakerTrainingService:
                     "The serialized SageMaker training payload does not match the training request."
                 )
             request_config = dict(training_payload)
-        job_name = self._new_job_name(run_id)
+        job_name = job_name or self._new_job_name(run_id)
         run_base = _join_s3(
             self.config.checkpoint_s3_uri,
             self.config.resource_prefix,
@@ -503,7 +505,12 @@ class SageMakerTrainingService:
                 "mlx_fine_tune": str(is_fine_tune).lower(),
                 "mlx_model_s3_uri": self.config.model_s3_uri or "",
                 "mlx_image_uri": effective_image,
+                "mlx_instance_type": self.config.instance_type,
                 "mlx_volume_size_gb": str(self.config.volume_size_gb),
+                **(
+                    {"mlx_comparison_validation_s3_uri": comparison_validation_s3_uri}
+                    if comparison_validation_s3_uri else {}
+                ),
             },
             "Tags": [
                 {"Key": "mlx:managed", "Value": "true"},

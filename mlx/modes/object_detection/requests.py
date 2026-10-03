@@ -49,6 +49,10 @@ class TrainObjectDetectionRequest(ObjectDetectionRequest):
     validation_confidence: float = 0.001
     validation_iou: float = 0.6
     validation_max_detections: int = 300
+    workers: Optional[int] = None
+    eval_interval: Optional[int] = None
+    no_aug_epochs: Optional[int] = None
+    patience: Optional[int] = None
 
 
 @dataclass(frozen=True)

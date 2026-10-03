@@ -149,7 +149,7 @@ original model architecture: changing pooling changes the representation and exp
 `none` is passed to llama.cpp, but token-level output is rejected by this retrieval workflow.
 MLX never manually averages token embeddings.
 
-`--prompt-format` accepts `auto`, `none`, or `e5`. Both `auto` (the default) and `none` leave the
+`--prompt-format` accepts `auto`, `none`, `e5`, `embeddinggemma`, or `qwen3`. Both `auto` (the default) and `none` leave the
 text unchanged unless you supply the existing custom prefixes. Automatic family detection is
 not attempted: filenames and architecture identifiers are not reliable evidence of prompt conventions.
 For multilingual-e5-small, multilingual-e5-base, and multilingual-e5-large, use `e5` to prepend
@@ -158,6 +158,11 @@ prefix precedes the combined title/body. Other models receive no E5 prefixes aut
 E5 formatting cannot be combined with nonempty `--query-prefix` or `--document-prefix`; choose
 one formatting method to prevent double prefixes. Input text is not inspected or stripped for
 existing prefixes, so pass unprefixed BEIR text when using the preset.
+
+`embeddinggemma` applies Gemma's retrieval query and document templates.
+`qwen3` prepends the published Qwen3 retrieval instruction to queries and leaves
+documents unprefixed after title/body composition. These presets cannot be combined
+with custom prefixes. Use the preset matching the embedding model in comparative work.
 
 ```bash
 python -m mlx --mode text-embedding --action embed \
@@ -201,3 +206,5 @@ constant fail with upgrade guidance. GGUF architecture support still depends on 
 llama.cpp build; explicit pooling cannot repair every model-loading failure. Add `--verbose` to
 retain the chained Python traceback on stderr alongside the original underlying error.
 The new nondefault options apply to BEIR embedding, not the retained legacy CSV compatibility route.
+
+For corpus-adapted compression experiments, see [Autoencoder retrieval benchmarks](retrieval-autoencoders.md).

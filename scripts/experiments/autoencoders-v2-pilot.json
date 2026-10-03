@@ -1,0 +1,137 @@
+{
+  "schema_version": 2,
+  "phase": "pilot",
+  "datasets": [
+    "nfcorpus",
+    "nano-quora",
+    "nano-fiqa2018"
+  ],
+  "seeds": [
+    40,
+    41
+  ],
+  "training": {
+    "hidden_dim": 512,
+    "epochs": 50,
+    "batch_size": 64,
+    "lr": 0.001,
+    "val_ratio": 0.2,
+    "device": "cpu"
+  },
+  "variants": [
+    {
+      "name": "mse",
+      "model": "simple",
+      "loss": "mse",
+      "dimensions": [
+        384,
+        512
+      ]
+    },
+    {
+      "name": "spectral-mse",
+      "model": "simple-spectral",
+      "loss": "mse",
+      "dimensions": [
+        384,
+        512
+      ]
+    },
+    {
+      "name": "least-volume-0p01",
+      "model": "simple-spectral",
+      "loss": "mse-least-volume",
+      "dimensions": [
+        384,
+        512
+      ],
+      "loss_config": {
+        "rho": 0.01,
+        "eta": 0.001
+      }
+    },
+    {
+      "name": "covariance-0p01",
+      "model": "simple",
+      "loss": "mse-covariance",
+      "dimensions": [
+        384,
+        512
+      ],
+      "loss_config": {
+        "rho": 0.01
+      }
+    },
+    {
+      "name": "least-volume-0p1",
+      "model": "simple-spectral",
+      "loss": "mse-least-volume",
+      "dimensions": [
+        384,
+        512
+      ],
+      "loss_config": {
+        "rho": 0.1,
+        "eta": 0.001
+      }
+    },
+    {
+      "name": "covariance-0p1",
+      "model": "simple",
+      "loss": "mse-covariance",
+      "dimensions": [
+        384,
+        512
+      ],
+      "loss_config": {
+        "rho": 0.1
+      }
+    },
+    {
+      "name": "least-volume-1p0",
+      "model": "simple-spectral",
+      "loss": "mse-least-volume",
+      "dimensions": [
+        384,
+        512
+      ],
+      "loss_config": {
+        "rho": 1.0,
+        "eta": 0.001
+      }
+    },
+    {
+      "name": "covariance-1p0",
+      "model": "simple",
+      "loss": "mse-covariance",
+      "dimensions": [
+        384,
+        512
+      ],
+      "loss_config": {
+        "rho": 1.0
+      }
+    },
+    {
+      "name": "ordered",
+      "model": "ordered-simple",
+      "loss": "mse",
+      "dimensions": [
+        512
+      ],
+      "evaluation_dimensions": [
+        384,
+        512
+      ],
+      "model_config": {
+        "prefix_dimensions": [
+          128,
+          256,
+          384,
+          512
+        ]
+      }
+    }
+  ],
+  "secondary": []
+}

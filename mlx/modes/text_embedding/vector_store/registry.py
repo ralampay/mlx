@@ -40,7 +40,8 @@ class VectorStoreRegistry:
 
 
 DEFAULT_VECTOR_STORE_REGISTRY = VectorStoreRegistry(
-    {"chroma": "mlx.modes.text_embedding.vector_store.chroma:create_chroma_vector_store"}
+    {"exact": "mlx.modes.text_embedding.vector_store.exact:ExactCosineVectorStore",
+        "chroma": "mlx.modes.text_embedding.vector_store.chroma:create_chroma_vector_store"}
 )
 
 

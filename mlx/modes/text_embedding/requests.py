@@ -24,6 +24,7 @@ class EmbedTextRequest(ConfigRequest):
     adapter: Optional[str] = None
     trust_checkpoint_code: bool = False
     device: str = "cpu"
+    context_length: Optional[int] = None
     pooling: str = "auto"
     prompt_format: str = "auto"
 
@@ -33,6 +34,7 @@ class BenchmarkTextEmbeddingRequest(ConfigRequest):
     input_path: Optional[str] = None
     output_path: Optional[str] = None
     vector_store: Optional[str] = None
+    exclude_self_matches: bool = False
     top_k: int = 100
     k_values: tuple[int, ...] = DEFAULT_K_VALUES
     metrics: tuple[str, ...] = ("precision", "recall", "mrr", "map", "ndcg")

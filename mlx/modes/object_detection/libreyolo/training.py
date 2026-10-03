@@ -177,6 +177,10 @@ class TrainLibreYOLOObjectDetection:
         allow_pretrained: bool,
     ) -> dict[str, Any]:
         optimizer = str(self.config.get("optimizer") or "auto").lower()
+        for name in ("workers", "eval_interval", "no_aug_epochs", "patience"):
+            value = self.config.get(name)
+            if value is not None and (not isinstance(value, int) or isinstance(value, bool) or value < 0):
+                raise MLXUserError(f"{name} must be a non-negative integer.")
         kwargs: dict[str, Any] = {
             "data": data,
             "epochs": int(self.config.get("epochs", 100)),
@@ -193,6 +197,9 @@ class TrainLibreYOLOObjectDetection:
             "save_plots": bool(self.config.get("plots", True)),
             "save_period": int(self.config.get("save_period", -1)),
         }
+        for name in ("workers", "eval_interval", "no_aug_epochs", "patience"):
+            if self.config.get(name) is not None:
+                kwargs[name] = self.config[name]
         if self.config.get("incremental_adapter"):
             kwargs["incremental_adapter"] = True
             kwargs["incremental_adapter_train_only"] = bool(

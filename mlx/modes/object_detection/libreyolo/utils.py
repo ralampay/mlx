@@ -13,6 +13,7 @@ class LibreYOLOModelSpec:
     size: str
     drax_stages: tuple[str, ...] = ()
     constructor_name: str = "LibreYOLO9"
+    architecture_variant: Optional[str] = None
 
     @property
     def uses_drax(self) -> bool:
@@ -34,6 +35,17 @@ MODEL_SPECS = MappingProxyType({
         )
         for size in sizes
     },
+    **{
+        f"yolox-drax-mobilenet-v3-large-l-{variant}": LibreYOLOModelSpec(
+            size="l", constructor_name="LibreYOLOXDraxMobileNetV3Large", architecture_variant=variant
+        )
+        for variant in ("refine-p3p4", "spp-p5", "balanced-drax")
+    },
+    "yolox-drax-mobilenet-v3-large-m-pyramid-drax": LibreYOLOModelSpec(
+        size="m",
+        constructor_name="LibreYOLOXDraxMobileNetV3Large",
+        architecture_variant="pyramid-drax",
+    ),
     "yolox-drax-csp-m": LibreYOLOModelSpec(
         size="m", constructor_name="LibreYOLOXDraxCSPM",
     ),

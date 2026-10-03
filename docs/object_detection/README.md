@@ -268,16 +268,22 @@ With `--provider libreyolo`, first-class training and listing use these aliases:
 - `yolox-{n,t,s,m,l,x}`
 - `yolo9-drax-mobilenet-v3-large-{t,s,m,c}`
 - `yolox-drax-mobilenet-v3-large-{n,t,s,m,l,x}`
+- `yolox-drax-mobilenet-v3-large-l-{refine-p3p4,spp-p5,balanced-drax}`
+- `yolox-drax-mobilenet-v3-large-m-pyramid-drax`
 - `yolox-drax-csp-m`
 
 Braces denote supported explicit size suffixes, for example `yolox-n` or
-`yolo9-drax-mobilenet-v3-large-s`. Listing reports all 22 individual aliases.
+`yolo9-drax-mobilenet-v3-large-s`. Listing reports all 27 individual aliases.
 The MobileNet variants use LibreYOLO's `LibreYOLO9DraxMobileNetV3Large` and
 `LibreYOLOXDraxMobileNetV3Large` classes. Their fixed Drax MobileNetV3 Large backbone
 retains the selected detector's neck/head. With `--pretrained`, training initializes
 only the MobileNet ImageNet V2 features; Drax, projections, neck, and head start fresh.
 Without it, training starts from scratch. Loading or resuming a detector checkpoint
 preserves its weights. Listing constructs models on CPU without downloading weights.
+The `pyramid-drax` candidate combines lightweight P3/P4 refinement, pooled P5 context,
+and stabilized Drax residual scaling at YOLOX-M neck/head scale. Its parameter budget
+is intentionally below vanilla YOLOX-M; matching YOLOX-L accuracy remains an empirical
+training target rather than a guaranteed property of the architecture.
 
 Incremental adapter-only fine-tuning requires a LibreYOLO version whose training signature or
 trainer configuration explicitly supports the incremental-adapter controls. MLX rejects unsupported
@@ -657,8 +663,8 @@ python -m mlx \
 
 - `object-detection-ultralytics` installs `ultralytics` from the
   `ralampay/ultralytics` fork plus ONNX Runtime.
-- `object-detection-libreyolo` installs `libreyolo[onnx]` from the `release` branch
-  of `ralampay/libreyolo`.
+- `object-detection-libreyolo` installs `libreyolo[onnx]` from the pinned
+  CSP-capable commit of `ralampay/libreyolo`.
 - `object-detection` installs both providers.
 - `opencv-python` supplies webcam/video input and display for either provider.
 

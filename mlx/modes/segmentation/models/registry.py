@@ -10,7 +10,8 @@ from mlx.modes.segmentation.models.backbones import BACKBONE_SPECS
 
 def build_unet(name, config, *, num_classes):
     from .unet import UNet
-    return UNet(in_channels=3 if config.get("colored", True) else 1, num_classes=num_classes)
+    features = (16, 32, 64, 128) if name == "unet-compact" else (64, 128, 256, 512)
+    return UNet(in_channels=3 if config.get("colored", True) else 1, num_classes=num_classes, features=features)
 
 
 def build_backbone_unet(name, config, *, num_classes):
@@ -22,7 +23,8 @@ def build_backbone_unet(name, config, *, num_classes):
 @dataclass(frozen=True)
 class SegmentationModelRegistry:
     entries: Mapping[str, Callable | str] = field(default_factory=lambda: {
-        "unet": build_unet, **{name: build_backbone_unet for name in BACKBONE_SPECS},
+        "unet": build_unet, "unet-compact": build_unet,
+        **{name: build_backbone_unet for name in BACKBONE_SPECS},
     })
 
     def __post_init__(self):

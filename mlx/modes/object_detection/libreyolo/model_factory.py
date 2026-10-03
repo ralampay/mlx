@@ -26,6 +26,11 @@ def build_scratch_model(spec: LibreYOLOModelSpec, *, device: str) -> Any:
         ) from exc
 
     kwargs = {"model_path": None, "size": spec.size, "device": device, "task": "detect"}
+    if spec.architecture_variant is not None:
+        from inspect import signature
+        if "architecture_variant" not in signature(constructor).parameters:
+            raise MLXUserError("This LibreYOLO build does not support backbone variants; use the Drax ablation provider checkout.")
+        kwargs["architecture_variant"] = spec.architecture_variant
     if spec.uses_drax:
         kwargs["drax_config"] = build_drax_config(spec)
     return constructor(**kwargs)

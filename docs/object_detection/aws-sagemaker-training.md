@@ -1,5 +1,76 @@
 # AWS SageMaker Object-Detection Training
 
+## Model comparison
+
+For the balanced 100-epoch experiment, use
+[`aws-model-comparison-balanced.yaml`](./aws-model-comparison-balanced.yaml).
+It selects the 1,000-image RSUD20K subset and trains the two models from
+scratch with matching settings. Submit and monitor the jobs sequentially:
+
+```bash
+python -m mlx --mode object-detection --platform aws --action compare-models \
+  --config docs/object_detection/aws-model-comparison-balanced.yaml \
+  --models yolox-m,yolox-drax-csp-m --format json
+python -m mlx --mode object-detection --platform aws --action comparison-status \
+  --config docs/object_detection/aws-model-comparison-balanced.yaml \
+  --experiment-id EXPERIMENT_ID --watch
+python -m mlx --mode object-detection --platform aws --action comparison-test \
+  --config docs/object_detection/aws-model-comparison-balanced.yaml \
+  --experiment-id EXPERIMENT_ID
+```
+
+The trained results are only evidence for this small subset. If YOLOX-M
+also scores near zero, the backbone comparison is inconclusive. Set
+`training.pretrained: true` in a separate run to assess the MobileNet
+ImageNet initialization; the current YOLOX-M path does not load equivalent
+pretrained weights from that flag.
+
+The [quick comparison config](./aws-model-comparison-quick.yaml) uses the curated
+`s3://mlx-object-detection-datasets/rsud20k-quick.zip` dataset: 400 training,
+120 validation, and 200 held-out test images. Select two or more model names from
+the chosen MLX provider's catalog. The action follows the YAML training settings,
+including pretrained weights and Spot choice. This example runs 30 scratch epochs
+on demand. Each model gets an independent training job. The first starts at
+submission; `comparison-status --watch` starts each subsequent model after the
+previous job completes, so one training instance is enough. Keep the watcher
+running, or restart it later to continue. The held-out test runs in a separate
+job after all training jobs finish.
+
+The general object-detection SageMaker image installs the LibreYOLO fork at
+commit `e1e0f897af6ff6a64185cf724a4d9f891d64176e`, which supports the
+current MLX model catalog. Training and comparison use the same image builder.
+
+```bash
+python -m mlx --mode object-detection --provider libreyolo \
+  --action ls-models --names-only
+python -m mlx --mode object-detection --platform aws --action compare-models \
+  --config docs/object_detection/aws-model-comparison-quick.yaml \
+  --models yolox-m,yolox-drax-mobilenet-v3-large-m-pyramid-drax --format json
+python -m mlx --mode object-detection --platform aws --action comparison-status \
+  --config docs/object_detection/aws-model-comparison-quick.yaml \
+  --experiment-id EXPERIMENT_ID --watch
+python -m mlx --mode object-detection --platform aws --action comparison-test \
+  --config docs/object_detection/aws-model-comparison-quick.yaml \
+  --experiment-id EXPERIMENT_ID
+```
+
+`comparison.models` in YAML can supply the names instead of `--models`; the CLI list
+takes precedence. Set `training.provider` to `ultralytics` or `libreyolo` and choose
+names from that provider's `ls-models --names-only` output.
+
+To continue an existing comparison whose first model was already submitted, repeat
+`compare-models` with the same `--models` list and `--experiment-id EXPERIMENT_ID`.
+It preserves submitted jobs and records the remaining model order. Then run
+`comparison-status --watch` to submit subsequent jobs sequentially.
+
+The submit command returns `experiment_id`, the first job name, and the S3 manifest URI. The
+test command returns the test job and `results_s3_uri`; monitor it with
+`comparison-status --experiment-id EXPERIMENT_ID --watch`.
+The test job evaluates both the validation-selected `best.pt` and final `last.pt` for every
+model on the held-out test split. `results.json` and `results.csv` label them
+`{model}-best` and `{model}-last`. Validation metrics are attached only to the best entry;
+the final checkpoint is read from the completed recovery slot at the configured last epoch.
+
 MLX runs on the local machine as a control-plane client. It validates S3, builds and pushes a
 training image when necessary, submits an asynchronous SageMaker training job, and later queries
 or stops that job. Model training runs inside SageMaker; the local MLX process does not need to

@@ -151,7 +151,7 @@ def load_aws_training_config(
     cli_config: Mapping[str, Any],
 ) -> AwsTrainingConfig:
     root = _load_yaml(Path(config_path).expanduser())
-    _reject_unknown(root, {"version", "aws", "training"}, "root")
+    _reject_unknown(root, {"version", "aws", "training", "comparison"}, "root")
     if root.get("version", 1) != 1:
         raise MLXUserError("Unsupported AWS configuration version; expected version: 1.")
 
@@ -195,6 +195,17 @@ def load_aws_training_config(
     validate_distillation_options({**training, "platform": "aws"})
     training.setdefault("device", "auto")
     training.setdefault("save_period", -1)
+    if not training.get("model") and cli_config.get("action") == "compare-models":
+        selected = cli_config.get("models")
+        listed = selected.split(",") if isinstance(selected, str) else (
+            _require_mapping(root.get("comparison"), "comparison").get("models") or []
+        )
+        if isinstance(listed, list) and listed:
+            training["model"] = listed[0].strip() if isinstance(listed[0], str) else listed[0]
+    if not training.get("model") and cli_config.get("action") in {
+        "comparison-status", "comparison-test"
+    }:
+        training["model"] = "comparison"
     if not training.get("model"):
         raise MLXUserError("AWS object-detection training requires 'training.model'.")
 

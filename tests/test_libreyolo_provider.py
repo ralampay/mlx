@@ -60,13 +60,13 @@ def test_cli_parses_incremental_adapter_training_options() -> None:
     assert parsed.incremental_adapter_type == "conv_bottleneck"
 
 
-def test_dependency_metadata_uses_ralampay_release_fork() -> None:
+def test_dependency_metadata_uses_current_ralampay_fork() -> None:
     root = Path(__file__).resolve().parents[1]
     metadata = tomllib.loads((root / "pyproject.toml").read_text(encoding="utf-8"))
     project = metadata["project"]
     extras = project["optional-dependencies"]
     fork_reference = (
-        "libreyolo[onnx] @ git+https://github.com/ralampay/libreyolo.git@release"
+        "libreyolo[onnx] @ git+https://github.com/ralampay/libreyolo.git@e1e0f897af6ff6a64185cf724a4d9f891d64176e"
     )
 
     assert project["requires-python"] == ">=3.10"
@@ -406,7 +406,9 @@ def test_libreyolo_listing_builds_canonical_configurations(monkeypatch) -> None:
     calls = []
 
     class FakeYOLO9:
-        def __init__(self, **kwargs):
+        def __init__(self, architecture_variant=None, **kwargs):
+            if architecture_variant is not None:
+                kwargs["architecture_variant"] = architecture_variant
             calls.append(kwargs)
             self.model = nn.Linear(3, 2)
 
@@ -430,8 +432,13 @@ def test_libreyolo_listing_builds_canonical_configurations(monkeypatch) -> None:
         ModelParameterSummary("yolo9-c", 8),
         ModelParameterSummary("yolo9-s-drax-b5", 8),
     ]
-    assert len(summaries) == 22
-    assert {summary.model_name for summary in summaries} == {case[0] for case in _MODEL_CASES}
+    assert len(summaries) == 26
+    assert {summary.model_name for summary in summaries} == {case[0] for case in _MODEL_CASES} | {
+        f"yolox-drax-mobilenet-v3-large-l-{v}" for v in ("refine-p3p4", "spp-p5", "balanced-drax")
+    } | {
+        "yolox-drax-mobilenet-v3-large-m-pyramid-drax",
+        "yolox-drax-csp-m",
+    }
     assert all(summary.parameter_count == 8 for summary in summaries)
     assert [call["size"] for call in calls[:5]] == ["t", "s", "m", "c", "s"]
     assert all(call["device"] == "cpu" and call["model_path"] is None for call in calls)

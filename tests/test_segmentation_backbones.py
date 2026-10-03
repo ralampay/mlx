@@ -34,12 +34,15 @@ EXPECTED_BACKBONE_MODELS = {
     "unet-draxnet-sknet",
     "unet-drax_mobilenet_v3_large-average",
     "unet-drax_mobilenet_v3_large-sknet",
+    "unet-mobilenet_v3_large-skip-conv",
+    "unet-mobilenet_v3_large-skip-drax",
+    "unet-mobilenet_v3_large-skip-drax-balanced",
 }
 
 
 def test_segmentation_registry_contains_all_non_siamese_backbones() -> None:
     assert set(BACKBONE_SPECS) == EXPECTED_BACKBONE_MODELS
-    assert MODEL_NAMES == {"unet", *EXPECTED_BACKBONE_MODELS}
+    assert MODEL_NAMES == {"unet", "unet-compact", *EXPECTED_BACKBONE_MODELS}
     assert supported_model_names() == sorted(MODEL_NAMES)
     assert not any("siamese" in model_name for model_name in MODEL_NAMES)
 
@@ -206,4 +209,32 @@ def test_pretrained_draxnet_backbone_failure_is_user_facing() -> None:
             "unet-draxnet-average",
             {"colored": True, "pretrained": True},
             num_classes=2,
+        )
+
+
+@pytest.mark.parametrize(
+    "model_name",
+    [
+        "unet-mobilenet_v3_large-skip-conv",
+        "unet-mobilenet_v3_large-skip-drax",
+        "unet-mobilenet_v3_large-skip-drax-balanced",
+    ],
+)
+def test_skip_refiner_receives_gradients_and_restores_input_size(model_name: str) -> None:
+    model = build_segmentation_model(
+        model_name, {"colored": True, "pretrained": False}, num_classes=2
+    )
+    model.eval()
+    logits = model(torch.randn(1, 3, 33, 35))
+    logits.square().mean().backward()
+
+    assert logits.shape == (1, 2, 33, 35)
+    assert sum(parameter.numel() for parameter in model.parameters()) < 10_000_000
+    assert model.encoder.refiner.convnext.pwconv2.weight.grad is not None
+    if "balanced" in model_name:
+        assert model.encoder.refiner.attention_scale is not None
+        assert model.encoder.refiner.attention_scale.grad is not None
+        assert torch.allclose(
+            model.encoder.refiner.convnext.layer_scale,
+            torch.full_like(model.encoder.refiner.convnext.layer_scale, 1e-3),
         )

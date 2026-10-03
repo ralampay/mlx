@@ -26,7 +26,7 @@ from mlx.modes.text_embedding.metrics import (
     aggregate_query_metrics,
     compute_query_metrics,
 )
-from mlx.modes.text_embedding.models import EmbeddedText, document_embedding_text
+from mlx.modes.text_embedding.models import EmbeddedText
 from mlx.modes.text_embedding.requests import (
     BenchmarkTextEmbeddingRequest,
     EmbedTextRequest,
@@ -91,6 +91,9 @@ class EmbedTextCommand:
             raise MLXUserError(
                 f"Embedding backend '{self.request.embedding_backend}' does not support explicit pooling."
             )
+        if self.request.context_length is not None:
+            if self.request.context_length < 1 or not backend.supports_context_length:
+                raise MLXUserError("A positive --context-length requires a supporting embedding backend.")
         formatter = resolve_text_formatter(
             self.request.prompt_format,
             query_prefix=self.request.query_prefix,
@@ -116,40 +119,47 @@ class EmbedTextCommand:
             },
         )
         options = {"pooling": self.request.pooling} if self.request.pooling != "auto" else {}
+        if self.request.context_length is not None:
+            options["context_length"] = self.request.context_length
         provider = provider_factory(model_path, **options)
-        vector_store_path = output_dir / "vector_store"
-        vector_store_path.mkdir(parents=True, exist_ok=True)
-        store = factory(vector_store_path, collection="corpus", create=True)
-        corpus_csv = output_dir / "corpus_embeddings.csv"
-        query_csv = output_dir / "query_embeddings.csv"
         try:
-            self.artifact_writer.initialize_csv(corpus_csv, kind="corpus")
-            self.artifact_writer.initialize_csv(query_csv, kind="query")
-            self._embed_corpus(dataset, provider, store, corpus_csv, formatter)
-            self._embed_queries(dataset, provider, query_csv, formatter)
+            vector_store_path = output_dir / "vector_store"
+            vector_store_path.mkdir(parents=True, exist_ok=True)
+            store = factory(vector_store_path, collection="corpus", create=True)
+            corpus_csv = output_dir / "corpus_embeddings.csv"
+            query_csv = output_dir / "query_embeddings.csv"
+            try:
+                self.artifact_writer.initialize_csv(corpus_csv, kind="corpus")
+                self.artifact_writer.initialize_csv(query_csv, kind="query")
+                self._embed_corpus(dataset, provider, store, corpus_csv, formatter)
+                self._embed_queries(dataset, provider, query_csv, formatter)
+            finally:
+                store.close()
+            dimensions = self._dimensions
+            if dimensions is None:
+                raise MLXUserError("Embedding provider did not report vector dimensions.")
+            if self._source_dimensions is None:
+                raise MLXUserError("Embedding provider did not produce source dimensions.")
+            self.artifact_writer.write_manifests(
+                output_dir,
+                dataset=dataset,
+                model_path=model_path,
+                dimensions=dimensions,
+                normalized=self.request.normalize_embeddings,
+                vector_store=self.request.vector_store,
+                query_prefix=formatter.query_prefix,
+                document_prefix=formatter.document_prefix,
+                representation=self.request.representation,
+                source_dimensions=self._source_dimensions,
+                adapter=(dict(self.transformer.provenance) if self.transformer else None),
+                started_at=started_at,
+                backend=backend.provenance,
+                embedding_configuration=self._embedding_configuration(model_path, provider, formatter),
+            )
         finally:
-            store.close()
-        dimensions = self._dimensions
-        if dimensions is None:
-            raise MLXUserError("Embedding provider did not report vector dimensions.")
-        if self._source_dimensions is None:
-            raise MLXUserError("Embedding provider did not produce source dimensions.")
-        self.artifact_writer.write_manifests(
-            output_dir,
-            dataset=dataset,
-            model_path=model_path,
-            dimensions=dimensions,
-            normalized=self.request.normalize_embeddings,
-            vector_store=self.request.vector_store,
-            query_prefix=formatter.query_prefix,
-            document_prefix=formatter.document_prefix,
-            representation=self.request.representation,
-            source_dimensions=self._source_dimensions,
-            adapter=(dict(self.transformer.provenance) if self.transformer else None),
-            started_at=started_at,
-            backend=backend.provenance,
-            embedding_configuration=self._embedding_configuration(model_path, provider, formatter),
-        )
+            close = getattr(provider, "close", None)
+            if callable(close):
+                close()
         result = EmbedTextResult(
             output_dir=output_dir,
             corpus_documents=len(dataset.corpus),
@@ -177,6 +187,8 @@ class EmbedTextCommand:
             "pooling_effective": runtime.get("pooling_effective", "unknown"),
             "embedding_dimension": self._source_dimensions,
             "context_length": runtime.get("context_length"),
+            **({"context_length_requested": self.request.context_length,
+                "truncation": runtime.get("truncation", "unknown")} if self.request.context_length is not None else {}),
             "prompt_format_requested": self.request.prompt_format,
             "prompt_format_effective": formatter.effective_format,
             "llama_cpp_python_version": runtime.get("llama_cpp_python_version"),
@@ -210,7 +222,7 @@ class EmbedTextCommand:
         for start in range(0, total, self.request.batch_size):
             documents = dataset.corpus[start : start + self.request.batch_size]
             texts = [
-                formatter.format_document(document_embedding_text(document))
+                formatter.format_document(document.text, title=document.title)
                 for document in documents
             ]
             vectors = self._embed_batch(provider, texts)
@@ -380,9 +392,10 @@ class BenchmarkTextEmbeddingCommand:
         search_depth = min(self.request.top_k, corpus_size)
         try:
             for index, (query, vector) in enumerate(queries, start=1):
-                results = tuple(store.query(vector, k=search_depth))
+                depth = min(corpus_size, search_depth + int(self.request.exclude_self_matches))
+                results = tuple(store.query(vector, k=depth))
                 identifiers = [result.id for result in results]
-                if len(results) > search_depth or len(set(identifiers)) != len(identifiers):
+                if len(results) > depth or len(set(identifiers)) != len(identifiers):
                     raise MLXUserError("Vector store returned duplicate IDs or too many results.")
                 if any(identifier not in artifacts["corpus_ids"] for identifier in identifiers):
                     raise MLXUserError("Vector store returned an ID absent from the corpus export.")
@@ -390,6 +403,8 @@ class BenchmarkTextEmbeddingCommand:
                     raise MLXUserError("Vector store returned non-finite scores.")
                 if any(results[pos].score < results[pos + 1].score for pos in range(len(results) - 1)):
                     raise MLXUserError("Vector store returned results outside best-first score order.")
+                if self.request.exclude_self_matches:
+                    results = tuple(item for item in results if item.id != query.id)[:search_depth]
                 qrels = qrels_by_query.get(query.id, {})
                 metrics = compute_query_metrics(
                     [result.id for result in results], qrels, self.request.k_values,
@@ -437,6 +452,7 @@ class BenchmarkTextEmbeddingCommand:
             "dimensions": embedding["dimensions"],
             "similarity": embedding_manifest["vector_store"].get("similarity", "cosine"),
             "vector_store": requested_provider,
+            "exclude_self_matches": self.request.exclude_self_matches,
             "top_k": self.request.top_k,
             "metrics": aggregate,
         }
@@ -449,6 +465,7 @@ class BenchmarkTextEmbeddingCommand:
             "embedding_dimensions": embedding["dimensions"],
             "vector_store_provider": requested_provider,
             "similarity": summary["similarity"],
+            "exclude_self_matches": self.request.exclude_self_matches,
             "k_values": list(self.request.k_values),
             "metrics": list(self.request.metrics),
             "corpus_documents": corpus_size,

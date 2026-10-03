@@ -17,6 +17,9 @@ from mlx.modes.text_embedding.models import (
 class BeirDatasetLoader:
     """Load and validate the small, standard BEIR retrieval dataset layout."""
 
+    def __init__(self, *, allow_empty_documents: bool = False):
+        self.allow_empty_documents = allow_empty_documents
+
     def load(self, path: str | Path) -> RetrievalDataset:
         root = Path(path).expanduser()
         if not root.is_dir():
@@ -53,7 +56,7 @@ class BeirDatasetLoader:
                 raise MLXUserError(f"Duplicate corpus document ID '{identifier}' in {path} at line {line}.")
             title = row.get("title", "")
             text = row.get("text")
-            if not isinstance(title, str) or not isinstance(text, str) or not text.strip():
+            if not isinstance(title, str) or not isinstance(text, str) or (not self.allow_empty_documents and not text.strip()):
                 raise MLXUserError(
                     f"Invalid corpus record in {path} at line {line}: title must be a string and text must be non-empty."
                 )

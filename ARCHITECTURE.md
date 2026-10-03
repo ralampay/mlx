@@ -79,7 +79,7 @@ mlx/
     │   ├── evaluation.py         normalized benchmark metrics and research-artifact contract
     │   ├── artifacts.py          shared checkpoint discovery and export-path rules
     │   ├── streaming.py          frame-sink adapter and compatibility frame-source re-exports
-    │   ├── aws/                  SageMaker Spot submission, lifecycle, and recovery boundary
+    │   ├── aws/                  SageMaker submission, recovery, and comparison commands
     │   ├── tracking/             tracking, MOT evaluation, replay export, registry, algorithms
     │   ├── libreyolo/            LibreYOLO implementation using the Ralampay fork
     │   └── ultralytics/          Ultralytics implementation and compatibility exports
@@ -103,7 +103,7 @@ The primary workflow commands are:
 | Video anomaly detection | `TrainVideoAnomalyModel`, `BenchmarkVideoAnomalyModel`, `InferVideoAnomaly`, `ListVideoAnomalyModels`, AWS all-model submit/status/resume commands |
 | Object detection | `TrainObjectDetectionModel`, `FineTuneObjectDetectionModel`, `BenchmarkObjectDetectionModel`, `CreateObjectDetector`, `ConvertObjectDetectionModel`, `ListObjectDetectionModels`, `RunObjectDetectionStream`, AWS submit/status/stop/resume and best-model locator commands |
 | Tracking | `CreateTrackingAlgorithm`, `RunObjectDetectionTrackingCommand`, `RunTrackByDetectionCommand`, `RunTrackingVideo`, `PrepareTrackingBenchmarks`, `CompileTrackingVideo`, `BenchmarkTrackingDataset`, `ExportMOTFromClassAwareTracking`, `BenchmarkMOTTracking`, `ExportTrackingReplay` |
-| Text embedding | `EmbedTextCommand`, `BenchmarkTextEmbeddingCommand`; legacy `EmbedCsvCommand` remains supported |
+| Text embedding | `EmbedTextCommand`, `BenchmarkTextEmbeddingCommand`, `PrepareRetrievalDatasets`, `BenchmarkAutoencoderRetrieval`, `TransformEmbeddingArtifacts`, `AnalyzeAutoencoderRetrieval`, `BenchmarkConfiguredAutoencoders`, `SelectAutoencoderExperimentSettings`; legacy `EmbedCsvCommand` remains supported |
 | Autoencoder | `TrainAutoencoder`, `EmbedAutoencoder`, `ListAutoencoderModels`, `ListAutoencoderLosses` |
 
 Large commands should keep `execute()` readable by delegating cohesive steps to private methods
@@ -284,7 +284,7 @@ To add another provider:
 
 Provider dependencies are named optional extras so users can install only the integration they
 need. `object-detection-ultralytics` installs the Ralampay Ultralytics fork,
-`object-detection-libreyolo` follows the `release` branch of the Ralampay LibreYOLO fork with its
+`object-detection-libreyolo` pins the CSP-capable Ralampay LibreYOLO fork commit with its
 ONNX dependencies, and `object-detection` installs both. Provider packages must stay lazy so these
 extras remain independent.
 
@@ -300,9 +300,12 @@ public library classes: `LibreYOLO9` for `yolo9-{t,s,m,c}` and `yolo9-s-drax-b5`
 for `yolox-{n,t,s,m,l,x}`, `LibreYOLO9DraxMobileNetV3Large` for
 `yolo9-drax-mobilenet-v3-large-{t,s,m,c}`, and `LibreYOLOXDraxMobileNetV3Large` for
 `yolox-drax-mobilenet-v3-large-{n,t,s,m,l,x}`, and `LibreYOLOXDraxCSPM` for
-`yolox-drax-csp-m`. This scratch model retains the YOLOX-M CSPDarknet backbone with
-a P3 spatial refiner, a P5 Drax block, and a narrower PAN/head. New architectures
-extend this inventory rather than
+`yolox-drax-csp-m`. The MobileNet
+Drax MobileNet pyramid variant fixes the compact pyramid backbone with a 0.67-deep, 0.875-wide
+YOLOX neck/head. The CSP-Drax model keeps the YOLOX-M CSPDarknet backbone and
+uses a P3 refiner, a compact P5 Drax block, and a narrower PAN/head. These variants have
+separate checkpoint families.
+New architectures extend this inventory rather than
 adding selection branches to training or listing commands. Missing public classes raise an
 actionable provider-build error; importing MLX does not import the provider library.
 
@@ -463,6 +466,26 @@ higher total epoch target. It also preserves the original serialized training pa
 only the epoch target, so a newer local CLI cannot introduce default fields that are unknown to
 the immutable training image. Provider/model/dataset changes are rejected at that boundary.
 
+Object-detection comparisons use `SubmitDetectionComparison`,
+`GetDetectionComparisonStatus`, and `LaunchDetectionComparisonTest` in the mode's AWS package.
+`--models` or YAML `comparison.models` supplies two or more names validated against the selected
+MLX provider catalog. Submission records the ordered model list in an S3 manifest and starts
+the first job. `WatchDetectionComparison` invokes `AdvanceDetectionComparison` after each
+completed job to submit the next, keeping instance demand at one; a restarted watcher can
+continue the manifest. Each job uses the same dataset ZIP and configured training settings. Each
+container publishes validation metrics to the comparison prefix. The test command requires
+all jobs to have completed and stages each model's `best.pt` and final full-state `last.pt`
+in separate SageMaker channels. The last checkpoint is selected from the active recovery slot
+only when its metadata reaches the configured final epoch. The evaluation-only container
+benchmarks both checkpoints on the `test` split and publishes JSON and CSV results under
+`{model}-best` and `{model}-last`; stored validation metrics belong to the best checkpoint.
+The runner selects commands and renders records; provider benchmarking stays behind the neutral
+`BenchmarkObjectDetectionModel` command. Training and comparison use the same
+object-detection SageMaker image and provider adapter boundary.
+The submission passes its instance type to the container. The entrypoint resolves `auto`
+through PyTorch CUDA availability and raises a user-facing error when a GPU instance cannot
+expose CUDA, preventing an unnoticed CPU training run.
+
 Object-detection fine-tuning is an explicit training use case rather than provider-specific
 branching. Local callers supply a required `.pt` checkpoint to
 `FineTuneObjectDetectionModel`; the command validates the initialization contract and delegates
@@ -592,7 +615,7 @@ fails; artifact setup and embedding share the same cleanup boundary.
 
 BEIR parsing produces immutable corpus, query, relevance-judgment, and dataset values independently
 of embedding and retrieval. Document title/body composition and configurable query/document
-prefixes live at the workflow boundary rather than in the llama.cpp adapter. Embedding artifacts
+role formatting live at the workflow boundary rather than in the llama.cpp adapter. Embedding artifacts
 include portable copied qrels, manifests, model SHA-256, explicit normalization/prefix metadata,
 and a generic representation name. This serialization boundary allows future PCA or autoencoder
 tools to load, transform, export, and re-index vectors without changing embedding providers.
@@ -611,7 +634,7 @@ structures and exported IDs before index access. Retrieval results must have uni
 finite best-first scores, and respect the requested depth. Chroma reload checks cosine metadata.
 
 Text embedding accepts `pooling` (`auto`, `mean`, `cls`, `last`, `none`) and
-`prompt_format` (`auto`, `none`, `e5`) on `EmbedTextRequest`. Both default to `auto`.
+`prompt_format` (`auto`, `none`, `e5`, `embeddinggemma`) on `EmbedTextRequest`. Both default to `auto`.
 The existing immutable backend registry declares optional `supports_pooling`; opted-in factories
 accept a `pooling` keyword for explicit choices. Default construction retains the single-path
 factory contract. Unsupported explicit pooling is rejected before output creation.
@@ -620,8 +643,9 @@ vectors, and exposes optional `runtime_metadata()` returning `pooling_effective`
 and `llama_cpp_python_version`. Providers without this method remain compatible and report unknown
 runtime settings. No token averaging or alternate-pooling retry is permitted.
 
-The mode-local `RetrievalTextFormatter` provides query/document formatting after title/body
-composition. Its resolver supplies identity/custom-prefix formatting or E5 role prefixes.
+The mode-local `RetrievalTextFormatter` receives document title/body separately and provides
+legacy title/body composition with identity/custom-prefix or E5 role prefixes, or explicit
+EmbeddingGemma title-aware formatting.
 Prompt-format auto deliberately resolves to none without filename detection. E5 conflicts with
 nonempty custom prefixes and fails before model construction. Dataset values remain unmodified.
 
@@ -730,6 +754,16 @@ deterministic samples across the sorted split, and refreshes mode-owned original
 ground-truth, prediction, overlay, and labeled-panel artifacts. Full test metrics remain the
 responsibility of `BenchmarkSegmentation`.
 
+The small segmentation DRAX comparison keeps MobileNetV3's five-stage encoder and shared U-Net
+decoder. `SkipRefinedMobileNetEncoder` refines only the 1/16-resolution encoder skip through a
+64-channel adapter; its registered variants use convolution-only, original DRAX, or balanced-branch
+DRAX refinement. The existing final-feature DRAX MobileNet remains distinct. The optional
+`DraxBlock.balanced_branch_scale` initializes convolution and attention delta scales equally;
+omitting it retains existing classifier and detector behavior. `unet-compact` uses the native U-Net
+with narrower widths. The mode-owned `cross-entropy-dice` loss combines cross entropy and
+foreground soft Dice for sparse binary masks. These additions have stable model and loss names for
+checkpoint reload, while the historical `all-small` group retains its explicit membership.
+
 `BenchmarkSegmentation` feeds each inference batch into a mode-owned metrics accumulator rather
 than retaining dataset-wide target, prediction, and probability tensors. Confusion, calibration,
 loss, MCC, and configured binary-threshold statistics remain exact; bounded per-class score
@@ -790,3 +824,189 @@ performing full-model training. MLX does not invent a neural-adapter registry or
 - Any code or configuration change must review this document. Update it in the same change whenever
   command inventory, package ownership, dependencies, interfaces, provider behavior, or data flow
   changes.
+
+## Corpus-Adapted Autoencoder Retrieval Experiments
+
+`text_embedding` adds `PrepareRetrievalDatasets` (`prepare-datasets`) and
+`BenchmarkAutoencoderRetrieval` (`benchmark-autoencoders`). The latter accepts a typed
+`AutoencoderRetrievalRequest`; its runner injects `TrainAutoencoder` and
+`AutoencoderRepresentationTransformer` factories, keeping torch/model ownership in `autoencoder`.
+The experiment command coordinates existing embedding and benchmark commands, the
+provider-neutral `TransformEmbeddingArtifacts`, and `AnalyzeAutoencoderRetrieval`. It does not
+implement training or model-provider selection. Reports remain artifact/presentation concerns.
+The CLI uses action-specific typed defaults without changing standalone command defaults.
+
+`retrieval_datasets` owns the immutable, revision-pinned `laptop-ae-v1` source inventory and an
+injected Hub/Parquet boundary. Downloads convert into temporary BEIR directories before validated
+atomic publication. Nano judgments are binary and the source storage split named `train` becomes
+`qrels/test.tsv`; manifests make this evaluation mapping explicit. Corpus/query IDs are preserved,
+including empty Nano corpus text through the loader's opt-in `allow_empty_documents` policy.
+No judgments or documents are silently discarded. Existing source directories require matching
+revision and content hashes. Missing or malformed inputs raise actionable `MLXUserError` values.
+
+The embedding formatter adds explicit `embeddinggemma` selection using separate title and body
+fields; legacy none/E5 composition is unchanged. Backend registry capability
+`supports_context_length` allows optional `EmbedTextRequest.context_length`; the llama.cpp adapter
+sets context/batch capacity and records token-prefix truncation provenance. Omitted context values
+preserve binding defaults. Optional provider `close()` is called on success and failure after
+runtime metadata capture. No filename inference or pooling fallback is introduced.
+
+The immutable vector-store registry adds `exact`, a float32 cosine index with memory-mapped
+vectors, bounded score chunks, and ID-stable ties. `BenchmarkTextEmbeddingRequest` adds opt-in
+`exclude_self_matches` and records the policy in benchmark artifacts. The cached transform command
+uses `VectorRepresentationTransformer` to transform both exports, normalize final vectors, and
+rebuild an index while retaining original model/dataset provenance. It never imports autoencoder
+models or reruns text embedding.
+
+`AutoencoderTrainRequest.minimum_batch_size` permits callers to raise the batching minimum to two
+(default one), coordinating the same singleton-merging policy across loss ablations. Loss-declared
+minimums remain authoritative lower bounds. Model initialization, partitions, and ordering remain
+seeded; validation objective remains the checkpoint-selection rule.
+
+`ExperimentStages` owns experiment identity, content verification, duration recording, failure
+artifacts, and atomic stage publication. Configuration, source/model/dataset hashes and versions
+must match for resume. Partial stages restart; modified completed stages are rejected. Acquisition
+and resume are explicit options, and no output is printed by reusable workflow code. Sequential
+execution bounds resources; callers must not share an output directory concurrently.
+
+Statistical inference uses dataset-level paired mean deltas after averaging query and seed
+repetitions. One-sided t-tests at the negative non-inferiority margin receive Holm correction over
+the primary loss/dimension family. Secondary similarity-versus-MSE tests form a separate family.
+Intervals, multiplicity policy, assumptions, seed variation, and transductive/Nano limitations are
+reported explicitly. Missing cells prevent analysis; degenerate variance is inconclusive. This
+boundary does not redefine existing retrieval metrics. See
+[`docs/retrieval-autoencoders.md`](docs/retrieval-autoencoders.md) for the reproducible protocol.
+
+## Configured Autoencoder Retrieval Experiments (v2)
+
+The existing `benchmark-autoencoders` command accepts an optional `--experiment-config` JSON
+recipe. Legacy flags and layouts remain supported when no recipe is supplied. With a recipe,
+`BenchmarkConfiguredAutoencoders` coordinates named variants through injected training,
+validation, embedding, and transformation collaborators; it does not import torch or own model
+selection. Shared protocol validation lives in `experiment_validation`. Recipes separate training
+widths from evaluation widths, so one ordered checkpoint or PCA fit can serve several outputs.
+`--dry-run` validates the recipe, local datasets, model, and any requested embedding source without
+creating output. Explicit legacy variant flags conflict with recipes; explicit runtime training
+flags override recipe training defaults. Resolved configuration is hashed for resume.
+
+The autoencoder registry adds `simple-spectral` and `ordered-simple`. Both reuse the existing
+GELU MLP; spectral decoder linear layers use parametrizations with five power iterations. Ordered
+models declare supported prefixes but retain deterministic full-width `encode()` and `decode()`.
+`objectives` isolates scalar/component evaluation from training: `ReconstructionObjective` wraps
+existing two-argument and latent-aware losses; `OrderedReconstructionObjective` masks a prefix
+with its own seeded generator in training and averages every declared prefix during validation.
+Ordinary losses retain their public signature. Ordered models initially permit MSE only.
+
+`regularization` owns `mse-least-volume` and `mse-covariance`, including validation and training-only
+calibration. Least Volume requires a constrained-decoder capability. The covariance objective is
+an explicitly paper-inspired mean squared off-diagonal feature-covariance penalty, not a paper
+reproduction or a sample-similarity loss. Both persist calibration scale/raw terms, formula version,
+and validation components alongside seed and split hash. Zero coefficient follows MSE without
+calibration. Checkpoint schema remains compatible; additional metadata is optional for old models.
+The representation adapter accepts a supported output prefix and records training and output widths.
+
+`mlx.core.partitions` owns the shared seeded row split and split hash used by AE training and PCA.
+It preserves the existing torch permutation and loader-generator advancement; torch is imported
+lazily at this narrow boundary. Corpus text loading and vector CSV parsing remain mode-owned.
+`compression_controls` owns training-only full-SVD, centered/unwhitened PCA and native vector
+truncation. Both implement the existing vector-transform contract. Export normalizes final vectors
+and records the actual representation name, including PCA and truncation rather than an AE label.
+
+`ValidateEmbeddingSource` verifies external original stages against content, dataset, model, and
+embedding-protocol/runtime provenance. External stages remain read-only; a v2 manifest records
+resolved references and their hashes. Missing or mismatched requested sources fail rather than
+silently recomputing embeddings. v2 manifests and atomic stages distinguish a training run from
+its evaluations. Training costs and model/PCA bytes are reported once per run, while vector bytes,
+transformation and search times are per evaluation. PCA and deterministic truncation have explicit
+kind/seed semantics; deterministic controls are not replicated to inflate statistical sample size.
+
+`SelectAutoencoderExperimentSettings` is exposed as `select-autoencoder-settings`. It verifies a
+complete pilot and selects coefficients solely from held-out document reconstruction ratios against
+matched controls; it never reads retrieval metrics. It emits frozen confirmation settings and an
+auditable selection record. `AnalyzeConfiguredAutoencoders` requires every expected cell and reports
+prespecified non-inferiority and superiority families with separate Holm corrections. The analysis
+unit remains the dataset. See `docs/retrieval-autoencoders.md` for protocol, counts, and launchers.
+
+### Orthogonal tied projections and supervised experiment processes
+
+The autoencoder registry adds `orthogonal-tied`, a bias-free linear encoder whose single
+weight is reused transposed for reconstruction. Its model owns training-only uncentered
+SVD initialization, signed reduced-QR projection after optimizer updates, and orthogonality
+diagnostics. `TrainAutoencoder` recognizes optional `initialize_from_training_values`,
+`project_parameters_`, and `training_diagnostics` model capabilities. Initialization receives
+only the already-normalized training partition, before loss calibration and optimization.
+Initialized models receive an epoch-zero evaluation eligible for best-checkpoint selection;
+legacy models retain their original epoch sequence. Checkpoint restoration never initializes
+from data, and initialization provenance is persisted separately from construction options.
+
+`mse-cosine` is a reconstruction-only loss: MSE plus `cosine_weight / input_width` times
+per-row cosine error. It creates no sample-pair matrices. Reconstruction objectives collect
+component diagnostics from both latent-aware and reconstruction-only losses.
+
+Configured experiments additionally accept `kind: svd`. `FitLinearProjection` and
+`LinearProjectionVectors` own centered PCA and uncentered SVD behind the same fitted
+projection boundary. `FitPcaVectors` and `PcaVectors` retain their centered-only compatibility
+interfaces. Controls fit training rows only and can evaluate prefixes of one fitted basis.
+SVD fit counts, artifacts, and provenance remain distinct from PCA. Selection metadata is
+retained in reports; two-sided difference tests have a separate Holm family from
+non-inferiority and prespecified secondary tests. Confidence intervals remain unadjusted.
+
+The orthogonal experiment recipe is exploratory: the existing ten datasets have already
+informed model selection. Its launch scripts use `scripts/experiment-job.py`, a POSIX-only
+process supervisor outside ML workflow code. Foreground and background execution share
+an advisory per-output lock. Detached workers use nohup, a new session, disconnected stdin,
+timestamped logs, PID/child PID metadata, explicit thread settings, and exit-status records.
+The experiment child inherits the lock descriptor so a lost supervisor does not permit a
+duplicate writer. PID files are informational; lock ownership determines whether a launch
+is allowed. Existing experiment stage identity and hash checks govern resume.
+
+`retrieval_datasets` also provides the pinned `held-out-nano-v1` source inventory for
+ClimateFEVER, FEVER, and NQ. It uses the same Parquet-to-BEIR conversion command and
+source-manifest verification as `laptop-ae-v1`. The held-out confirmation recipe
+adds a matched `simple` MSE autoencoder and compares it with the orthogonal MSE model,
+PCA, and full Gemma embeddings; SVD and truncation remain contextual controls.
+`AnalyzeReductionMetricComparison` reads completed baseline and per-seed metric CSVs,
+requires complete 512D cells, averages seeds within datasets, and performs five
+separate eight-metric paired-test families with Holm correction. Its frozen margins
+and variant identities are supplied by the caller; analysis writes outside the
+immutable benchmark stage. The script in `scripts/analyze-reduction-metrics.py` is
+only a thin entrypoint for the experiment protocol.
+
+### Answer-level RAG reduction experiments
+
+`PrepareRagEvaluationDatasets` converts pinned SQuAD v2, HotpotQA, and FinQA
+sources into BEIR corpora, relevance judgments, answer labels, and a frozen
+generation subset. Source hashes and converted files are verified on reuse.
+The existing configured retrieval command produces embeddings, reduction
+checkpoints, exact-search rankings, and retrieval metrics for each embedding
+model. The `qwen3` retrieval formatter applies the upstream query instruction
+while leaving document text unprefixed.
+
+`EvaluateRagReduction` reads only completed rankings and injects a generator
+through its narrow `generate(prompt)` interface. `LlamaCppRagGenerator` owns
+the local GGUF chat integration and loads the model lazily. The evaluator
+uses identical prompt and context rules for every reduction, caches identical
+prompts across variants, and returns answer and gold-evidence proxy metrics.
+`AnalyzeRagReduction` calculates equal-dataset means and paired question
+bootstrap intervals conditional on the fixed datasets. CLI scripts under
+`scripts/` supply protocol paths and dependencies; RAG orchestration and
+statistics remain mode-owned rather than in the runners.
+
+## YOLOX MobileNet Drax architecture ablations
+
+LibreYOLO's YOLOX-Drax-MobileNetV3 wrapper owns the optional `architecture_variant`
+constructor preset. MLX extends the existing immutable model inventory with three
+L-size ablation aliases ending in `-refine-p3p4`, `-spp-p5`, and `-balanced-drax`,
+plus the integrated M-size `-pyramid-drax` candidate used for parameter-constrained
+comparisons. Its lazy factory injects the preset and rejects provider versions that
+would silently ignore it. Neural blocks, preprocessing, strict checkpoint reconstruction, class-count
+rebuilding, and distributed worker reconstruction remain provider-owned. The
+unchanged family is the default; variants require the matching LibreYOLO build.
+
+`TrainObjectDetectionRequest` adds optional `workers`, `eval_interval`,
+`no_aug_epochs`, and `patience` values, forwarded by the LibreYOLO boundary after
+non-negative integer validation. Omitted Python values preserve provider defaults.
+CLI `--workers` retains its existing default of four; `--eval-interval`,
+`--no-aug-epochs`, and `--patience` default to unset. Other providers retain their
+existing behavior. Research experiment supervisors compose these training and
+benchmark commands externally; they do not embed model logic in MLX runners.

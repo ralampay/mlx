@@ -12,6 +12,7 @@ from mlx.core.exceptions import MLXUserError
 from mlx.modes.segmentation.models.backbone_factory import (
     ClassificationBackboneFactory,
     build_default_classification_backbone,
+    build_skip_refiner,
 )
 
 
@@ -21,6 +22,7 @@ class BackboneSpec:
     encoder_family: str
     output_channels: tuple[int, ...]
     fusion_mode: str | None = None
+    skip_refiner: str | None = None
 
 
 BACKBONE_SPECS = {
@@ -92,6 +94,18 @@ BACKBONE_SPECS = {
         "drax_mobilenet",
         (16, 24, 40, 112, 960),
         "sknet",
+    ),
+    "unet-mobilenet_v3_large-skip-conv": BackboneSpec(
+        "mobilenet_v3_large", "mobilenet_skip", (16, 24, 40, 112, 960),
+        skip_refiner="conv",
+    ),
+    "unet-mobilenet_v3_large-skip-drax": BackboneSpec(
+        "mobilenet_v3_large", "mobilenet_skip", (16, 24, 40, 112, 960),
+        skip_refiner="drax",
+    ),
+    "unet-mobilenet_v3_large-skip-drax-balanced": BackboneSpec(
+        "mobilenet_v3_large", "mobilenet_skip", (16, 24, 40, 112, 960),
+        skip_refiner="balanced",
     ),
 }
 
@@ -216,6 +230,34 @@ class DraxMobileNetEncoder(SequentialStageEncoder):
         return outputs
 
 
+class SkipRefinedMobileNetEncoder(SequentialStageEncoder):
+    """Refine the 1/16-resolution skip without changing the base MobileNet stages."""
+
+    def __init__(self, model: nn.Module, output_channels: tuple[int, ...], *, refiner: str) -> None:
+        super().__init__(model.features, stage_ends=(1, 4, 7, 13, 17), output_channels=output_channels)
+        if refiner not in {"conv", "drax", "balanced"}:
+            raise ValueError(f"Unsupported MobileNet skip refiner '{refiner}'.")
+        width = 64
+        self.adapter_down = nn.Conv2d(output_channels[-2], width, kernel_size=1, bias=False)
+        self.adapter_norm = nn.BatchNorm2d(width)
+        self.adapter_activation = nn.Hardswish()
+        self.refiner = build_skip_refiner(
+            dim=width,
+            use_attention=refiner != "conv",
+            balanced_branch_scale=1e-3 if refiner == "balanced" else None,
+        )
+        self.adapter_up = nn.Conv2d(width, output_channels[-2], kernel_size=1, bias=False)
+        self.adapter_up_norm = nn.BatchNorm2d(output_channels[-2])
+
+    def forward(self, x: torch.Tensor) -> list[torch.Tensor]:
+        outputs = super().forward(x)
+        residual = outputs[-2]
+        refined = self.adapter_activation(self.adapter_norm(self.adapter_down(residual)))
+        refined = self.adapter_up_norm(self.adapter_up(self.refiner(refined)))
+        outputs[-2] = residual + refined
+        return outputs
+
+
 def _sequential_encoder(model, channels, *, stage_ends):
     return SequentialStageEncoder(model.features, stage_ends=stage_ends, output_channels=channels)
 
@@ -227,6 +269,7 @@ ENCODER_FACTORIES = MappingProxyType({
     "efficientnet": partial(_sequential_encoder, stage_ends=(1, 3, 4, 6, 9)),
     "convnext": partial(_sequential_encoder, stage_ends=(2, 4, 6, 8)),
     "drax_mobilenet": DraxMobileNetEncoder,
+    "mobilenet_skip": SkipRefinedMobileNetEncoder,
 })
 
 
@@ -262,6 +305,8 @@ def build_segmentation_encoder(
     encoder_factory = ENCODER_FACTORIES.get(spec.encoder_family)
     if encoder_factory is None:
         raise MLXUserError(f"U-Net backbone '{model_name}' has unsupported encoder family '{spec.encoder_family}'.")
+    if spec.skip_refiner is not None:
+        return encoder_factory(classifier, spec.output_channels, refiner=spec.skip_refiner)
     return encoder_factory(classifier, spec.output_channels)
 
 

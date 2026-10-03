@@ -21,6 +21,7 @@ class AutoencoderRepresentationTransformer:
         device: str = "cpu",
         trust_checkpoint_code: bool = False,
         registry: AutoencoderRegistry = DEFAULT_AUTOENCODER_REGISTRY,
+        output_dimensions: int | None = None,
     ) -> None:
         path, checkpoint = load_checkpoint(checkpoint_path)
         self._path = path
@@ -31,13 +32,20 @@ class AutoencoderRepresentationTransformer:
             trust_checkpoint_code=trust_checkpoint_code,
         )
 
+        full = int(checkpoint["bottleneck_dimensions"])
+        requested = full if output_dimensions is None else output_dimensions
+        prefixes = getattr(self._model, "reconstruction_prefixes", ())
+        if type(requested) is not int or requested < 1 or (requested != full and requested not in prefixes):
+            raise MLXUserError("Requested output prefix is not supported by this checkpoint.")
+        self._output_dimensions = requested
+
     @property
     def input_dimensions(self) -> int:
         return int(self._checkpoint["input_dimensions"])
 
     @property
     def output_dimensions(self) -> int:
-        return int(self._checkpoint["bottleneck_dimensions"])
+        return self._output_dimensions
 
     @property
     def provenance(self) -> Mapping[str, Any]:
@@ -53,6 +61,7 @@ class AutoencoderRepresentationTransformer:
                 self._checkpoint["expects_l2_normalized_input"]
             ),
             "loss": self._checkpoint.get("loss"),
+            "training_dimensions": self._checkpoint["bottleneck_dimensions"],
         }
 
     @torch.no_grad()
@@ -73,7 +82,7 @@ class AutoencoderRepresentationTransformer:
         if bool(self._checkpoint["expects_l2_normalized_input"]):
             values = l2_normalize_tensor(values)
         try:
-            encoded = self._model.encode(values)
+            encoded = self._model.encode(values)[:, :self.output_dimensions]
         except (RuntimeError, TypeError, ValueError) as exc:
             raise MLXUserError(f"Autoencoder encoding failed: {exc}") from exc
         if (

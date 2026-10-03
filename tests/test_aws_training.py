@@ -925,6 +925,7 @@ def test_submit_payload_uses_spot_and_shared_run_prefix(provider, model) -> None
     payload = json.loads(request["HyperParameters"]["mlx_training"])
     assert payload["model"] == model
     assert payload["provider"] == provider
+    assert request["HyperParameters"]["mlx_instance_type"] == "ml.g4dn.xlarge"
     assert request["EnableManagedSpotTraining"] is True
     assert request["StoppingCondition"]["MaxWaitTimeInSeconds"] == 172800
     assert request["CheckpointConfig"]["S3Uri"].endswith(
@@ -950,6 +951,44 @@ def test_submit_payload_uses_spot_and_shared_run_prefix(provider, model) -> None
     assert json.loads(service.sagemaker.request["HyperParameters"]["mlx_training"]) == (
         legacy_payload
     )
+
+
+@pytest.mark.parametrize(
+    "device,instance_type,cuda_available,expected",
+    [
+        ("auto", "ml.g4dn.2xlarge", True, "0"),
+        ("auto", "ml.m5.xlarge", False, "cpu"),
+        ("cpu", "ml.g4dn.2xlarge", False, "cpu"),
+        ("1", "ml.g4dn.2xlarge", True, "1"),
+    ],
+)
+def test_sagemaker_training_resolves_available_device(
+    monkeypatch, device, instance_type, cuda_available, expected
+) -> None:
+    import torch
+
+    monkeypatch.setattr(torch.cuda, "is_available", lambda: cuda_available)
+
+    assert RunSageMakerObjectDetectionTraining._resolve_device(
+        device, instance_type=instance_type
+    ) == expected
+
+
+@pytest.mark.parametrize(
+    "device,instance_type",
+    [("auto", "ml.g4dn.2xlarge"), ("0", "ml.g4dn.2xlarge")],
+)
+def test_sagemaker_training_rejects_unavailable_cuda(
+    monkeypatch, device, instance_type
+) -> None:
+    import torch
+
+    monkeypatch.setattr(torch.cuda, "is_available", lambda: False)
+
+    with pytest.raises(MLXUserError, match="CUDA is unavailable"):
+        RunSageMakerObjectDetectionTraining._resolve_device(
+            device, instance_type=instance_type
+        )
 
 
 def test_fine_tune_submit_adds_model_channel_and_manifest_identity() -> None:

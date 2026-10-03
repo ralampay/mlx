@@ -1,0 +1,112 @@
+{
+  "schema_version": 2,
+  "phase": "confirmation",
+  "datasets": [
+    "nfcorpus",
+    "scifact",
+    "nano-arguana",
+    "nano-fiqa2018",
+    "nano-scidocs",
+    "nano-touche2020",
+    "nano-quora",
+    "nano-dbpedia",
+    "nano-hotpotqa",
+    "nano-msmarco"
+  ],
+  "seeds": [
+    42,
+    43,
+    44,
+    45,
+    46
+  ],
+  "training": {
+    "hidden_dim": 512,
+    "epochs": 50,
+    "batch_size": 64,
+    "lr": 0.001,
+    "val_ratio": 0.2,
+    "device": "cpu"
+  },
+  "variants": [
+    {
+      "name": "orthogonal-mse",
+      "model": "orthogonal-tied",
+      "loss": "mse",
+      "dimensions": [
+        384,
+        512
+      ]
+    },
+    {
+      "name": "orthogonal-cosine",
+      "model": "orthogonal-tied",
+      "loss": "mse-cosine",
+      "dimensions": [
+        384,
+        512
+      ],
+      "loss_config": {
+        "cosine_weight": 1.0
+      }
+    },
+    {
+      "name": "pca",
+      "kind": "pca",
+      "dimensions": [
+        512
+      ],
+      "evaluation_dimensions": [
+        384,
+        512
+      ]
+    },
+    {
+      "name": "svd",
+      "kind": "svd",
+      "dimensions": [
+        512
+      ],
+      "evaluation_dimensions": [
+        384,
+        512
+      ]
+    },
+    {
+      "name": "truncate",
+      "kind": "truncate",
+      "dimensions": [
+        384,
+        512
+      ]
+    }
+  ],
+  "secondary": [
+    [
+      "orthogonal-cosine",
+      "orthogonal-mse"
+    ],
+    [
+      "orthogonal-mse",
+      "pca"
+    ],
+    [
+      "orthogonal-mse",
+      "svd"
+    ],
+    [
+      "orthogonal-cosine",
+      "pca"
+    ],
+    [
+      "orthogonal-cosine",
+      "svd"
+    ]
+  ],
+  "selection": {
+    "interpretation": "exploratory: all ten datasets have already informed model selection",
+    "primary_metric": "ndcg@10",
+    "noninferiority_margin": 0.01,
+    "loss_weight": "fixed before retrieval; cosine_weight=1, divided by input dimension"
+  }
+}

@@ -1,0 +1,27 @@
+version: 1
+
+aws:
+  region: ap-southeast-1
+  dataset_s3_uri: s3://mlx-object-detection-datasets/rsud20k-small.zip
+  checkpoint_s3_uri: s3://mlx-checkpoints
+  instance_type: ml.g4dn.2xlarge
+  volume_size_gb: 100
+  managed_spot: false
+  max_runtime_seconds: 14400
+  resource_prefix: mlx-od-quick
+
+training:
+  provider: libreyolo
+  epochs: 100
+  batch_size: 8
+  height: 640
+  width: 640
+  pretrained: false
+  random_seed: 42
+  validate_after_training: true
+  validation_split: val
+  validation_confidence: 0.001
+  validation_iou: 0.6
+  validation_max_detections: 300
+  eval_interval: 5
+  no_aug_epochs: 15

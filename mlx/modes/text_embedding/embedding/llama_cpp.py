@@ -16,10 +16,12 @@ class LlamaCppEmbeddingProvider:
         *,
         model_factory: Callable[..., Any] | None = None,
         pooling: str = "auto",
+        context_length: int | None = None,
     ) -> None:
         if pooling not in ("auto", "mean", "cls", "last", "none"):
             raise MLXUserError("--pooling must be one of: auto, mean, cls, last, none.")
         self.pooling_requested = pooling
+        self.context_length_requested = context_length
         path = Path(model_path).expanduser()
         if not path.is_file():
             raise MLXUserError(f"GGUF embedding model not found: {path}")
@@ -29,6 +31,10 @@ class LlamaCppEmbeddingProvider:
             )
         factory = model_factory or self._import_llama()
         options = {}
+        if context_length is not None:
+            if type(context_length) is not int or context_length < 1:
+                raise MLXUserError("Context length must be a positive integer.")
+            options.update(n_ctx=context_length, n_batch=context_length, n_ubatch=context_length)
         if pooling != "auto":
             try:
                 import llama_cpp
@@ -48,6 +54,11 @@ class LlamaCppEmbeddingProvider:
                 + self._pooling_guidance()
             ) from exc
         self._dimensions: int | None = None
+
+    def close(self) -> None:
+        close = getattr(self._model, "close", None)
+        if callable(close):
+            close()
 
     @staticmethod
     def _pooling_guidance() -> str:
@@ -80,6 +91,7 @@ class LlamaCppEmbeddingProvider:
         return {
             "pooling_effective": effective,
             "context_length": context_accessor() if callable(context_accessor) else None,
+            **({"truncation": "backend-token-prefix"} if self.context_length_requested is not None else {}),
             "llama_cpp_python_version": version,
         }
 

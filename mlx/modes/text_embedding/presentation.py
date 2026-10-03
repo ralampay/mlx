@@ -16,7 +16,10 @@ class RichTextEmbeddingReporter:
     def emit(self, event: WorkflowEvent) -> None:
         payload = event.payload if isinstance(event.payload, dict) else {}
         name = payload.get("event")
-        if name in {"text_embedding_progress", "text_embedding_benchmark_progress"}:
+        if name == "retrieval_stage":
+            self._stop()
+            console.print(event.message, markup=False)
+        elif name in {"text_embedding_progress", "text_embedding_benchmark_progress"}:
             phase = payload.get("phase", "benchmark")
             if self._progress is None:
                 self._progress = Progress(

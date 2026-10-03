@@ -27,6 +27,7 @@ The source is organized by responsibility:
 ## Supported Models
 
 - `unet`: basic U-Net for semantic segmentation
+- `unet-compact`: narrow U-Net with widths `(16, 32, 64, 128)`
 - `unet-resnet18`, `unet-resnet50`
 - `unet-densenet121`
 - `unet-mobilenet_v3_large`, `unet-efficientnet_b0`
@@ -35,11 +36,17 @@ The source is organized by responsibility:
 - `unet-draxnet-average`, `unet-draxnet-sknet`
 - `unet-drax_mobilenet_v3_large-average`,
   `unet-drax_mobilenet_v3_large-sknet`
+- `unet-mobilenet_v3_large-skip-conv`,
+  `unet-mobilenet_v3_large-skip-drax`,
+  `unet-mobilenet_v3_large-skip-drax-balanced`: 1/16-resolution skip refiners
 
 The backbone models reuse the corresponding image-classification feature
 extractors and replace their pooling/classification heads with a common U-Net
 decoder. Average and SKNet DRAX fusion are separate model identifiers so runs,
 checkpoints, and parameter counts remain unambiguous.
+
+The [KolektorSDD small DRAX study](kolektorsdd-drax-study.md) documents the
+scratch-trained CPU-focused comparison and its statistical analysis.
 
 ## Dataset Format
 
@@ -198,6 +205,7 @@ Important arguments:
 - `--num-classes`: number of output classes expected in the masks
 - `--class-names`: optional comma-separated names matching `--num-classes`
 - `--epochs`, `--batch-size`, `--device`, `--lr`: training controls
+- `--loss cross-entropy-dice`: two-class cross entropy plus foreground soft Dice
 - `--width`, `--height`: input dimensions used to build `input_size`
 - `--transform`: `resize` (default), `random-crop`, or `center-crop`
 

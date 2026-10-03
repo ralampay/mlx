@@ -12,6 +12,8 @@ from torch.utils.data import DataLoader, RandomSampler, SequentialSampler, Subse
 from mlx.core.artifacts import atomic_torch_save, write_csv, write_json_atomic
 from mlx.core.commands import NullWorkflowReporter, WorkflowReporter, emit
 from mlx.core.exceptions import MLXUserError
+from mlx.core.partitions import partition_rows, partition_hash
+from mlx.modes.autoencoder.objectives import build_objective
 from mlx.core.random import seed_everything
 from mlx.modes.autoencoder.contracts import validate_model, validate_loss
 from mlx.modes.autoencoder.adapter import AutoencoderRepresentationTransformer
@@ -76,6 +78,8 @@ class TrainAutoencoder:
 
     def execute(self) -> AutoencoderTrainingResult:
         self._validate_request()
+        if type(self.request.minimum_batch_size) is not int or self.request.minimum_batch_size not in (1, 2):
+            raise MLXUserError("Autoencoder minimum_batch_size must be 1 or 2.")
         seed_everything(self.request.random_seed)
         table = self.csv_loader.load(str(self.request.input_path))
         if self.request.input_dim is not None and self.request.input_dim != table.dimensions:
@@ -127,10 +131,25 @@ class TrainAutoencoder:
             criterion.to(self.request.device)
         except (RuntimeError, ValueError) as exc:
             raise MLXUserError(f"Unable to initialize autoencoder on device '{self.request.device}': {exc}") from exc
+        minimum_batch_size = getattr(criterion, "minimum_batch_size", 1)
+        if type(minimum_batch_size) is not int or minimum_batch_size not in (1, 2):
+            raise MLXUserError("Loss minimum_batch_size must be 1 or 2.")
+        minimum_batch_size = max(self.request.minimum_batch_size, minimum_batch_size)
         train_loader, validation_loader = self._loaders(
-            table.vectors, normalize_inputs,
-            minimum_batch_size=getattr(criterion, "minimum_batch_size", 1),
+            table.vectors, normalize_inputs, minimum_batch_size=minimum_batch_size,
         )
+        self._objective = build_objective(model, criterion, int(self.request.random_seed or 0))
+        self._epoch_components = {}
+        training_indices = train_loader.dataset.indices
+        validation_indices = validation_loader.dataset.indices
+        split_hash = partition_hash(training_indices, validation_indices)
+        initializer = getattr(model, "initialize_from_training_values", None)
+        if initializer is not None:
+            initializer(train_loader.dataset.dataset.values[sorted(training_indices)].to(self.request.device))
+        if hasattr(criterion, "calibrate"):
+            calibration_indices = sorted(training_indices)[:1024]
+            values = train_loader.dataset.dataset.values[calibration_indices].to(self.request.device)
+            criterion.calibrate(model, values)
         output_dir = prepare_output_directory(str(self.request.output_path))
         started_at = utc_timestamp()
         emit(
@@ -147,14 +166,18 @@ class TrainAutoencoder:
         best_loss = float("inf")
         best_epoch = 0
         best_checkpoint: dict[str, Any] | None = None
-        for epoch in range(1, self.request.epochs + 1):
-            train_loss = self._train_epoch(model, train_loader, criterion, optimizer)
+        for epoch in range(0 if initializer is not None else 1, self.request.epochs + 1):
+            train_loss = (self._validation_loss(model, train_loader, criterion) if epoch == 0 else
+                          self._train_epoch(model, train_loader, criterion, optimizer))
+            train_components = dict(self._epoch_components)
             validation_loss = self._validation_loss(model, validation_loader, criterion)
             row = {
                 "epoch": epoch,
                 "train_loss": train_loss,
                 "val_loss": validation_loss,
                 "learning_rate": float(optimizer.param_groups[0]["lr"]),
+                **{f"train_{k}": v for k, v in train_components.items()},
+                **{f"val_{k}": v for k, v in self._epoch_components.items()},
             }
             history.append(row)
             write_csv(output_dir / "training.csv", history)
@@ -175,6 +198,13 @@ class TrainAutoencoder:
                     best_epoch=best_epoch if self.request.use_best else epoch,
                     best_validation_loss=best_loss if self.request.use_best else validation_loss,
                     source_path=table.path,
+                )
+                best_checkpoint.update(
+                    initialization=getattr(model, "initialization_metadata", {}),
+                    calibration=getattr(criterion, "calibration", {}),
+                    split_hash=split_hash, seed=int(self.request.random_seed or 0),
+                    sampling_seed=int(self.request.random_seed or 0),
+                    validation_components=dict(self._epoch_components),
                 )
                 atomic_torch_save(best_checkpoint, output_dir / "autoencoder.pth")
             emit(
@@ -200,7 +230,12 @@ class TrainAutoencoder:
                 "best_epoch": best_checkpoint["best_epoch"],
                 "best_validation_loss": best_checkpoint["best_validation_loss"],
                 "seed": self.request.random_seed,
+                "minimum_batch_size": minimum_batch_size,
                 "device": self.request.device,
+                "split_hash": split_hash,
+                "initialization": getattr(model, "initialization_metadata", {}),
+                "calibration": getattr(criterion, "calibration", {}),
+                "validation_components": best_checkpoint["validation_components"],
             },
         )
         write_training_artifacts(
@@ -265,13 +300,11 @@ class TrainAutoencoder:
         if normalize_inputs:
             dataset.values = l2_normalize_tensor(dataset.values)
         generator = torch.Generator().manual_seed(int(self.request.random_seed or 0))
-        indices = torch.randperm(len(dataset), generator=generator).tolist()
-        validation_count = min(
-            len(dataset) - 1,
-            max(1, round(len(dataset) * float(self.request.val_ratio))),
+        train_indices, val_indices = partition_rows(
+            len(dataset), float(self.request.val_ratio), int(self.request.random_seed or 0), generator=generator,
         )
-        validation = Subset(dataset, indices[:validation_count])
-        training = Subset(dataset, indices[validation_count:])
+        validation = Subset(dataset, val_indices)
+        training = Subset(dataset, train_indices)
         if type(minimum_batch_size) is not int or minimum_batch_size not in (1, 2):
             raise MLXUserError("Autoencoder losses may request minimum_batch_size 1 or 2.")
         if minimum_batch_size == 2:
@@ -315,31 +348,38 @@ class TrainAutoencoder:
             ),
         )
 
-    @staticmethod
-    def _evaluate_loss(model, criterion, values):
-        if getattr(criterion, "requires_latent", False):
-            latent = model.encode(values)
-            return criterion(model.decode(latent), values, latent=latent)
-        return criterion(model(values), values)
-
     def _train_epoch(self, model, loader, criterion, optimizer) -> float:
         model.train()
         total = 0.0
         count = 0
+        components = {}
         for values in loader:
             values = values.to(self.request.device)
             optimizer.zero_grad()
             try:
-                loss = self._evaluate_loss(model, criterion, values)
+                evaluation = self._objective.evaluate(model, values, training=model.training)
+                loss = evaluation.loss
+                for key, value in evaluation.components.items():
+                    components[key] = components.get(key, 0.0) + float(value.detach()) * len(values)
             except (RuntimeError, TypeError, ValueError) as exc:
                 raise MLXUserError(f"Autoencoder training step failed: {exc}") from exc
             validate_loss(loss, training=True)
             loss.backward()
             optimizer.step()
+            projector = getattr(model, "project_parameters_", None)
+            if projector is not None:
+                try:
+                    projector()
+                except RuntimeError as exc:
+                    raise MLXUserError(f"Unable to enforce model parameter constraints: {exc}") from exc
             total += float(loss.item()) * values.shape[0]
             count += values.shape[0]
         if not count:
             raise MLXUserError("Autoencoder training partition is empty.")
+        self._epoch_components = {key: value / count for key, value in components.items()}
+        diagnostics = getattr(model, "training_diagnostics", None)
+        if diagnostics is not None:
+            self._epoch_components.update({key: float(value) for key, value in diagnostics().items()})
         return total / count
 
     @torch.no_grad()
@@ -347,10 +387,14 @@ class TrainAutoencoder:
         model.eval()
         total = 0.0
         count = 0
+        components = {}
         for values in loader:
             values = values.to(self.request.device)
             try:
-                loss = self._evaluate_loss(model, criterion, values)
+                evaluation = self._objective.evaluate(model, values, training=model.training)
+                loss = evaluation.loss
+                for key, value in evaluation.components.items():
+                    components[key] = components.get(key, 0.0) + float(value.detach()) * len(values)
             except (RuntimeError, TypeError, ValueError) as exc:
                 raise MLXUserError(f"Autoencoder validation step failed: {exc}") from exc
             validate_loss(loss, training=False)
@@ -358,6 +402,10 @@ class TrainAutoencoder:
             count += values.shape[0]
         if not count:
             raise MLXUserError("Autoencoder validation partition is empty.")
+        self._epoch_components = {key: value / count for key, value in components.items()}
+        diagnostics = getattr(model, "training_diagnostics", None)
+        if diagnostics is not None:
+            self._epoch_components.update({key: float(value) for key, value in diagnostics().items()})
         return total / count
 
 
@@ -386,6 +434,7 @@ class EmbedAutoencoder:
         transformer = self.transformer_factory(
             self.request.model_path, device=self.request.device,
             **({"trust_checkpoint_code": True} if self.request.trust_checkpoint_code else {}),
+            **({"output_dimensions": self.request.output_dim} if self.request.output_dim is not None else {}),
         )
         if table.dimensions != transformer.input_dimensions:
             raise MLXUserError(

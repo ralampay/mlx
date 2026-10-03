@@ -125,6 +125,9 @@ def _reject_options(name: str, config: Mapping[str, Any]) -> None:
 BUILTIN_LOSSES: Mapping[str, str] = MappingProxyType(
     {
         "mae": "mlx.modes.autoencoder.losses:MAELossDefinition",
+        "mse-least-volume": "mlx.modes.autoencoder.regularization:LeastVolumeLossDefinition",
+        "mse-covariance": "mlx.modes.autoencoder.regularization:CovarianceLossDefinition",
+        "mse-cosine": "mlx.modes.autoencoder.cosine_loss:MSECosineLossDefinition",
         "mse": "mlx.modes.autoencoder.losses:MSELossDefinition",
         "mse-similarity": "mlx.modes.autoencoder.losses:MSESimilarityLossDefinition",
         "smooth-l1": "mlx.modes.autoencoder.losses:SmoothL1LossDefinition",
@@ -137,8 +140,11 @@ class ReconstructionLossRegistry:
     entries: Mapping[str, str] = field(default_factory=lambda: BUILTIN_LOSSES)
     descriptions: Mapping[str, str] = field(default_factory=lambda: {
         "mae": MAELossDefinition.description, "mse": MSELossDefinition.description,
+        "mse-cosine": "MSE plus per-vector cosine reconstruction error, scaled by input width.",
         "smooth-l1": SmoothL1LossDefinition.description,
         "mse-similarity": MSESimilarityLossDefinition.description,
+        "mse-least-volume": "MSE plus calibrated latent volume; requires a constrained decoder.",
+        "mse-covariance": "MSE plus calibrated squared off-diagonal feature covariance.",
     })
 
     def __post_init__(self) -> None:

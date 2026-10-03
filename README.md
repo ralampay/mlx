@@ -443,8 +443,8 @@ on the required test split. Local or S3 ZIP datasets are supported; S3 data is s
 once for the complete batch. Per-model artifacts live below the output directory and
 root `all-models.json`/`leaderboard.csv` files summarize the comparison.
 
-Use `--model all-small` for the four registered segmentation models below 10 million
-parameters. Segmentation training also accepts `--transform resize` (the default),
+Use `--model all-small` for the original four-model comparison group, whose members
+are below 10 million parameters. Segmentation training also accepts `--transform resize` (the default),
 `--transform random-crop`, or `--transform center-crop`; random training crops use
 deterministic center crops for validation, test benchmarking, and samples.
 

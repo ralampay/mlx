@@ -30,12 +30,14 @@ class AutoencoderTrainRequest(AutoencoderRequest):
     val_ratio: Optional[float] = 0.2
     loss: str = "mse"
     loss_config: str | Mapping[str, Any] | None = None
+    minimum_batch_size: int = 1
     plots: bool = True
     use_best: bool = True
 
 
 @dataclass(frozen=True)
 class AutoencoderEmbedRequest(AutoencoderRequest):
+    output_dim: int | None = None
     trust_checkpoint_code: bool = False
     normalize_embeddings: bool = False
 

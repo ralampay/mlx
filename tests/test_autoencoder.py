@@ -146,11 +146,11 @@ def test_builtin_losses_are_correct_and_listed() -> None:
     assert mse(prediction, target).item() == pytest.approx(2.0)
     assert mae(prediction, target).item() == pytest.approx(1.0)
     assert smooth(prediction, target).item() == pytest.approx(0.75)
-    assert DEFAULT_LOSS_REGISTRY.names() == ("mae", "mse", "mse-similarity", "smooth-l1")
+    assert DEFAULT_LOSS_REGISTRY.names() == ("mae", "mse", "mse-cosine", "mse-covariance", "mse-least-volume", "mse-similarity", "smooth-l1")
     assert [item["name"] for item in ListAutoencoderLosses().execute()] == [
-        "mae", "mse", "mse-similarity", "smooth-l1"
+        "mae", "mse", "mse-cosine", "mse-covariance", "mse-least-volume", "mse-similarity", "smooth-l1"
     ]
-    assert [item["name"] for item in ListAutoencoderModels().execute()] == ["simple", "tiny"]
+    assert [item["name"] for item in ListAutoencoderModels().execute()] == ["ordered-simple", "orthogonal-tied", "simple", "simple-spectral", "tiny"]
 
 
 def test_external_model_and_loss_definition_import_paths(monkeypatch) -> None:

@@ -13,6 +13,14 @@ from mlx.modes.object_detection.aws.commands import (
     WatchAwsObjectDetectionTraining,
 )
 from mlx.modes.object_detection.aws.config import load_aws_training_config
+from mlx.modes.object_detection.aws.comparison import (
+    AdvanceDetectionComparison,
+    GetDetectionComparisonStatus,
+    LaunchDetectionComparisonTest,
+    SubmitDetectionComparison,
+    WatchDetectionComparison,
+    comparison_models,
+)
 from mlx.modes.object_detection.aws.presentation import render_aws_result
 from mlx.modes.object_detection.aws.service import SageMakerTrainingService
 
@@ -25,6 +33,35 @@ def run_aws_object_detection(config: dict[str, Any]) -> Any:
     service = SageMakerTrainingService(aws_config)
     action = config.get("action") or "train"
     output_format = str(config.get("output_format") or "table")
+
+    if action in {"compare-models", "comparison-status", "comparison-test"}:
+        if action == "compare-models":
+            models = comparison_models(
+                str(config_path), provider=aws_config.training.provider,
+                selected=config.get("models"),
+            )
+            result = SubmitDetectionComparison(
+                service, models, experiment_id=config.get("experiment_id")
+            ).execute()
+        else:
+            experiment_id = str(config.get("experiment_id") or "").strip()
+            if not experiment_id:
+                raise MLXUserError(f"AWS action '{action}' requires --experiment-id.")
+            if action == "comparison-test":
+                result = LaunchDetectionComparisonTest(service, experiment_id).execute()
+            else:
+                status = GetDetectionComparisonStatus(service, experiment_id)
+                if config.get("watch"):
+                    result = WatchDetectionComparison(
+                        status,
+                        interval=float(config.get("poll_interval") or 30.0),
+                        on_status=lambda value: render_aws_result(value, output_format=output_format),
+                        advance=AdvanceDetectionComparison(service, experiment_id),
+                    ).execute()
+                    return result
+                result = status.execute()
+        render_aws_result(result, output_format=output_format)
+        return result
 
     if action == "train":
         result = SubmitAwsObjectDetectionTraining(service).execute()
@@ -59,7 +96,8 @@ def run_aws_object_detection(config: dict[str, Any]) -> Any:
     else:
         raise MLXUserError(
             f"Unsupported AWS object-detection action '{action}'. "
-            "Available actions: best-model, fine-tune, resume, status, stop, train."
+            "Available actions: best-model, compare-models, comparison-status, "
+            "comparison-test, fine-tune, resume, status, stop, train."
         )
 
     render_aws_result(result, output_format=output_format)

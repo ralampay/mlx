@@ -158,12 +158,22 @@ class DraxBlock(nn.Module):
         efficient: bool = True,
         drop_path: float = 0.0,
         fusion_mode: str = "average",
+        balanced_branch_scale: float | None = None,
     ) -> None:
         super().__init__()
         self.use_attention = use_attention
         self.efficient = efficient
         self.fusion_mode = resolve_drax_fusion_mode(fusion_mode)
-        self.convnext = ConvNeXtBlock(dim)
+        if balanced_branch_scale is not None and balanced_branch_scale <= 0:
+            raise ValueError("balanced_branch_scale must be positive.")
+        self.convnext = ConvNeXtBlock(
+            dim,
+            layer_scale_init_value=balanced_branch_scale or 1e-6,
+        )
+        self.attention_scale = (
+            nn.Parameter(torch.full((dim,), balanced_branch_scale))
+            if use_attention and balanced_branch_scale is not None else None
+        )
         self.drop_path = DropPath(drop_path)
 
         if use_attention and self.fusion_mode == "sknet":
@@ -204,6 +214,9 @@ class DraxBlock(nn.Module):
             attention_delta = self.attn_up(self.attention(reduced) - reduced)
         else:
             attention_delta = self.attention(x) - x
+
+        if self.attention_scale is not None:
+            attention_delta = attention_delta * self.attention_scale.view(1, -1, 1, 1)
 
         fused_delta = self._fuse_deltas(conv_delta, attention_delta)
         return x + self.drop_path(fused_delta)

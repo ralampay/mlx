@@ -2,17 +2,16 @@ from __future__ import annotations
 
 import hashlib
 import json
-import os
 import shutil
 import signal
 import sys
 from pathlib import Path
 from typing import Any, Mapping, Optional
+from urllib.parse import urlparse
 
 from mlx.core.commands import CallbackWorkflowReporter, WorkflowEvent
-from mlx.core.datasets import extract_zip_safely
-from mlx.modes.object_detection.data import object_detection_dataset_root
 from mlx.core.exceptions import MLXUserError
+from mlx.modes.object_detection.aws.dataset import extract_sagemaker_dataset
 from mlx.modes.object_detection.aws.checkpoints import (
     RotatingCheckpointPublisher,
     find_valid_recovery_checkpoint,
@@ -104,7 +103,10 @@ class RunSageMakerObjectDetectionTraining:
                 "dataset_path": str(dataset_root),
                 "output_path": str(self.work_dir),
                 "run_name": run_name,
-                "device": self._resolve_device(str(training.get("device") or "auto")),
+                "device": self._resolve_device(
+                    str(training.get("device") or "auto"),
+                    instance_type=str(hyperparameters.get("mlx_instance_type") or ""),
+                ),
                 "save_period": -1,
             }
         )
@@ -131,6 +133,7 @@ class RunSageMakerObjectDetectionTraining:
             result = training_command(request, reporter=reporter).execute()
             self._publisher.publish_now()
             self._stage_model_artifacts(result, training)
+            self._publish_comparison_validation(result, hyperparameters)
             return result
         finally:
             signal.signal(signal.SIGTERM, previous_handler)
@@ -186,21 +189,10 @@ class RunSageMakerObjectDetectionTraining:
         return value
 
     def _extract_dataset(self, *, max_uncompressed_bytes: Optional[int] = None) -> Path:
-        archives = sorted(path for path in self.input_dir.rglob("*.zip") if path.is_file())
-        if len(archives) != 1:
-            raise MLXUserError(
-                f"Expected exactly one dataset ZIP in {self.input_dir}; found {len(archives)}."
-            )
-        archive = archives[0]
-        if self.dataset_dir.exists():
-            shutil.rmtree(self.dataset_dir)
-        self.dataset_dir.mkdir(parents=True)
-        extract_zip_safely(
-            archive,
-            self.dataset_dir,
+        return extract_sagemaker_dataset(
+            self.input_dir, self.dataset_dir,
             max_uncompressed_bytes=max_uncompressed_bytes,
         )
-        return object_detection_dataset_root(self.dataset_dir)
 
     def _resolve_initial_model(self) -> Path:
         candidates = sorted(
@@ -214,10 +206,19 @@ class RunSageMakerObjectDetectionTraining:
         return candidates[0].resolve()
 
     @staticmethod
-    def _resolve_device(value: str) -> str:
-        if value != "auto":
+    def _resolve_device(value: str, *, instance_type: str = "") -> str:
+        if value == "cpu":
             return value
-        return "0" if int(os.environ.get("SM_NUM_GPUS", "0")) > 0 else "cpu"
+        import torch
+
+        if torch.cuda.is_available():
+            return "0" if value == "auto" else value
+        if value != "auto" or instance_type.startswith(("ml.g", "ml.p")):
+            raise MLXUserError(
+                f"CUDA is unavailable in the SageMaker training container on {instance_type or 'this instance'}. "
+                "Check the GPU driver and container CUDA compatibility before retrying."
+            )
+        return "cpu"
 
     @staticmethod
     def _compatibility_fingerprint(
@@ -270,10 +271,41 @@ class RunSageMakerObjectDetectionTraining:
             encoding="utf-8",
         )
 
+    @staticmethod
+    def _publish_comparison_validation(result: Any, hyperparameters: Mapping[str, Any]) -> None:
+        uri = hyperparameters.get("mlx_comparison_validation_s3_uri")
+        if not uri:
+            return
+        benchmark = getattr(result, "benchmark_result", None)
+        if benchmark is None:
+            raise MLXUserError("Comparison training did not produce validation metrics.")
+        import boto3
+
+        parsed = urlparse(str(uri))
+        payload = {
+            "split": benchmark.split,
+            "metrics": dict(benchmark.metrics),
+            "checkpoint_path": str(getattr(result, "checkpoint_path", "")),
+        }
+        try:
+            boto3.client("s3").put_object(
+                Bucket=parsed.netloc,
+                Key=parsed.path.lstrip("/"),
+                Body=json.dumps(payload, sort_keys=True).encode(),
+                ContentType="application/json",
+            )
+        except Exception as exc:
+            raise MLXUserError(f"Unable to publish comparison validation metrics to {uri}: {exc}") from exc
+
 
 def main() -> int:
     try:
-        RunSageMakerObjectDetectionTraining().execute()
+        hyperparameters = RunSageMakerObjectDetectionTraining()._load_hyperparameters()
+        if "mlx_comparison_test" in hyperparameters:
+            from mlx.modes.object_detection.aws.comparison_entrypoint import RunSageMakerDetectionComparisonTest
+            RunSageMakerDetectionComparisonTest(hyperparameters=hyperparameters).execute()
+        else:
+            RunSageMakerObjectDetectionTraining().execute()
     except KeyboardInterrupt:
         return 143
     except MLXUserError as exc:

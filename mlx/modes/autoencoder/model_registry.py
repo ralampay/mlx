@@ -9,7 +9,10 @@ from mlx.modes.autoencoder.contracts import AutoencoderDefinition
 BUILTIN_AUTOENCODERS: Mapping[str, str] = MappingProxyType(
     {
         "simple": "mlx.modes.autoencoder.models:SimpleAutoencoderDefinition",
+        "orthogonal-tied": "mlx.modes.autoencoder.architectures.orthogonal:OrthogonalTiedDefinition",
         "tiny": "mlx.modes.autoencoder.architectures.tiny:TinyAutoencoderDefinition",
+        "simple-spectral": "mlx.modes.autoencoder.architectures.structured:SpectralAutoencoderDefinition",
+        "ordered-simple": "mlx.modes.autoencoder.architectures.structured:OrderedAutoencoderDefinition",
     }
 )
 
@@ -19,7 +22,10 @@ class AutoencoderRegistry:
     entries: Mapping[str, str] = field(default_factory=lambda: BUILTIN_AUTOENCODERS)
     descriptions: Mapping[str, str] = field(default_factory=lambda: {
         "simple": "Symmetric GELU MLP with a linear bottleneck and reconstruction output.",
+        "orthogonal-tied": "Orthogonal tied linear projection with training-only SVD initialization.",
         "tiny": "Two linear layers demonstrating the vector autoencoder contract.",
+        "simple-spectral": "GELU MLP with spectrally normalized decoder linear layers.",
+        "ordered-simple": "GELU MLP trained to reconstruct supported latent prefixes.",
     })
 
     def __post_init__(self) -> None:

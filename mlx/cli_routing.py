@@ -38,7 +38,7 @@ MODE_DESCRIPTORS: tuple[ModeDescriptor, ...] = (
         aliases=("object-detection",),
         runner="mlx.modes.object_detection.runner:run_object_detection",
         default_action="train",
-        actions=("train", "fine-tune", "benchmark", "best-model", "resume", "status", "stop", "convert", "infer-camera", "infer-video", "ls-models"),
+        actions=("train", "fine-tune", "benchmark", "best-model", "resume", "status", "stop", "compare-models", "comparison-status", "comparison-test", "convert", "infer-camera", "infer-video", "ls-models"),
         purpose="Provider-backed detection training, evaluation, and inference",
     ),
     ModeDescriptor(
@@ -94,7 +94,7 @@ MODE_DESCRIPTORS: tuple[ModeDescriptor, ...] = (
         aliases=("text-embedding", "nlp"),
         runner="mlx.modes.text_embedding.runner:run_text_embedding",
         default_action="embed",
-        actions=("embed", "benchmark", "ls-metrics", "ls-vector-stores", "ls-embedding-backends"),
+        actions=("embed", "benchmark", "ls-metrics", "ls-vector-stores", "ls-embedding-backends", "prepare-datasets", "benchmark-autoencoders", "select-autoencoder-settings"),
         purpose="GGUF text embedding and retrieval benchmarking workflows",
     ),
 )

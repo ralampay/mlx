@@ -39,7 +39,21 @@ def build_default_classification_backbone(
     )
 
 
+def build_skip_refiner(
+    *, dim: int, use_attention: bool, balanced_branch_scale: float | None
+) -> nn.Module:
+    """Adapt the shared Drax block for segmentation skip refinement."""
+    from mlx.modes.image_classification.models.blocks import DraxBlock
+
+    return DraxBlock(
+        dim=dim,
+        use_attention=use_attention,
+        balanced_branch_scale=balanced_branch_scale,
+    )
+
+
 __all__ = [
     "ClassificationBackboneFactory",
     "build_default_classification_backbone",
+    "build_skip_refiner",
 ]

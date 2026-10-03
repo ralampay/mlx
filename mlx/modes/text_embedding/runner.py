@@ -107,8 +107,66 @@ def _list_components(config):
     return result
 
 
+def _prepare_datasets(config):
+    from mlx.modes.text_embedding.retrieval_datasets import PrepareRetrievalDatasets
+    return PrepareRetrievalDatasets(config["dataset_path"], suite=config.get("suite", "laptop-ae-v1"), reporter=_reporter(config)).execute()
+
+
+def _benchmark_autoencoders(config):
+    from dataclasses import fields
+    from mlx.modes.autoencoder.commands import TrainAutoencoder
+    from mlx.modes.autoencoder.requests import AutoencoderTrainRequest
+    from mlx.modes.autoencoder.adapter import AutoencoderRepresentationTransformer
+    from mlx.modes.autoencoder.presentation import RichAutoencoderReporter
+    from mlx.modes.text_embedding.experiment import BenchmarkAutoencoderRetrieval
+    from mlx.modes.text_embedding.experiment_requests import AutoencoderRetrievalRequest
+
+    defaults = AutoencoderRetrievalRequest()
+    values = {field.name: getattr(defaults, field.name) for field in fields(defaults) if field.name != "extras"}
+    explicit = config.get("_explicit_options", set())
+    values.update({key: config[key] for key in values if key in explicit})
+    for name in ("bottleneck_dims", "seeds", "k_values"):
+        if isinstance(values[name], str):
+            try:
+                values[name] = tuple(int(item.strip()) for item in values[name].split(","))
+            except ValueError as exc:
+                raise MLXUserError(f"--{name.replace('_', '-')} requires comma-separated integers.") from exc
+    for name in ("losses", "metrics"):
+        if isinstance(values[name], str):
+            values[name] = tuple(item.strip() for item in values[name].split(","))
+    if values.get("experiment_config"):
+        conflicts = set(explicit) & {"autoencoder_model", "losses", "bottleneck_dims", "similarity_weight", "seeds"}
+        if conflicts:
+            raise MLXUserError("--experiment-config conflicts with explicit variant flags: " + ", ".join(sorted(conflicts)))
+    values["extras"] = {"explicit_options": sorted(explicit)}
+    request = AutoencoderRetrievalRequest(**values)
+    from mlx.modes.autoencoder.models import DEFAULT_AUTOENCODER_REGISTRY
+    DEFAULT_AUTOENCODER_REGISTRY.resolve(request.autoencoder_model)
+    training_reporter = NullWorkflowReporter() if config.get("output_format") == "json" else RichAutoencoderReporter()
+    from mlx.modes.autoencoder.data import EmbeddingCsvLoader
+    from mlx.modes.autoencoder.objectives import validate_training_variant
+    return BenchmarkAutoencoderRetrieval(
+        request, reporter=_reporter(config),
+        training_factory=lambda options: TrainAutoencoder(AutoencoderTrainRequest(**options), reporter=training_reporter),
+        transformer_factory=lambda path, **options: AutoencoderRepresentationTransformer(path, **{"device": request.device, **options}),
+        vector_loader=EmbeddingCsvLoader(), variant_validator=validate_training_variant,
+    ).execute()
+
+
+def _select_autoencoder_settings(config):
+    from mlx.modes.text_embedding.experiment_selection import SelectAutoencoderExperimentSettings
+    from mlx.core.commands import emit
+    if not config.get("input_path") or not config.get("output_path"):
+        raise MLXUserError("Settings selection requires --input pilot-directory and --output new-directory.")
+    result = SelectAutoencoderExperimentSettings(config["input_path"], config["output_path"]).execute()
+    emit(_reporter(config), "success", f"Frozen confirmation config: {result['config']}", payload={"event": "retrieval_stage"})
+    return result
+
+
 ACTION_HANDLERS = {
     "embed": _embed, "benchmark": _benchmark,
+    "select-autoencoder-settings": _select_autoencoder_settings,
+    "prepare-datasets": _prepare_datasets, "benchmark-autoencoders": _benchmark_autoencoders,
     "ls-metrics": _list_components, "ls-vector-stores": _list_components,
     "ls-embedding-backends": _list_components,
 }

@@ -34,6 +34,9 @@ MODEL_SPECS = MappingProxyType({
         )
         for size in sizes
     },
+    "yolox-drax-csp-m": LibreYOLOModelSpec(
+        size="m", constructor_name="LibreYOLOXDraxCSPM",
+    ),
 })
 CANONICAL_MODEL_NAMES = tuple(MODEL_SPECS)
 DATASET_ALIASES = {

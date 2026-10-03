@@ -417,7 +417,8 @@ def test_libreyolo_listing_builds_canonical_configurations(monkeypatch) -> None:
     )
 
     for constructor in (
-        "LibreYOLOX", "LibreYOLO9DraxMobileNetV3Large", "LibreYOLOXDraxMobileNetV3Large"
+        "LibreYOLOX", "LibreYOLO9DraxMobileNetV3Large", "LibreYOLOXDraxMobileNetV3Large",
+        "LibreYOLOXDraxCSPM",
     ):
         setattr(sys.modules["libreyolo"], constructor, FakeYOLO9)
     summaries = ListLibreYOLOModels().execute()
@@ -429,7 +430,7 @@ def test_libreyolo_listing_builds_canonical_configurations(monkeypatch) -> None:
         ModelParameterSummary("yolo9-c", 8),
         ModelParameterSummary("yolo9-s-drax-b5", 8),
     ]
-    assert len(summaries) == 21
+    assert len(summaries) == 22
     assert {summary.model_name for summary in summaries} == {case[0] for case in _MODEL_CASES}
     assert all(summary.parameter_count == 8 for summary in summaries)
     assert [call["size"] for call in calls[:5]] == ["t", "s", "m", "c", "s"]
@@ -506,6 +507,7 @@ _MODEL_CASES = [
         ("yolox", "LibreYOLOX", "ntsmlx"),
         ("yolo9-drax-mobilenet-v3-large", "LibreYOLO9DraxMobileNetV3Large", "tsmc"),
         ("yolox-drax-mobilenet-v3-large", "LibreYOLOXDraxMobileNetV3Large", "ntsmlx"),
+        ("yolox-drax-csp", "LibreYOLOXDraxCSPM", "m"),
     )
     for size in sizes
 ] + [("yolo9-s-drax-b5", "LibreYOLO9", "s")]
@@ -551,9 +553,9 @@ def test_invalid_libreyolo_alias_is_actionable(alias):
         resolve_model_spec(alias)
 
 
-def test_missing_variant_class_requests_release_update(monkeypatch, tmp_path):
+def test_missing_variant_class_requests_provider_build(monkeypatch, tmp_path):
     _install_fake_libreyolo(monkeypatch, LibreYOLO=lambda **kw: None)
-    with pytest.raises(MLXUserError, match="LibreYOLOXDraxMobileNetV3Large.*release"):
+    with pytest.raises(MLXUserError, match="LibreYOLOXDraxMobileNetV3Large.*LibreYOLO build"):
         TrainLibreYOLOObjectDetection({
             "model": "yolox-drax-mobilenet-v3-large-s", "dataset_path": "coco8",
             "output_path": str(tmp_path),

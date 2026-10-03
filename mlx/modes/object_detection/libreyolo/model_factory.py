@@ -21,8 +21,8 @@ def build_scratch_model(spec: LibreYOLOModelSpec, *, device: str) -> Any:
     except (AttributeError, ImportError) as exc:
         raise MLXUserError(
             f"The installed LibreYOLO does not expose {spec.constructor_name}. "
-            "Update the ralampay/libreyolo release dependency with './update.sh' "
-            "from the MLX repository and try again."
+            "Install a LibreYOLO build that provides this model, or point "
+            "PYTHONPATH at its local checkout, and try again."
         ) from exc
 
     kwargs = {"model_path": None, "size": spec.size, "device": device, "task": "detect"}

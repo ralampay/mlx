@@ -299,9 +299,12 @@ provider-local `model_factory.build_scratch_model` construction boundary. The in
 public library classes: `LibreYOLO9` for `yolo9-{t,s,m,c}` and `yolo9-s-drax-b5`, `LibreYOLOX`
 for `yolox-{n,t,s,m,l,x}`, `LibreYOLO9DraxMobileNetV3Large` for
 `yolo9-drax-mobilenet-v3-large-{t,s,m,c}`, and `LibreYOLOXDraxMobileNetV3Large` for
-`yolox-drax-mobilenet-v3-large-{n,t,s,m,l,x}`. New architectures extend this inventory rather than
+`yolox-drax-mobilenet-v3-large-{n,t,s,m,l,x}`, and `LibreYOLOXDraxCSPM` for
+`yolox-drax-csp-m`. This scratch model retains the YOLOX-M CSPDarknet backbone with
+a P3 spatial refiner, a P5 Drax block, and a narrower PAN/head. New architectures
+extend this inventory rather than
 adding selection branches to training or listing commands. Missing public classes raise an
-actionable release-update error; importing MLX does not import the provider library.
+actionable provider-build error; importing MLX does not import the provider library.
 
 Only `yolo9-s-drax-b5` receives `DraxConfig`: B5 only, attention and efficient mode enabled,
 average fusion, and zero drop path. MobileNet variants own their fixed Drax configuration in

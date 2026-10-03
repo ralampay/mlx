@@ -268,9 +268,10 @@ With `--provider libreyolo`, first-class training and listing use these aliases:
 - `yolox-{n,t,s,m,l,x}`
 - `yolo9-drax-mobilenet-v3-large-{t,s,m,c}`
 - `yolox-drax-mobilenet-v3-large-{n,t,s,m,l,x}`
+- `yolox-drax-csp-m`
 
 Braces denote supported explicit size suffixes, for example `yolox-n` or
-`yolo9-drax-mobilenet-v3-large-s`. Listing reports all 21 individual aliases.
+`yolo9-drax-mobilenet-v3-large-s`. Listing reports all 22 individual aliases.
 The MobileNet variants use LibreYOLO's `LibreYOLO9DraxMobileNetV3Large` and
 `LibreYOLOXDraxMobileNetV3Large` classes. Their fixed Drax MobileNetV3 Large backbone
 retains the selected detector's neck/head. With `--pretrained`, training initializes

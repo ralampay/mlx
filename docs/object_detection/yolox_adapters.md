@@ -1,75 +1,181 @@
-# YOLOX-L adapter experiment
+# YOLOX-L adapter study
 
-The experiment always starts each condition from the strict-loaded standard
-YOLOX-L checkpoint `~/Desktop/object-detection-models/foundational-yolox-l.pt`.
-The checkpoint has six classes in this order: person, bicycle, motorcycle,
-car, bus, truck. Its names match the prepared ACDC dataset without remapping.
-No new foundation model or detection head is constructed.
+This local-CUDA study always starts from
+`~/Desktop/object-detection-models/foundational-yolox-l.pt`. The standard
+LibreYOLO YOLOX-L model is instantiated first, the checkpoint is loaded
+strictly, and only then are foundation parameters frozen and adapters injected.
+The six classes are, in ID order: person, bicycle, motorcycle, car, bus, truck.
+No detector classes or checkpoint tensor shapes are changed.
 
-The selected source is `~/Desktop/datasets/object-detection/eval2` (ACDC,
-349 images, 2,146 boxes, about 639 MiB). Its source folder has one prepared
-test split. `adapter-prepare` makes a seed-42, sequence-disjoint research
-train/validation/test split with symlinks, preserving source files. The split
-is recorded in `output/dataset/manifest.json`. The sequence-level split
-reduces near-neighbor frame leakage. Exact independence from the foundation
-training corpus remains unverified. Rare bicycle and motorcycle classes have
-few validation examples; per-class conclusions should be cautious.
+LibreYOLO owns the generic PyTorch adapter modules, registry, injection, YOLOX
+placement policy, and strict checkpoint compatibility. MLX owns DAWN conversion,
+local CUDA execution, training, evaluation, timing/memory measurements, seeds,
+serialization, and aggregation. See `ARCHITECTURE.md` and LibreYOLO's
+`docs/yolox_feature_adapters.md` for implementation details and literature.
 
-The prepared ACDC annotations use the foundation class order directly.
-The source ACDC category IDs had already been mapped as 24/25→person,
-33→bicycle, 32→motorcycle, 26→car, 28→bus, and 27→truck. No detection
-head resizing or further class remapping occurs in the adapter experiment.
+## Dataset
 
-The default adapter placement is the three YOLOX neck outputs. Default
-training uses AdamW, batch size 2, 640x640 images, a fixed seed, and no
-mosaic or mixup. Use 1 epoch to smoke test and 12 epochs for an exploratory
-run. The frozen method evaluates immediately and runs automatically before any
-adapted method unless a matching frozen run already exists. All methods use the same
-prepared split and validation path. This is an exploratory comparison, not a
-publication-grade experiment; later multi-seed runs can use
-`--experiment-seeds 1,2,3,4,5`. Reports show per-method performance and
-paired Drax differences, with descriptive 95% intervals when more than one
-paired seed is available. A future non-inferiority analysis needs a
-prespecified margin and a powered design.
+The selected target is DAWN v3, downloaded under
+`~/Desktop/datasets/object-detection/dawn/original` and converted without
+changing the source files into `processed`. DAWN has the exact six foundation
+classes and a meaningful rain/fog/snow/sand domain shift. The seed-42 split is
+deterministic, exact-size, class/weather balanced, and recorded in
+`processed/manifest.json`:
 
-COCO mAP50 and mAP50-95 come from LibreYOLO validation. The experiment
-separately computes class-aware micro precision and recall at score 0.25 and
-IoU 0.50 because LibreYOLO's legacy `precision` and `recall` result keys
-alias AP and AR rather than a fixed operating point. Recorded forward latency
-is batch-1 raw-model time after warmup, excluding decode and NMS.
+| Split | Images | Boxes | person | bicycle | motorcycle | car | bus | truck |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+| train | 719 | 5,566 | 329 | 18 | 56 | 4,567 | 113 | 483 |
+| validation | 154 | 1,131 | 79 | 4 | 13 | 940 | 19 | 76 |
+| test | 154 | 1,148 | 69 | 4 | 12 | 947 | 29 | 87 |
 
-See `python -m mlx --help` for options and `libreyolo/docs/yolox_feature_adapters.md`
-for architecture, parameter formulas and literature references.
+DAWN does not publish capture-sequence identifiers, so near-frame leakage
+cannot be excluded. Bicycle and motorcycle are rare, making their per-class
+estimates high variance. The foundation corpus included COCO, BDD100K,
+VisDrone, MOT17/MOT20, and PCB; those were not reused as the target. Other
+candidates considered were ACDC (excellent fit but a 15.6 GB RGB download),
+ExDark (no truck), Cityscapes (login and instance conversion), and KITTI
+(cyclist semantics do not preserve the six-class mapping).
+
+## Experimental defaults and measured smoke result
+
+The default placement is the three YOLOX neck outputs at strides 8, 16, and 32.
+This exposes every detection scale while keeping the backbone and head frozen.
+The measured RTX 3060 calibration probed batches 1, 2, 4, and 8 for both Drax
+and full fine-tuning with AMP. Both selected the intentionally capped batch 8;
+the worst probe peak was 4,711.8 MiB. Real one-epoch Drax training peaked at
+1,458.1 MiB allocated. The study uses physical/effective batch 8, AdamW,
+640x640 inputs, no mosaic or mixup, and seed 42.
+
+The one-epoch smoke run took 29.47 seconds for 719 images (24.39 images/s),
+including validation. It had exact initialization identity, finite loss 3.3070,
+unchanged frozen parameters, changed adapter parameters, and wrote a 1.35 MiB
+adapter-only checkpoint. Its test metrics were mAP50 0.6527 and mAP50-95 0.4079;
+one warmup epoch is an integration check, not evidence of adaptation benefit.
+The frozen test metrics were 0.6528 and 0.4080. Fixed score-0.25/IoU-0.50
+precision and recall were 0.7354 and 0.7796 for both at this short horizon.
+
+Twenty epochs are recommended for the first exploratory runs. At measured Drax
+throughput that is about 9.8 minutes per run; allow roughly 1.3 hours for all
+eight trainable conditions plus the frozen baseline and about 6.6 hours for
+five seeds. These are linear estimates; other methods can differ in throughput.
 
 ## Commands
 
-Run from the MLX checkout with LibreYOLO importable. `--checkpoint` aliases
-the existing `--model-path` option; for YOLOX-L it defaults to the foundation
-checkpoint shown below.
-Other YOLOX sizes can be selected with an explicit, size-matched checkpoint;
-the initial study and default checkpoint remain YOLOX-L.
+Run from the MLX checkout after activating its environment. Every research
+command explicitly requests CUDA; a missing CUDA runtime aborts before training.
 
 ```bash
-python -m mlx --mode object-detection --action adapter-verify --model yolox-l --format json
-python -m mlx --mode object-detection --action adapter-prepare --model yolox-l \
-  --dataset ~/Desktop/datasets/object-detection/eval2 --output ./results/yolox-l-adapters
-python -m mlx --mode object-detection --action adapter-experiment --model yolox-l \
-  --methods frozen --dataset ~/Desktop/datasets/object-detection/eval2 \
-  --output ./results/yolox-l-adapters --device cuda:0 --batch-size 2 --seed 42
-python -m mlx --mode object-detection --action adapter-experiment --model yolox-l \
-  --adapter drax --dataset ~/Desktop/datasets/object-detection/eval2 \
-  --output ./results/yolox-l-drax-smoke --device cuda:0 --batch-size 2 --epochs 1 --seed 42
-python -m mlx --mode object-detection --action adapter-experiment --model yolox-l \
-  --adapter drax --dataset ~/Desktop/datasets/object-detection/eval2 \
-  --output ./results/yolox-l-drax --device cuda:0 --batch-size 2 --epochs 12 --seed 42
-python -m mlx --mode object-detection --action adapter-experiment --model yolox-l \
-  --methods frozen,head-only,full-finetune,bottleneck,ssf,lora,convpass,conv-adapter,drax \
-  --dataset ~/Desktop/datasets/object-detection/eval2 \
-  --output ./results/yolox-l-comparison --device cuda:0 --batch-size 2 --epochs 12 --seed 42
-python -m mlx --mode object-detection --action adapter-report --output ./results/yolox-l-comparison
+cd /home/ralampay/workspace/mlx
+source env/bin/activate
 ```
 
-For five paired seeds, append `--experiment-seeds 1,2,3,4,5` to the all-method
-command. This is a future run; it has not been launched. Every seed gets its
-own frozen baseline. If an output already contains a method/seed run, choose
-a new output root; completed runs are not overwritten.
+Environment and checkpoint verification:
+
+```bash
+nvidia-smi
+python - <<'PY'
+import platform, torch
+print("Python:", platform.python_version())
+print("PyTorch:", torch.__version__)
+print("CUDA available:", torch.cuda.is_available())
+print("PyTorch CUDA:", torch.version.cuda)
+print("cuDNN:", torch.backends.cudnn.version())
+if torch.cuda.is_available():
+    print("GPU count:", torch.cuda.device_count())
+    for i in range(torch.cuda.device_count()):
+        p = torch.cuda.get_device_properties(i)
+        print(i, torch.cuda.get_device_name(i), f"{p.total_memory / 1024**3:.2f} GB")
+PY
+python -m mlx --mode object-detection --action adapter-verify --model yolox-l \
+  --checkpoint ~/Desktop/object-detection-models/foundational-yolox-l.pt \
+  --device cuda --format json
+```
+
+Dataset preparation and calibration (already completed; use a new calibration
+output before intentionally repeating it because artifacts are not overwritten):
+
+```bash
+python -m mlx --mode object-detection --action adapter-prepare \
+  --dataset ~/Desktop/datasets/object-detection/dawn/original \
+  --output ~/Desktop/datasets/object-detection/dawn/processed
+python -m mlx --mode object-detection --action adapter-calibrate --model yolox-l \
+  --checkpoint ~/Desktop/object-detection-models/foundational-yolox-l.pt \
+  --dataset ~/Desktop/datasets/object-detection/dawn/processed \
+  --output ~/Desktop/experiments/yolox-l-adapters/calibration-repeat \
+  --device cuda --height 640 --width 640 --amp
+```
+
+The completed frozen baseline and smoke configuration were:
+
+```bash
+python -m mlx --mode object-detection --action adapter-experiment --model yolox-l \
+  --methods frozen --checkpoint ~/Desktop/object-detection-models/foundational-yolox-l.pt \
+  --dataset ~/Desktop/datasets/object-detection/dawn/processed \
+  --output ~/Desktop/experiments/yolox-l-adapters --device cuda \
+  --height 640 --width 640 --batch-size 8 --gradient-accumulation 1 --seed 42 --amp
+python -m mlx --mode object-detection --action adapter-experiment --model yolox-l \
+  --adapter drax --checkpoint ~/Desktop/object-detection-models/foundational-yolox-l.pt \
+  --dataset ~/Desktop/datasets/object-detection/dawn/processed \
+  --output ~/Desktop/experiments/yolox-l-adapters --device cuda \
+  --height 640 --width 640 --batch-size 8 --gradient-accumulation 1 --epochs 1 \
+  --seed 42 --adapter-target neck --adapter-reduction 8 --adapter-alpha 1.0 --amp
+```
+
+Recommended Drax exploratory run:
+
+```bash
+python -m mlx --mode object-detection --action adapter-experiment --model yolox-l \
+  --adapter drax --checkpoint ~/Desktop/object-detection-models/foundational-yolox-l.pt \
+  --dataset ~/Desktop/datasets/object-detection/dawn/processed \
+  --output ~/Desktop/experiments/yolox-l-adapters/exploratory-20ep --device cuda \
+  --height 640 --width 640 --batch-size 8 --gradient-accumulation 1 --epochs 20 \
+  --seed 42 --adapter-target neck --adapter-reduction 8 --adapter-alpha 1.0 --amp
+```
+
+For any individual adapter, replace `METHOD` below with `bottleneck`, `ssf`,
+`lora`, `convpass`, `conv-adapter`, or `drax`:
+
+```bash
+METHOD=drax
+python -m mlx --mode object-detection --action adapter-experiment --model yolox-l \
+  --adapter "$METHOD" --checkpoint ~/Desktop/object-detection-models/foundational-yolox-l.pt \
+  --dataset ~/Desktop/datasets/object-detection/dawn/processed \
+  --output ~/Desktop/experiments/yolox-l-adapters/individual-20ep/$METHOD --device cuda \
+  --height 640 --width 640 --batch-size 8 --gradient-accumulation 1 --epochs 20 \
+  --seed 42 --adapter-target neck --adapter-reduction 8 --adapter-rank 8 --amp
+```
+
+Full single-seed comparison (provided only; not automatically run):
+
+```bash
+python -m mlx --mode object-detection --action adapter-experiment --model yolox-l \
+  --methods frozen,head-only,full-finetune,bottleneck,ssf,lora,convpass,conv-adapter,drax \
+  --checkpoint ~/Desktop/object-detection-models/foundational-yolox-l.pt \
+  --dataset ~/Desktop/datasets/object-detection/dawn/processed \
+  --output ~/Desktop/experiments/yolox-l-adapters/comparison-20ep --device cuda \
+  --height 640 --width 640 --batch-size 8 --gradient-accumulation 1 --epochs 20 \
+  --seed 42 --adapter-target neck --adapter-reduction 8 --adapter-rank 8 --amp
+```
+
+Five paired seeds (provided only; not automatically run):
+
+```bash
+python -m mlx --mode object-detection --action adapter-experiment --model yolox-l \
+  --methods frozen,head-only,full-finetune,bottleneck,ssf,lora,convpass,conv-adapter,drax \
+  --experiment-seeds 1,2,3,4,5 \
+  --checkpoint ~/Desktop/object-detection-models/foundational-yolox-l.pt \
+  --dataset ~/Desktop/datasets/object-detection/dawn/processed \
+  --output ~/Desktop/experiments/yolox-l-adapters/five-seed-20ep --device cuda \
+  --height 640 --width 640 --batch-size 8 --gradient-accumulation 1 --epochs 20 \
+  --adapter-target neck --adapter-reduction 8 --adapter-rank 8 --amp
+```
+
+Generate aggregate CSV, JSON, and Markdown for any study root:
+
+```bash
+python -m mlx --mode object-detection --action adapter-report \
+  --output ~/Desktop/experiments/yolox-l-adapters
+```
+
+Completed runs are never silently overwritten. Use a new output root for a
+different epoch count, seed set, precision mode, batch, or adapter configuration.

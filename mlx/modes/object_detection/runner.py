@@ -56,21 +56,37 @@ def run_object_detection(config: dict[str, Any]) -> Any:
         )
 
     action = config.get("action") or "train"
-    if action in {"adapter-verify", "adapter-prepare", "adapter-experiment", "adapter-report"}:
+    if action in {"adapter-verify", "adapter-prepare", "adapter-calibrate", "adapter-experiment", "adapter-report"}:
         from mlx.modes.object_detection.adapter_experiment import (
-            AdapterExperimentRequest, RunAdapterExperiment,
+            AdapterExperimentRequest, RunAdapterExperiment, DEFAULT_DATASET, DEFAULT_OUTPUT,
         )
-        from mlx.modes.object_detection.libreyolo.adapter_backend import VerifyFoundationCheckpoint
-        from mlx.modes.object_detection.adapter_data import prepare_adapter_dataset
+        from mlx.modes.object_detection.libreyolo.adapter_backend import (
+            CalibrateAdapterBatchSize, CollectAdapterEnvironment, VerifyFoundationCheckpoint,
+        )
+        from mlx.modes.object_detection.adapter_data import PrepareDawnAdapterDataset
         from mlx.modes.object_detection.adapter_report import GenerateAdapterReport
         if action == "adapter-report":
-            return GenerateAdapterReport(Path(config.get("output_path") or "results/yolox-l-adapters")).execute()
+            return GenerateAdapterReport(Path(config.get("output_path") or DEFAULT_OUTPUT)).execute()
+        if action == "adapter-prepare":
+            source = Path(config.get("dataset_path") or "~/Desktop/datasets/object-detection/dawn/original")
+            destination = Path(config.get("output_path") or DEFAULT_DATASET)
+            return PrepareDawnAdapterDataset(source, destination, seed=42).execute()
         request = AdapterExperimentRequest.from_config(config)
         if action == "adapter-verify":
             _, info = VerifyFoundationCheckpoint(request.model, request.checkpoint).execute()
             return info
-        if action == "adapter-prepare":
-            return prepare_adapter_dataset(request.dataset, request.output / "dataset", seed=42)
+        if action == "adapter-calibrate":
+            import libreyolo
+            CollectAdapterEnvironment(
+                request.output, device=request.device, amp=request.amp,
+                mlx_root=Path(__file__).resolve().parents[3],
+                libreyolo_root=Path(libreyolo.__file__).resolve().parents[1],
+            ).execute()
+            return CalibrateAdapterBatchSize(
+                request.model, request.checkpoint, request.output,
+                device=request.device, image_size=request.image_size, amp=request.amp,
+                reduction=request.reduction,
+            ).execute()
         return RunAdapterExperiment(request).execute()
     if action == "ls-models" and config.get("names_only"):
         from mlx.modes.object_detection.providers import get_provider
@@ -182,7 +198,7 @@ def run_object_detection(config: dict[str, Any]) -> Any:
             setup.pop_all()
         return command.execute()
 
-    available = "adapter-experiment, adapter-prepare, adapter-report, adapter-verify, benchmark, convert, fine-tune, infer-camera, infer-video, ls-models, train"
+    available = "adapter-calibrate, adapter-experiment, adapter-prepare, adapter-report, adapter-verify, benchmark, convert, fine-tune, infer-camera, infer-video, ls-models, train"
     raise MLXUserError(
         f"Unsupported action '{action}' for object-detection. Available actions: {available}."
     )

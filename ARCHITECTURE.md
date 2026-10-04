@@ -77,7 +77,7 @@ mlx/
     │   ├── providers.py          lazy provider registry and provider protocol
     │   ├── commands.py           neutral train, benchmark, create, convert, list, stream commands
     │   ├── evaluation.py         normalized benchmark metrics and research-artifact contract
-    │   ├── adapter_data.py       deterministic source-preserving, sequence-disjoint YOLO split
+    │   ├── adapter_data.py       deterministic DAWN conversion, class mapping, and stratified split
     │   ├── adapter_metrics.py    fixed-threshold detection precision and recall
     │   ├── adapter_experiment.py typed request and checkpoint verification/training/evaluation commands
     │   ├── adapter_report.py     comparative CSV and paired-seed Markdown report command
@@ -86,7 +86,7 @@ mlx/
     │   ├── aws/                  SageMaker submission, recovery, and comparison commands
     │   ├── tracking/             tracking, MOT evaluation, replay export, registry, algorithms
     │   ├── libreyolo/            LibreYOLO implementation using the Ralampay fork
-    │   │   └── adapter_backend.py strict YOLOX checkpoint loader and BN-safe trainer adapter
+    │   │   └── adapter_backend.py strict checkpoint/CUDA/environment/calibration and BN-safe trainer boundary
     │   └── ultralytics/          Ultralytics implementation and compatibility exports
     ├── video_anomaly_detection/  normal-only clip data, 3D/legacy backbones, SVDD, research artifacts
     │   └── aws/                  sequential all-model SageMaker lifecycle and recovery
@@ -106,7 +106,7 @@ The primary workflow commands are:
 | Segmentation | `TrainSegmentationModel`, `TrainAllSegmentationModels`, `GenerateSegmentationSamples`, `SmokeTestSegmentationModel`, `BenchmarkSegmentation`, `InferSegmentationImage`, `RunSegmentationStreamInference`, `BuildSegmentationDataset`, `ListSegmentationModels` |
 | Saliency mapping | `TrainSaliencyModel`, `TrainSaliencyModelGroup`, `GenerateSaliencySamples`, `SmokeTestSaliencyModels`, `BenchmarkSaliencyMapping`, `BenchmarkSaliencyModelGroup`, `InferSaliencyImage`, `BuildSaliencyDataset`, `ListSaliencyModels` |
 | Video anomaly detection | `TrainVideoAnomalyModel`, `BenchmarkVideoAnomalyModel`, `InferVideoAnomaly`, `ListVideoAnomalyModels`, AWS all-model submit/status/resume commands |
-| Object detection | `TrainObjectDetectionModel`, `FineTuneObjectDetectionModel`, `BenchmarkObjectDetectionModel`, `CreateObjectDetector`, `ConvertObjectDetectionModel`, `ListObjectDetectionModels`, `RunObjectDetectionStream`, `VerifyFoundationCheckpoint`, `RunAdapterExperiment`, `GenerateAdapterReport`, AWS submit/status/stop/resume and best-model locator commands |
+| Object detection | `TrainObjectDetectionModel`, `FineTuneObjectDetectionModel`, `BenchmarkObjectDetectionModel`, `CreateObjectDetector`, `ConvertObjectDetectionModel`, `ListObjectDetectionModels`, `RunObjectDetectionStream`, `PrepareDawnAdapterDataset`, `VerifyFoundationCheckpoint`, `CalibrateAdapterBatchSize`, `RunAdapterExperiment`, `GenerateAdapterReport`, AWS submit/status/stop/resume and best-model locator commands |
 | Tracking | `CreateTrackingAlgorithm`, `RunObjectDetectionTrackingCommand`, `RunTrackByDetectionCommand`, `RunTrackingVideo`, `PrepareTrackingBenchmarks`, `CompileTrackingVideo`, `BenchmarkTrackingDataset`, `ExportMOTFromClassAwareTracking`, `BenchmarkMOTTracking`, `ExportTrackingReplay` |
 | Text embedding | `EmbedTextCommand`, `BenchmarkTextEmbeddingCommand`, `PrepareRetrievalDatasets`, `BenchmarkAutoencoderRetrieval`, `TransformEmbeddingArtifacts`, `AnalyzeAutoencoderRetrieval`, `BenchmarkConfiguredAutoencoders`, `SelectAutoencoderExperimentSettings`; legacy `EmbedCsvCommand` remains supported |
 | Autoencoder | `TrainAutoencoder`, `EmbedAutoencoder`, `ListAutoencoderModels`, `ListAutoencoderLosses` |
@@ -817,6 +817,22 @@ Before adapter training, the integration verifies that either the train signatur
 configuration fields explicitly declare all requested adapter controls. Generic `**kwargs` alone
 is not evidence of support. Unsupported versions fail with `MLXUserError` rather than silently
 performing full-model training. MLX does not invent a neural-adapter registry or provider hook.
+
+The YOLOX-L feature-adapter study is a separate local research workflow. LibreYOLO owns the
+generic feature adapters, registry, injection, YOLOX target policy, standard model, and strict
+checkpoint compatibility. MLX owns DAWN Parquet-to-YOLO conversion, the seed-42 stratified split,
+CUDA-required execution, batch calibration, training/evaluation orchestration, memory/timing,
+per-seed artifacts, and aggregate statistics. The workflow loads the unmodified foundation state
+dict before injection and defaults to the three PAFPN outputs at strides 8, 16, and 32. It never
+silently falls back from a requested CUDA device or changes a configured batch after OOM.
+
+`PrepareDawnAdapterDataset.execute()` writes only below the caller-supplied dataset destination;
+experiment output contains metadata and run artifacts, not dataset copies. `RunAdapterExperiment`
+uses LibreYOLO's existing AMP and nominal-batch accumulation contracts, holds the physical/effective
+batch fixed across methods, verifies identity before training and frozen/trainable tensors after
+training, and records failures without retrying altered conditions. `GenerateAdapterReport` emits
+analysis-ready CSV/JSON plus descriptive mean, standard deviation, paired differences, and 95%
+intervals. Single-seed output is explicitly exploratory.
 
 ## Testing and Change Rules
 

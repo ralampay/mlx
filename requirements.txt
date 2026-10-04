@@ -9,6 +9,7 @@ numpy
 onnxruntime
 opencv-python
 pandas
+pyarrow
 pytest
 PyYAML>=6.0.1
 python-dotenv

@@ -23,10 +23,12 @@ object-detection-ultralytics = [
     "ultralytics @ git+https://github.com/ralampay/ultralytics"
 ]
 object-detection-libreyolo = [
+    "pyarrow",
     "libreyolo[onnx] @ git+https://github.com/ralampay/libreyolo.git@ce6c3911928cbe7137a6248cdab28f7b48e02f34"
 ]
 object-detection = [
     "onnxruntime",
+    "pyarrow",
     "ultralytics @ git+https://github.com/ralampay/ultralytics",
     "libreyolo[onnx] @ git+https://github.com/ralampay/libreyolo.git@ce6c3911928cbe7137a6248cdab28f7b48e02f34"
 ]

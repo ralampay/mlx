@@ -37,7 +37,7 @@ running, or restart it later to continue. The held-out test runs in a separate
 job after all training jobs finish.
 
 The general object-detection SageMaker image installs the LibreYOLO fork at
-commit `ce6c3911928cbe7137a6248cdab28f7b48e02f34`, which supports the
+commit `0f55a32969582442ad7904befe326d96ec16934d`, which supports the
 current MLX model catalog. Training and comparison use the same image builder.
 
 ```bash

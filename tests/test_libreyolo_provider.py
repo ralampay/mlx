@@ -78,6 +78,8 @@ def test_dependency_metadata_uses_current_ralampay_fork() -> None:
     requirements = (root / "requirements.txt").read_text(encoding="utf-8")
     assert "github.com/LibreYOLO/libreyolo" not in all_metadata
     assert fork_reference in requirements
+    for relative in ("mlx/modes/object_detection/aws/Dockerfile", "notebooks/train_object_detection.ipynb"):
+        assert fork_reference in (root / relative).read_text(encoding="utf-8")
 
 
 def test_libreyolo_result_decodes_normalized_detections() -> None:

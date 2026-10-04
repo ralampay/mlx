@@ -1,0 +1,107 @@
+% Include with \input{zero_shot_datasets}; requires booktabs in the preamble.
+% Bibliography: zero_shot_datasets.bib.
+% Draft methods/protocol text, not a report of completed inference experiments.
+% Verify all protocol claims against the actual runs before paper submission.
+\subsection{Datasets for zero-shot cross-dataset evaluation}
+\label{sec:zero-shot-datasets}
+
+We prepare two target datasets for evaluating cross-dataset generalization:
+ACDC~\cite{sakaridis2021acdc,sakaridis2026acdc} and
+MRTMD~\cite{bugeja2025mrtmd}. Both are represented using the detector's six
+classes, in output-index order: person, bicycle, motorcycle, car, bus, and truck.
+Here, zero-shot denotes evaluation on a target dataset without target-specific
+fitting or hyperparameter selection; it does not denote recognition of unseen
+object categories. The proposed evaluation protocol reserves these datasets
+for evaluation and fixes preprocessing, checkpoint selection, and detection
+thresholds before examining target-set results.
+
+\paragraph{ACDC.}
+ACDC comprises driving scenes captured in Switzerland under adverse visual
+conditions. We prepare its complete adverse-condition validation split of
+406 images at $1920\times1080$ pixels: 100 fog, 106 night, 100 rain, and 100
+snow images. Normal-condition reference images are not included.
+The source person and rider categories are mapped to person, with bicycle and
+motorcycle boxes retained separately. The 46 train annotations are removed
+while their images are retained. The resulting six-class annotation set
+contains 2,685 individual objects and 63 crowd regions. Native JSON annotations
+retain the source boxes, areas, and crowd flags. This mapping defines a custom
+six-class evaluation and is not directly comparable with ACDC's official
+eight-class detection benchmark.
+
+\paragraph{MRTMD.}
+MRTMD comprises traffic-video frames curated from YouTube and distributed at
+multiple resolutions. We prepare only the labelled 1080p release, avoiding
+repeated counting of different-resolution copies of the same frames.
+The pinned source annotations contain 3,733 image records and 69,348 boxes.
+Removing 22 redundant image records with identical annotations yields 3,711
+images and 69,010 boxes. Class IDs are reordered without merging or dropping
+categories. We clip 575 boxes with boundary overflows of at most 0.25 pixels,
+and recompute areas from the corrected 1080p boxes because the published area
+fields are approximately four times their 1080p bounding-box areas.
+The original annotations are retained separately.
+
+\begin{table}[t]
+  \centering
+  \small
+  \caption{Prepared evaluation sets. Crowd annotations describe regions and
+  are reported separately from individual object boxes.}
+  \label{tab:zero-shot-dataset-sizes}
+  \begin{tabular}{lrrr}
+    \toprule
+    Dataset & Images & Objects & Crowds \\
+    \midrule
+    ACDC validation & 406 & 2,685 & 63 \\
+    MRTMD 1080p & 3,711 & 69,010 & 0 \\
+    \bottomrule
+  \end{tabular}
+\end{table}
+
+\begin{table}[t]
+  \centering
+  \small
+  \caption{Class composition after mapping. ACDC object and crowd counts are
+  separate; all MRTMD annotations are individual object boxes.}
+  \label{tab:zero-shot-class-counts}
+  \begin{tabular}{lrrr}
+    \toprule
+    Class & \shortstack{ACDC\\objects} & \shortstack{ACDC\\crowds} & MRTMD \\
+    \midrule
+    Person & 567 & 11 & 21,274 \\
+    Bicycle & 68 & 22 & 64 \\
+    Motorcycle & 59 & 1 & 15,525 \\
+    Car & 1,836 & 29 & 30,187 \\
+    Bus & 49 & 0 & 337 \\
+    Truck & 106 & 0 & 1,623 \\
+    \midrule
+    Total & 2,685 & 63 & 69,010 \\
+    \bottomrule
+  \end{tabular}
+\end{table}
+
+\paragraph{Alternative ACDC export.}
+For tools requiring YOLO text labels, a separate crowd-free subset contains
+349 images and 2,146 boxes. It excludes all 57 images containing crowd regions
+and therefore has a different scene distribution. It is a subset of the
+406-image validation set, not an independent test set, and its scores must be
+reported separately from the full native-JSON evaluation.
+
+\paragraph{Provenance and limitations.}
+Exact-file SHA256 comparisons found no matches between ACDC and the checked
+foundation/DAWN artifacts, or between MRTMD and the checked
+foundation/DAWN/ACDC artifacts. This check does not rule out re-encoded copies,
+shared source videos, or perceptual near duplicates. MRTMD contains 919,
+387, and 2,405 images from source videos 1, 4, and 5, respectively. These
+correlated frames do not constitute 3,711 independent scenes, and only three
+video groups are available for assessing between-scene variation. Its 64
+bicycle annotations also limit the reliability of bicycle-specific estimates.
+Dataset-specific results should therefore be reported separately, with
+per-class and per-video breakdowns where practical.
+
+% Reproducibility metadata for supplementary material:
+% ACDC images: pcdat1003/ACDC mirror,
+% revision e09c38d6e347cd7e8ada42413851d610b311f891.
+% ACDC detection ZIP MD5: 32598aacfe0f3c5138262849be8f35f3.
+% MRTMD repository: https://github.com/OVD-Labs/MRTMD,
+% commit 664f6786e884e41cc95fd2a36949833223acea64.
+% MRTMD original annotation SHA256:
+% 92d50ba653ccaf362167ef742cee3ea58d42fdbdea28ff351205744d88c8f562.

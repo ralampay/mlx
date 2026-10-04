@@ -27,11 +27,58 @@ class LibreYOLOAdapterPredictionWriter:
         self.device = device
 
     def __call__(self, run: Any, split: str, destination: Path) -> Mapping[str, Any]:
+        wrapper = ReconstructAdapterModel(
+            self.request.checkpoint, self.foundation, self.device
+        ).execute(run)
+        destination.parent.mkdir(parents=True, exist_ok=True)
+        with tempfile.TemporaryDirectory(
+            prefix="slice-eval-", dir=self.request.analysis_root
+        ) as temporary:
+            native = wrapper.val(
+                data=str(self.request.dataset / "data.yaml"), split=split,
+                imgsz=self.request.image_size, batch=self.request.batch_size,
+                device=str(self.device), workers=self.request.workers,
+                conf=0.001, iou=0.6, verbose=False, save_json=True,
+                save_plots=False, save_dir=temporary,
+            )
+            generated = Path(temporary) / "predictions.json"
+            if not generated.is_file():
+                matches = list(Path(temporary).rglob("predictions.json"))
+                if len(matches) != 1:
+                    raise MLXUserError("LibreYOLO did not produce exactly one predictions.json")
+                generated = matches[0]
+            try:
+                predictions = json.loads(generated.read_text(encoding="utf-8"))
+            except (OSError, json.JSONDecodeError) as exc:
+                raise MLXUserError(f"Cannot read LibreYOLO predictions at {generated}: {exc}") from exc
+            write_json_atomic(destination, predictions)
+        del wrapper
+        torch.cuda.empty_cache()
+        return normalize_detection_metrics(native)
+
+    @staticmethod
+    def _adapter_targets(model, config, method):
+        return ReconstructAdapterModel._adapter_targets(model, config, method)
+
+    @staticmethod
+    def _restore_dense_checkpoint(model, run, loader):
+        return ReconstructAdapterModel._restore_dense_checkpoint(model, run, loader)
+
+
+class ReconstructAdapterModel:
+    """Strict foundation-first restoration shared by post-training evaluations."""
+
+    def __init__(self, checkpoint, foundation, device):
+        self.checkpoint = Path(checkpoint)
+        self.foundation = foundation
+        self.device = device
+
+    def execute(self, run):
         from libreyolo.adapters import inject_adapters, load_adapter_state_dict
         from libreyolo.utils.serialization import load_untrusted_torch_file
 
         model_name = f"yolox-{self.foundation['size']}"
-        model, info = VerifyFoundationCheckpoint(model_name, self.request.checkpoint).execute()
+        model, info = VerifyFoundationCheckpoint(model_name, self.checkpoint).execute()
         if info["sha256"] != self.foundation["sha256"]:
             raise MLXUserError("Foundation checkpoint changed during slice prediction generation")
         method = run.method
@@ -44,7 +91,7 @@ class LibreYOLOAdapterPredictionWriter:
                 targets,
                 reduction=int(config.get("adapter_reduction") or 8),
                 rank=int(config.get("adapter_rank") or 8),
-                alpha=float(config.get("adapter_alpha") or 1.0),
+                alpha=float(config.get("adapter_alpha", 1.0)),
                 train_head=bool(config.get("train_head", False)),
             )
             artifact = load_untrusted_torch_file(
@@ -61,38 +108,7 @@ class LibreYOLOAdapterPredictionWriter:
 
         model.to(self.device).eval()
         wrapper = build_experimental_yolox(model, info, str(self.device))
-        destination.parent.mkdir(parents=True, exist_ok=True)
-        with tempfile.TemporaryDirectory(
-            prefix="slice-eval-", dir=self.request.analysis_root
-        ) as temporary:
-            native = wrapper.val(
-                data=str(self.request.dataset / "data.yaml"),
-                split=split,
-                imgsz=self.request.image_size,
-                batch=self.request.batch_size,
-                device=str(self.device),
-                workers=self.request.workers,
-                conf=0.001,
-                iou=0.6,
-                verbose=False,
-                save_json=True,
-                save_plots=False,
-                save_dir=temporary,
-            )
-            generated = Path(temporary) / "predictions.json"
-            if not generated.is_file():
-                matches = list(Path(temporary).rglob("predictions.json"))
-                if len(matches) != 1:
-                    raise MLXUserError("LibreYOLO did not produce exactly one predictions.json")
-                generated = matches[0]
-            try:
-                predictions = json.loads(generated.read_text(encoding="utf-8"))
-            except (OSError, json.JSONDecodeError) as exc:
-                raise MLXUserError(f"Cannot read LibreYOLO predictions at {generated}: {exc}") from exc
-            write_json_atomic(destination, predictions)
-        del wrapper, model
-        torch.cuda.empty_cache()
-        return normalize_detection_metrics(native)
+        return wrapper
 
     @staticmethod
     def _adapter_targets(model, config, method):

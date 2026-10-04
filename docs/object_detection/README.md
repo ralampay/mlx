@@ -55,6 +55,11 @@ post-training slice analysis, and runnable research commands. The package bounda
 described in
 [ARCHITECTURE.md](../../ARCHITECTURE.md).
 
+The [zero-shot dataset guide](./zero_shot_datasets.md) documents the prepared ACDC
+and MRTMD evaluation sets, provenance, class composition, mapping policies, and
+limitations. It includes [BibTeX references](./zero_shot_datasets.bib) and a
+[LaTeX methods section with tables](./zero_shot_datasets.tex) for paper preparation.
+
 ## AWS SageMaker Managed Spot Training
 
 AWS training is asynchronous and uses Managed Spot by default. The dataset ZIP and checkpoint

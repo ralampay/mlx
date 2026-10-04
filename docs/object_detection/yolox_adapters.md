@@ -15,6 +15,10 @@ serialization, and aggregation. See `ARCHITECTURE.md` and LibreYOLO's
 
 ## Dataset
 
+For evaluation beyond the DAWN adaptation domain, see the
+[ACDC and MRTMD zero-shot dataset guide](./zero_shot_datasets.md), including
+verified composition tables, BibTeX references, and a LaTeX methods fragment.
+
 The selected target is DAWN v3, downloaded under
 `~/Desktop/datasets/object-detection/dawn/original` and converted without
 changing the source files into `processed`. DAWN has the exact six foundation

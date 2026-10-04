@@ -74,6 +74,8 @@ def build_parser() -> RichArgumentParser:
     parser.add_argument("--methods", default=None, help="Comma-separated YOLOX adapter experiment methods.")
     parser.add_argument("--experiment-seeds", default=None, help="Comma-separated seeds for adapter experiments.")
     parser.add_argument("--baseline-study", default=None, help="Read-only completed adapter study to reuse for comparison.")
+    parser.add_argument("--study-config", default=None, help="JSON specification for an inference-only transfer study.")
+    parser.add_argument("--study-phase", choices=("prepare", "pilot", "all"), default="all")
     parser.add_argument("--comparison-method", default="drax", help="Candidate method for paired adapter reports.")
     parser.add_argument(
         "--bootstrap-samples", type=int, default=2000,

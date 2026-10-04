@@ -866,6 +866,33 @@ analysis outputs; low-support weather slices remain explicitly descriptive.
 
 ## Testing and Change Rules
 
+### Inference-only target-domain adapter transfer
+
+`object_detection.zero_shot` owns the `adapter-zero-shot` and `adapter-zero-shot-report`
+actions. The composition boundary reads an explicit study JSON and injects the CUDA
+provider and strict foundation verifier into `RunTransferStudy`. `SnapshotTransferModels`
+copies validation-selected states into a hash-verified relative-path bundle; source runs
+remain read-only. `ReconstructAdapterModel` is the common provider reconstruction command
+used by both legacy DAWN slices and target-domain inference, including head-only state
+merging and recorded hybrid placements.
+
+`LibreYOLOTransferEvaluator` is the only new torch/LibreYOLO integration boundary. It
+reuses native detection validation and adds synchronized FP32 forward timing, explicit
+calibration and batch-one latency samples. `ScoreTransferPredictions` matches native COCO
+annotations once, retains crowd/area semantics, and re-accumulates weather/sequence/video
+slices from those matches. JSON prediction/match caches and completion receipts permit
+verified resume without altered batch settings. No training or target-driven selection is
+part of this workflow. `GenerateTransferReport` and `GenerateTransferGallery` consume
+caches without CUDA, with complete seed-paired superiority statistics and all-image boxes.
+`core.paired_superiority` supplies two-sided paired t intervals/tests, exact sign flips and
+Holm adjustment independently of the existing equivalence-analysis API. Five training
+seeds are the inference unit; correlated target frames are not treated as independent seeds.
+
+The CLI requires a dedicated output path; runtime dataset/model paths remain explicit
+configuration, never package constants. Source snapshots, hashes, environment, fixed
+protocol, pilot, calibration and run-level failures stay under that output directory.
+See `docs/object_detection/zero-shot-adapters.md` for configuration and reconstruction.
+
 - Unit-test commands with fake models, providers, reporters, frame sources, and frame sinks.
 - Test each provider against the neutral contract; provider-independent tests must not import its
   third-party package.

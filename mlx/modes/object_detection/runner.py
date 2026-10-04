@@ -44,6 +44,11 @@ def run_object_detection(config: dict[str, Any]) -> Any:
     config = with_explicit_options(config)
     from mlx.modes.object_detection.distillation import validate_distillation_options
     validate_distillation_options(config)
+    if config.get("action") in {"adapter-zero-shot", "adapter-zero-shot-report"}:
+        if config.get("platform", "local") != "local":
+            raise MLXUserError("Adapter zero-shot studies run locally only.")
+        from mlx.modes.object_detection.zero_shot.composition import run_transfer_action
+        return run_transfer_action(config)
     if config.get("platform", "local") == "aws":
         from mlx.modes.object_detection.aws.runner import run_aws_object_detection
 

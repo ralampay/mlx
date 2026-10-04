@@ -56,7 +56,7 @@ def run_object_detection(config: dict[str, Any]) -> Any:
         )
 
     action = config.get("action") or "train"
-    if action in {"adapter-verify", "adapter-prepare", "adapter-calibrate", "adapter-experiment", "adapter-report"}:
+    if action in {"adapter-verify", "adapter-prepare", "adapter-calibrate", "adapter-experiment", "adapter-report", "adapter-slice-predict", "adapter-slice-report"}:
         from mlx.modes.object_detection.adapter_experiment import (
             AdapterExperimentRequest, RunAdapterExperiment, DEFAULT_DATASET, DEFAULT_OUTPUT,
         )
@@ -65,6 +65,19 @@ def run_object_detection(config: dict[str, Any]) -> Any:
         )
         from mlx.modes.object_detection.adapter_data import PrepareDawnAdapterDataset
         from mlx.modes.object_detection.adapter_report import GenerateAdapterReport
+        if action in {"adapter-slice-predict", "adapter-slice-report"}:
+            from mlx.modes.object_detection.adapter_slices import (
+                AdapterSliceRequest,
+                CacheAdapterSlicePredictions,
+                GenerateAdapterSliceReport,
+            )
+            slice_request = AdapterSliceRequest.from_config(config)
+            command = (
+                CacheAdapterSlicePredictions(slice_request)
+                if action == "adapter-slice-predict"
+                else GenerateAdapterSliceReport(slice_request)
+            )
+            return command.execute()
         if action == "adapter-report":
             return GenerateAdapterReport(Path(config.get("output_path") or DEFAULT_OUTPUT)).execute()
         if action == "adapter-prepare":
@@ -198,7 +211,7 @@ def run_object_detection(config: dict[str, Any]) -> Any:
             setup.pop_all()
         return command.execute()
 
-    available = "adapter-calibrate, adapter-experiment, adapter-prepare, adapter-report, adapter-verify, benchmark, convert, fine-tune, infer-camera, infer-video, ls-models, train"
+    available = "adapter-calibrate, adapter-experiment, adapter-prepare, adapter-report, adapter-slice-predict, adapter-slice-report, adapter-verify, benchmark, convert, fine-tune, infer-camera, infer-video, ls-models, train"
     raise MLXUserError(
         f"Unsupported action '{action}' for object-detection. Available actions: {available}."
     )

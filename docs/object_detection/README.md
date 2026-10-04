@@ -50,8 +50,9 @@ The neutral source is split by responsibility:
 - `tracking/`: detector-neutral online tracking types, protocol, and per-frame command.
 
 The [YOLOX-L adapter experiment guide](./yolox_adapters.md) covers the
-foundation checkpoint, deterministic ACDC split, adapter conditions, and
-runnable research commands. The package boundaries are described in
+foundation checkpoint, deterministic DAWN split, adapter conditions, targeted
+post-training slice analysis, and runnable research commands. The package boundaries are
+described in
 [ARCHITECTURE.md](../../ARCHITECTURE.md).
 
 ## AWS SageMaker Managed Spot Training
@@ -276,6 +277,7 @@ With `--provider libreyolo`, first-class training and listing use these aliases:
 - `yolox-drax-mobilenet-v3-large-l-{refine-p3p4,spp-p5,balanced-drax}`
 - `yolox-drax-mobilenet-v3-large-m-pyramid-drax`
 - `yolox-drax-csp-m`
+- `yolox-drax-csp-fusion-m`
 
 Braces denote supported explicit size suffixes, for example `yolox-n` or
 `yolo9-drax-mobilenet-v3-large-s`. Listing reports all 27 individual aliases.
@@ -289,6 +291,9 @@ The `pyramid-drax` candidate combines lightweight P3/P4 refinement, pooled P5 co
 and stabilized Drax residual scaling at YOLOX-M neck/head scale. Its parameter budget
 is intentionally below vanilla YOLOX-M; matching YOLOX-L accuracy remains an empirical
 training target rather than a guaranteed property of the architecture.
+
+The corrected paired low-data evaluation for `yolox-drax-csp-fusion-m` is
+documented in the [CSP-Drax fusion study](csp-drax-fusion-study.md).
 
 Incremental adapter-only fine-tuning requires a LibreYOLO version whose training signature or
 trainer configuration explicitly supports the incremental-adapter controls. MLX rejects unsupported

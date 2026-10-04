@@ -73,6 +73,10 @@ def build_parser() -> RichArgumentParser:
     parser.add_argument("--adapter", default=None)
     parser.add_argument("--methods", default=None, help="Comma-separated YOLOX adapter experiment methods.")
     parser.add_argument("--experiment-seeds", default=None, help="Comma-separated seeds for adapter experiments.")
+    parser.add_argument(
+        "--bootstrap-samples", type=int, default=2000,
+        help="Deterministic image-bootstrap samples for adapter slice reports.",
+    )
     parser.add_argument("--adapter-reduction", type=int, default=8)
     parser.add_argument("--adapter-rank", type=int, default=8)
     parser.add_argument("--adapter-alpha", type=float, default=1.0)
@@ -510,6 +514,7 @@ def _render_help() -> None:
     options.add_row("--batch-size", "1", "Training or evaluation batch size; autoencoder mode defaults to 64.")
     options.add_row("--epochs", "100", "Training epoch count; autoencoder mode defaults to 50.")
     options.add_row("--methods", "None", "Comma-separated YOLOX adapter comparison methods.")
+    options.add_row("--bootstrap-samples", "2000", "Image-bootstrap draws for post-training adapter slice reports.")
     options.add_row("--experiment-seeds", "None", "Comma-separated independent adapter-study seeds.")
     options.add_row("--adapter-reduction", "8", "Feature-adapter channel reduction factor.")
     options.add_row("--adapter-rank", "8", "LoRA rank for YOLOX adapter experiments.")

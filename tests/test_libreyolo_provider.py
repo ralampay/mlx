@@ -66,7 +66,7 @@ def test_dependency_metadata_uses_current_ralampay_fork() -> None:
     project = metadata["project"]
     extras = project["optional-dependencies"]
     fork_reference = (
-        "libreyolo[onnx] @ git+https://github.com/ralampay/libreyolo.git@ce6c3911928cbe7137a6248cdab28f7b48e02f34"
+        "libreyolo[onnx] @ git+https://github.com/ralampay/libreyolo.git@aebe0e08b3b4613401ac1ec298aeafdabfcd46a9"
     )
 
     assert project["requires-python"] == ">=3.10"
@@ -420,7 +420,7 @@ def test_libreyolo_listing_builds_canonical_configurations(monkeypatch) -> None:
 
     for constructor in (
         "LibreYOLOX", "LibreYOLO9DraxMobileNetV3Large", "LibreYOLOXDraxMobileNetV3Large",
-        "LibreYOLOXDraxCSPM",
+        "LibreYOLOXDraxCSPM", "LibreYOLOXDraxCSPFusionM",
     ):
         setattr(sys.modules["libreyolo"], constructor, FakeYOLO9)
     summaries = ListLibreYOLOModels().execute()
@@ -432,12 +432,13 @@ def test_libreyolo_listing_builds_canonical_configurations(monkeypatch) -> None:
         ModelParameterSummary("yolo9-c", 8),
         ModelParameterSummary("yolo9-s-drax-b5", 8),
     ]
-    assert len(summaries) == 26
+    assert len(summaries) == 27
     assert {summary.model_name for summary in summaries} == {case[0] for case in _MODEL_CASES} | {
         f"yolox-drax-mobilenet-v3-large-l-{v}" for v in ("refine-p3p4", "spp-p5", "balanced-drax")
     } | {
         "yolox-drax-mobilenet-v3-large-m-pyramid-drax",
         "yolox-drax-csp-m",
+        "yolox-drax-csp-fusion-m",
     }
     assert all(summary.parameter_count == 8 for summary in summaries)
     assert [call["size"] for call in calls[:5]] == ["t", "s", "m", "c", "s"]
@@ -515,6 +516,7 @@ _MODEL_CASES = [
         ("yolo9-drax-mobilenet-v3-large", "LibreYOLO9DraxMobileNetV3Large", "tsmc"),
         ("yolox-drax-mobilenet-v3-large", "LibreYOLOXDraxMobileNetV3Large", "ntsmlx"),
         ("yolox-drax-csp", "LibreYOLOXDraxCSPM", "m"),
+        ("yolox-drax-csp-fusion", "LibreYOLOXDraxCSPFusionM", "m"),
     )
     for size in sizes
 ] + [("yolo9-s-drax-b5", "LibreYOLO9", "s")]

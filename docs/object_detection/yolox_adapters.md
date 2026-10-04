@@ -177,5 +177,31 @@ python -m mlx --mode object-detection --action adapter-report \
   --output ~/Desktop/experiments/yolox-l-adapters
 ```
 
+After every declared method and seed has completed, cache per-image predictions for targeted
+analysis. This performs evaluation only, requires CUDA, and verifies that each unsliced result
+reproduces the original run before accepting its cache:
+
+```bash
+python -m mlx --mode object-detection --action adapter-slice-predict \
+  --checkpoint ~/Desktop/object-detection-models/foundational-yolox-l.pt \
+  --dataset ~/Desktop/datasets/object-detection/dawn/processed \
+  --output ~/Desktop/experiments/yolox-l-adapters/five-seed-20ep \
+  --device cuda
+```
+
+Generate weather, pooled-weather, object-size, class, class-weather, and frozen-baseline-difficulty
+reports from the cache without another GPU pass:
+
+```bash
+python -m mlx --mode object-detection --action adapter-slice-report \
+  --output ~/Desktop/experiments/yolox-l-adapters/five-seed-20ep \
+  --seed 42 --bootstrap-samples 2000
+```
+
+Artifacts are stored in `sliced-analysis/` below the study root. Difficulty means tertiles of a
+continuous frozen-model detection-quality score using cutoffs fixed on validation data; it is not
+claimed to be a causal measure of domain-shift severity. Individual weather slices with fewer than
+ten images are marked low support.
+
 Completed runs are never silently overwritten. Use a new output root for a
 different epoch count, seed set, precision mode, batch, or adapter configuration.

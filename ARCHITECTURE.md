@@ -53,6 +53,7 @@ mlx/
 ├── cli_routing.py                immutable mode descriptors and lazy runner resolution
 ├── core/                         shared commands, requests, errors, UI, seeds, model summaries
 │   ├── artifacts.py             atomic serialization, hashes, and JSON normalization
+│   ├── paired_statistics.py     exact paired superiority, bootstrap interval, and TOST equivalence analysis
 │   ├── vector_transforms.py     provider-neutral batch representation-transform contract
 │   ├── aws/                     shared SageMaker lifecycle infrastructure
 │   ├── datasets.py              S3 ZIP staging, safe extraction, cache, resolver protocol
@@ -81,12 +82,15 @@ mlx/
     │   ├── adapter_metrics.py    fixed-threshold detection precision and recall
     │   ├── adapter_experiment.py typed request and checkpoint verification/training/evaluation commands
     │   ├── adapter_report.py     comparative CSV and paired-seed Markdown report command
+    │   ├── adapter_slices.py     post-training prediction cache and targeted slice-analysis commands
+    │   ├── comparison_experiment.py paired low-data YOLOX/CSP-Drax preparation, execution, and statistical report commands
     │   ├── artifacts.py          shared checkpoint discovery and export-path rules
     │   ├── streaming.py          frame-sink adapter and compatibility frame-source re-exports
     │   ├── aws/                  SageMaker submission, recovery, and comparison commands
     │   ├── tracking/             tracking, MOT evaluation, replay export, registry, algorithms
     │   ├── libreyolo/            LibreYOLO implementation using the Ralampay fork
-    │   │   └── adapter_backend.py strict checkpoint/CUDA/environment/calibration and BN-safe trainer boundary
+    │   │   ├── adapter_backend.py strict checkpoint/CUDA/environment/calibration and BN-safe trainer boundary
+    │   │   └── adapter_slice_backend.py strict checkpoint reconstruction and prediction-cache boundary
     │   └── ultralytics/          Ultralytics implementation and compatibility exports
     ├── video_anomaly_detection/  normal-only clip data, 3D/legacy backbones, SVDD, research artifacts
     │   └── aws/                  sequential all-model SageMaker lifecycle and recovery
@@ -106,7 +110,7 @@ The primary workflow commands are:
 | Segmentation | `TrainSegmentationModel`, `TrainAllSegmentationModels`, `GenerateSegmentationSamples`, `SmokeTestSegmentationModel`, `BenchmarkSegmentation`, `InferSegmentationImage`, `RunSegmentationStreamInference`, `BuildSegmentationDataset`, `ListSegmentationModels` |
 | Saliency mapping | `TrainSaliencyModel`, `TrainSaliencyModelGroup`, `GenerateSaliencySamples`, `SmokeTestSaliencyModels`, `BenchmarkSaliencyMapping`, `BenchmarkSaliencyModelGroup`, `InferSaliencyImage`, `BuildSaliencyDataset`, `ListSaliencyModels` |
 | Video anomaly detection | `TrainVideoAnomalyModel`, `BenchmarkVideoAnomalyModel`, `InferVideoAnomaly`, `ListVideoAnomalyModels`, AWS all-model submit/status/resume commands |
-| Object detection | `TrainObjectDetectionModel`, `FineTuneObjectDetectionModel`, `BenchmarkObjectDetectionModel`, `CreateObjectDetector`, `ConvertObjectDetectionModel`, `ListObjectDetectionModels`, `RunObjectDetectionStream`, `PrepareDawnAdapterDataset`, `VerifyFoundationCheckpoint`, `CalibrateAdapterBatchSize`, `RunAdapterExperiment`, `GenerateAdapterReport`, AWS submit/status/stop/resume and best-model locator commands |
+| Object detection | `TrainObjectDetectionModel`, `FineTuneObjectDetectionModel`, `BenchmarkObjectDetectionModel`, `CreateObjectDetector`, `ConvertObjectDetectionModel`, `ListObjectDetectionModels`, `RunObjectDetectionStream`, `PrepareDawnAdapterDataset`, `VerifyFoundationCheckpoint`, `CalibrateAdapterBatchSize`, `RunAdapterExperiment`, `GenerateAdapterReport`, `CacheAdapterSlicePredictions`, `GenerateAdapterSliceReport`, `PrepareCSPDraxComparison`, `RunCSPDraxComparison`, `AnalyzeCSPDraxComparison`, AWS submit/status/stop/resume and best-model locator commands |
 | Tracking | `CreateTrackingAlgorithm`, `RunObjectDetectionTrackingCommand`, `RunTrackByDetectionCommand`, `RunTrackingVideo`, `PrepareTrackingBenchmarks`, `CompileTrackingVideo`, `BenchmarkTrackingDataset`, `ExportMOTFromClassAwareTracking`, `BenchmarkMOTTracking`, `ExportTrackingReplay` |
 | Text embedding | `EmbedTextCommand`, `BenchmarkTextEmbeddingCommand`, `PrepareRetrievalDatasets`, `BenchmarkAutoencoderRetrieval`, `TransformEmbeddingArtifacts`, `AnalyzeAutoencoderRetrieval`, `BenchmarkConfiguredAutoencoders`, `SelectAutoencoderExperimentSettings`; legacy `EmbedCsvCommand` remains supported |
 | Autoencoder | `TrainAutoencoder`, `EmbedAutoencoder`, `ListAutoencoderModels`, `ListAutoencoderLosses` |
@@ -833,6 +837,14 @@ batch fixed across methods, verifies identity before training and frozen/trainab
 training, and records failures without retrying altered conditions. `GenerateAdapterReport` emits
 analysis-ready CSV/JSON plus descriptive mean, standard deviation, paired differences, and 95%
 intervals. Single-seed output is explicitly exploratory.
+
+Post-training targeted evaluation is split into two command boundaries. `CacheAdapterSlicePredictions`
+strictly reconstructs each validation-selected model, requires CUDA, verifies unsliced COCO metrics
+against the original run, and stores checksum-addressed per-image predictions without invoking
+training. `GenerateAdapterSliceReport` consumes those caches on CPU to report DAWN weather and pooled
+weather groups, COCO object sizes, classes, class-weather intersections, and validation-defined
+frozen-baseline difficulty. Seed-paired Drax comparisons and clustered image-bootstrap intervals are
+analysis outputs; low-support weather slices remain explicitly descriptive.
 
 ## Testing and Change Rules
 

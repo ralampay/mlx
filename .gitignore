@@ -80,3 +80,6 @@ runs/
 results/
 
 artifacts/
+
+# Isolated dependency worktrees used for cross-repository development
+.worktrees/

@@ -80,7 +80,7 @@ class AdapterSliceRequest:
             checkpoint=Path(
                 config.get("model_path") or "~/Desktop/object-detection-models/foundational-yolox-l.pt"
             ).expanduser().resolve(),
-            dataset=Path(config.get("dataset_path") or DEFAULT_DATASET).expanduser().resolve(),
+            dataset=Path(value("dataset_path", DEFAULT_DATASET) or DEFAULT_DATASET).expanduser().resolve(),
             device=str(value("device", "cuda") or "cuda"),
             image_size=int(value("height", 640) or 640),
             batch_size=int(value("batch_size", 8) or 8),

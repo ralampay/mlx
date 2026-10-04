@@ -147,6 +147,7 @@ def test_slice_request_ignores_unrelated_global_parser_defaults(tmp_path):
             "batch_size": 1,
             "workers": 4,
             "device": "cpu",
+            "dataset_path": "./tmp/dataset",
             "_explicit_options": {"output_path"},
         }
     )
@@ -154,6 +155,7 @@ def test_slice_request_ignores_unrelated_global_parser_defaults(tmp_path):
     assert request.batch_size == 8
     assert request.workers == 0
     assert request.device == "cuda"
+    assert request.dataset == Path("~/Desktop/datasets/object-detection/dawn/processed").expanduser().resolve()
 
 
 def test_head_only_reconstruction_preserves_foundation_and_restores_head_buffers(tmp_path):

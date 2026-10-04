@@ -80,7 +80,7 @@ class AdapterExperimentRequest:
         request = cls(
             model=model,
             checkpoint=Path(checkpoint).expanduser().resolve(),
-            dataset=Path(config.get("dataset_path") or DEFAULT_DATASET).expanduser().resolve(),
+            dataset=Path(value("dataset_path", DEFAULT_DATASET) or DEFAULT_DATASET).expanduser().resolve(),
             output=Path(config.get("output_path") or DEFAULT_OUTPUT).expanduser().resolve(),
             methods=methods,
             seeds=seeds,

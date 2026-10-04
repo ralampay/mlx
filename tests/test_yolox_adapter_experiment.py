@@ -59,6 +59,13 @@ def test_cuda_required_failure_is_explicit(monkeypatch):
     assert require_experiment_device("cpu") == torch.device("cpu")
 
 
+def test_adapter_dataset_default_ignores_global_cli_default():
+    request = AdapterExperimentRequest.from_config({"dataset_path": "./tmp/dataset", "_explicit_options": set()})
+    assert request.dataset == Path("~/Desktop/datasets/object-detection/dawn/processed").expanduser().resolve()
+    explicit = AdapterExperimentRequest.from_config({"dataset_path": "/custom", "_explicit_options": {"dataset_path"}})
+    assert explicit.dataset == Path("/custom")
+
+
 def _record(index: int) -> _DawnRecord:
     class_id = index % len(FOUNDATION_CLASSES)
     source_name = next(name for name, mapped in DAWN_CLASS_MAPPING.items() if mapped == class_id)

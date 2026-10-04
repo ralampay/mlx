@@ -182,3 +182,14 @@ def test_freezing_is_verified_against_non_ema_training_state(tmp_path):
     )
     assert changed_frozen == []
     assert trainable_changed is True
+
+
+def test_freezing_verification_detects_batchnorm_buffer_updates(tmp_path):
+    checkpoint = tmp_path / "last.pt"
+    torch.save({"train_model": {"bn.running_mean": torch.ones(2), "adapter": torch.ones(1)}}, checkpoint)
+    changed, learned = _verify_training_checkpoint(
+        {"last_checkpoint": str(checkpoint)},
+        {"bn.running_mean": torch.zeros(2)}, {"adapter": torch.zeros(1)},
+    )
+    assert changed == [("bn.running_mean", 1.0)]
+    assert learned

@@ -14,6 +14,7 @@ import torch
 from mlx.core.exceptions import MLXUserError
 from mlx.modes.object_detection.adapter_data import load_prepared_adapter_dataset
 from mlx.modes.object_detection.adapter_metrics import measure_precision_recall
+from mlx.modes.object_detection.adapter_baselines import LoadAdapterBaseline, baseline_root, baseline_provenance
 from mlx.modes.object_detection.evaluation import normalize_detection_metrics
 from mlx.modes.object_detection.libreyolo.adapter_backend import (
     MODEL_SIZES,
@@ -26,7 +27,7 @@ from mlx.modes.object_detection.libreyolo.adapter_backend import (
 
 METHODS = (
     "frozen", "head-only", "full-finetune", "bottleneck", "ssf", "lora",
-    "convpass", "conv-adapter", "drax",
+    "convpass", "conv-adapter", "drax", "drax-hybrid",
 )
 FOUNDATION = Path("~/Desktop/object-detection-models/foundational-yolox-l.pt")
 DEFAULT_DATASET = Path("~/Desktop/datasets/object-detection/dawn/processed")
@@ -54,6 +55,7 @@ class AdapterExperimentRequest:
     target: str = "neck"
     train_head: bool = False
     lr: float = 0.0001
+    baseline_study: Path | None = None
 
     @classmethod
     def from_config(cls, config: dict) -> "AdapterExperimentRequest":
@@ -95,6 +97,7 @@ class AdapterExperimentRequest:
             target=str(config.get("adapter_target", "neck")),
             train_head=bool(config.get("train_head", False)),
             lr=float(config.get("lr0") or 0.0001),
+            baseline_study=Path(config["baseline_study"]).expanduser().resolve() if config.get("baseline_study") else None,
         )
         request.validate(width=int(value("width", 640)))
         return request
@@ -225,7 +228,7 @@ class RunAdapterExperiment:
         if dataset["classes"] != expected_classes:
             raise MLXUserError("Dataset class order differs from foundation checkpoint")
         request.output.mkdir(parents=True, exist_ok=True)
-        CollectAdapterEnvironment(
+        environment = CollectAdapterEnvironment(
             request.output, device=str(device), amp=request.amp,
             mlx_root=Path(__file__).resolve().parents[3],
             libreyolo_root=Path(__import__("libreyolo").__file__).resolve().parents[1],
@@ -244,15 +247,48 @@ class RunAdapterExperiment:
             "foundation_sha256": foundation["sha256"],
             "dataset": dataset["dataset"],
             "dataset_selection_sha256": dataset["selection_sha256"],
-            "available_methods": list(METHODS),
-            "planned_seeds": [1, 2, 3, 4, 5],
+            "available_methods": list(dict.fromkeys(("frozen", *request.methods))),
+            "planned_seeds": list(request.seeds),
         }
+        previous_study = request.output / "study.json"
+        if previous_study.is_file():
+            declared = json.loads(previous_study.read_text())
+            if (set(study["available_methods"]) <= set(declared.get("available_methods", []))
+                    and set(request.seeds) <= set(declared.get("planned_seeds", []))):
+                study["available_methods"] = declared["available_methods"]
+                study["planned_seeds"] = declared["planned_seeds"]
         self._write_once(request.output / "study.json", study)
+
+        reused = {}
+        baseline = baseline_root(request.output, request.baseline_study)
+        if baseline:
+            from mlx.modes.object_detection.adapter_baselines import read_artifact
+            previous_environment = read_artifact(baseline / "environment.json")
+            for field in ("gpu_name", "pytorch_version", "pytorch_cuda_version", "cudnn_version"):
+                if environment[field] != previous_environment.get(field):
+                    raise MLXUserError(f"Baseline environment mismatch for {field}")
+            expected = {
+                "model": request.model, "checkpoint_sha256": foundation["sha256"],
+                "dataset_selection_sha256": dataset["selection_sha256"],
+                "image_size": request.image_size, "physical_batch_size": request.batch_size,
+                "effective_batch_size": request.batch_size * request.gradient_accumulation,
+                "gradient_accumulation": request.gradient_accumulation, "amp": request.amp,
+                "device": str(device), "epochs": request.epochs,
+                "optimizer": "adamw", "learning_rate": request.lr,
+                **{f"{split}_images": dataset["splits"][split]["images"] for split in ("train", "val", "test")},
+            }
+            loader = LoadAdapterBaseline(baseline, expected, request.seeds)
+            prior = loader.execute()
+            self._write_once(request.output / "baseline.json", baseline_provenance(baseline, prior, expected, request.seeds))
+            reused = {(run.method, run.seed): run.metrics for run in prior if run.method == "frozen"}
 
         rows = []
         for seed in request.seeds:
             methods = tuple(dict.fromkeys(("frozen", *request.methods)))
             for method in methods:
+                if (method, seed) in reused:
+                    rows.append(dict(reused[(method, seed)]))
+                    continue
                 existing = request.output / method / f"seed-{seed}" / "metrics.json"
                 if existing.exists():
                     metrics = json.loads(existing.read_text())
@@ -267,6 +303,12 @@ class RunAdapterExperiment:
                         "epochs": 0 if method == "frozen" else request.epochs,
                         "method": method,
                         "seed": seed,
+                        "learning_rate": request.lr,
+                        "adapter_rank": request.rank if method in {"lora", "drax-hybrid"} else None,
+                        "adapter_reduction": request.reduction if method in {"bottleneck", "convpass", "conv-adapter", "drax", "drax-hybrid"} else None,
+                        "adapter_alpha": request.alpha if method not in {"frozen", "head-only", "full-finetune"} else None,
+                        "train_head": request.train_head,
+                        "adapter_target": request.target if method not in {"frozen", "head-only", "full-finetune"} else None,
                     }
                     if metrics.get("status") != "completed" or any(
                         metrics.get(key) != value for key, value in expected.items()
@@ -289,6 +331,9 @@ class RunAdapterExperiment:
 
     def _run_one(self, method, seed, manifest, info, device):
         from libreyolo.adapters import adapter_state_dict, count_parameters, inject_adapters, yolox_targets
+        if method == "drax-hybrid":
+            from mlx.core.random import seed_everything
+            seed_everything(seed)
 
         run_dir = self.request.output / method / f"seed-{seed}"
         if run_dir.exists() and any(run_dir.iterdir()):
@@ -330,6 +375,14 @@ class RunAdapterExperiment:
             for name, parameter in model.named_parameters()
             if not parameter.requires_grad
         }
+        frozen_buffers = {
+            f"{name}.{buffer_name}": value.detach().cpu().clone()
+            for name, module in model.named_modules()
+            if isinstance(module, torch.nn.modules.batchnorm._BatchNorm)
+            and all(not parameter.requires_grad for parameter in module.parameters())
+            for buffer_name, value in module.named_buffers(recurse=False)
+        }
+        frozen_before.update(frozen_buffers)
         trainable_before = {
             name: parameter.detach().cpu().clone()
             for name, parameter in model.named_parameters()
@@ -343,6 +396,7 @@ class RunAdapterExperiment:
             "method": method,
             "seed": seed,
             "model": self.request.model,
+            "adapter_initialization_seed": seed if method == "drax-hybrid" else None,
             "foundation_checkpoint": info["checkpoint"],
             "checkpoint_sha256": info["sha256"],
             "dataset": manifest["dataset"],
@@ -361,8 +415,8 @@ class RunAdapterExperiment:
             "optimizer": "adamw",
             "learning_rate": self.request.lr,
             "adapter_target": self.request.target if method not in {"frozen", "head-only", "full-finetune"} else None,
-            "adapter_reduction": self.request.reduction if method in {"bottleneck", "convpass", "conv-adapter", "drax"} else None,
-            "adapter_rank": self.request.rank if method == "lora" else None,
+            "adapter_reduction": self.request.reduction if method in {"bottleneck", "convpass", "conv-adapter", "drax", "drax-hybrid"} else None,
+            "adapter_rank": self.request.rank if method in {"lora", "drax-hybrid"} else None,
             "adapter_alpha": self.request.alpha if method not in {"frozen", "head-only", "full-finetune"} else None,
             "train_head": self.request.train_head,
             "injected_modules": list(targets),
@@ -382,6 +436,14 @@ class RunAdapterExperiment:
         training_seconds = 0.0
         checkpoint_size = 0
         result = None
+        observed_gradients = set()
+        hooks = []
+        if method == "drax-hybrid":
+            for name, parameter in model.named_parameters():
+                if parameter.requires_grad:
+                    hooks.append(parameter.register_hook(
+                        lambda gradient, key=name: observed_gradients.add(key)
+                    ))
         try:
             if method != "frozen":
                 started = time.perf_counter()
@@ -412,6 +474,11 @@ class RunAdapterExperiment:
                 if gpu:
                     torch.cuda.synchronize(device)
                 training_seconds = time.perf_counter() - started
+                epoch_metrics = result.get("epoch_metrics") or []
+                if any(not math.isfinite(float(event["train_loss"])) for event in epoch_metrics):
+                    raise MLXUserError(f"Nonfinite training loss during {method}")
+                if method == "drax-hybrid" and not observed_gradients:
+                    raise MLXUserError("Hybrid training produced no adapter gradients")
                 changed_frozen, trainable_parameters_changed = _verify_training_checkpoint(
                     result, frozen_before, trainable_before
                 )
@@ -427,10 +494,10 @@ class RunAdapterExperiment:
                 artifact, selection = _restore_best_checkpoint(model, result)
                 if method != "full-finetune":
                     with torch.no_grad():
-                        current_parameters = dict(model.named_parameters())
+                        current_parameters = model.state_dict()
                         for name, value in frozen_before.items():
                             current_parameters[name].copy_(value.to(current_parameters[name].device))
-                current_parameters = dict(model.named_parameters())
+                current_parameters = model.state_dict()
                 foundation_parameters_unchanged = all(
                     torch.equal(value, current_parameters[name].detach().cpu())
                     for name, value in frozen_before.items()
@@ -451,6 +518,8 @@ class RunAdapterExperiment:
                 config.update(
                     {
                         "foundation_parameters_unchanged": foundation_parameters_unchanged,
+                        "frozen_buffers_verified": len(frozen_buffers),
+                        "adapter_gradient_tensors": len(observed_gradients) if method == "drax-hybrid" else None,
                         "trainable_parameters_changed": trainable_parameters_changed,
                         "selected_trainable_parameters_changed": selected_trainable_parameters_changed,
                     }
@@ -518,6 +587,9 @@ class RunAdapterExperiment:
             raise MLXUserError(
                 f"{method} run failed for seed {seed} without changing its configuration: {exc}"
             ) from exc
+        finally:
+            for hook in hooks:
+                hook.remove()
 
     def _write_training_csv(self, path: Path, events: list[dict], gpu: bool) -> None:
         fields = (

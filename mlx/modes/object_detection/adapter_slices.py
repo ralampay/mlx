@@ -21,6 +21,7 @@ from mlx.core.artifacts import sha256_file, write_csv, write_json_atomic
 from mlx.core.exceptions import MLXUserError
 from mlx.modes.object_detection.adapter_data import load_prepared_adapter_dataset
 from mlx.modes.object_detection.adapter_experiment import DEFAULT_DATASET, DEFAULT_OUTPUT, METHODS
+from mlx.modes.object_detection.adapter_baselines import recorded_baseline_runs
 from mlx.modes.object_detection.libreyolo.adapter_backend import (
     VerifyFoundationCheckpoint,
     require_experiment_device,
@@ -32,7 +33,7 @@ WEATHER_GROUPS = {
     "precipitation": ("rainstorm", "snowstorm"),
     "airborne-particulate": ("sandstorm", "dust-tornado"),
 }
-COMPARATORS = ("lora", "convpass", "conv-adapter", "bottleneck", "full-finetune", "frozen")
+COMPARATORS = ("lora", "convpass", "conv-adapter", "bottleneck", "full-finetune", "frozen", "drax")
 SLICE_FIELDS = (
     "method", "seed", "slice_family", "slice_name", "image_count", "object_count",
     "low_support", "mAP50", "mAP50_95", "precision", "recall", "AP_small",
@@ -60,6 +61,8 @@ class AdapterSliceRequest:
     seeds: tuple[int, ...] | None = None
     bootstrap_samples: int = 2_000
     analysis_seed: int = 42
+    baseline_study: Path | None = None
+    comparison_method: str = "drax"
 
     @classmethod
     def from_config(cls, config: Mapping[str, Any]) -> "AdapterSliceRequest":
@@ -84,6 +87,8 @@ class AdapterSliceRequest:
             workers=int(value("workers", 0) or 0),
             methods=methods,
             seeds=seeds,
+            baseline_study=Path(config["baseline_study"]).expanduser().resolve() if config.get("baseline_study") else None,
+            comparison_method=str(config.get("comparison_method") or "drax"),
             bootstrap_samples=int(value("bootstrap_samples", 2_000) or 2_000),
             analysis_seed=int(
                 config.get("random_seed") if config.get("random_seed") is not None else 42
@@ -99,6 +104,8 @@ class AdapterSliceRequest:
             raise MLXUserError(f"Adapter study output does not exist: {self.output}")
         if self.bootstrap_samples < 1:
             raise MLXUserError("--bootstrap-samples must be positive")
+        if self.comparison_method not in METHODS:
+            raise MLXUserError(f"Unknown comparison method: {self.comparison_method}")
         if self.methods and set(self.methods) - set(METHODS):
             raise MLXUserError(f"Slice methods must use {', '.join(METHODS)}")
         if self.seeds and any(seed < 0 for seed in self.seeds):
@@ -148,7 +155,11 @@ def discover_study_runs(request: AdapterSliceRequest) -> list[StudyRun]:
     if not study_path.is_file():
         raise MLXUserError(f"Adapter study metadata is missing: {study_path}")
     study = json.loads(study_path.read_text(encoding="utf-8"))
+    baseline = recorded_baseline_runs(request.output, request.baseline_study)
+    prior = {(run.method, run.seed): run for run in baseline}
     methods = request.methods or tuple(study.get("available_methods") or ())
+    if request.methods is None:
+        methods = tuple(dict.fromkeys((*methods, *(run.method for run in baseline))))
     seeds = request.seeds or tuple(int(value) for value in study.get("planned_seeds") or ())
     if not methods or not seeds:
         raise MLXUserError("Study metadata does not declare methods and seeds")
@@ -160,6 +171,10 @@ def discover_study_runs(request: AdapterSliceRequest) -> list[StudyRun]:
             metrics_path = directory / "metrics.json"
             config_path = directory / "config.json"
             if not metrics_path.is_file() or not config_path.is_file():
+                if (method, seed) in prior:
+                    run = prior[(method, seed)]
+                    runs.append(StudyRun(run.method, run.seed, run.directory, run.metrics, run.config))
+                    continue
                 missing.append(f"{method}/seed-{seed}")
                 continue
             metrics = json.loads(metrics_path.read_text(encoding="utf-8"))
@@ -334,6 +349,10 @@ class CacheAdapterSlicePredictions:
         }
         for split, payload in ground_truth.items():
             _write_compatible_json(root / f"ground_truth_{split}.json", payload)
+        for source in {run.directory.parent.parent for run in runs if run.directory.parent.parent != request.output}:
+            for split, payload in ground_truth.items():
+                if _load_json(source / "sliced-analysis" / f"ground_truth_{split}.json") != payload:
+                    raise MLXUserError(f"Baseline {split} ground truth differs: {source}")
 
         if self.prediction_writer_factory is None:
             from mlx.modes.object_detection.libreyolo.adapter_slice_backend import (
@@ -367,6 +386,16 @@ class CacheAdapterSlicePredictions:
                 "iou": 0.6,
                 "checkpoint": str(checkpoint) if checkpoint else str(request.checkpoint),
             }
+            if run.directory.parent.parent != request.output and not destination.exists():
+                source = _prediction_path(run.directory.parent.parent / "sliced-analysis", run, split)
+                metadata = _load_json(_prediction_metadata_path(source))
+                if any(metadata.get(key) != value for key, value in expected.items()):
+                    raise MLXUserError(f"Baseline prediction cache settings differ: {source}")
+                if metadata.get("predictions_sha256") != sha256_file(source):
+                    raise MLXUserError(f"Baseline prediction cache checksum mismatch: {source}")
+                destination.parent.mkdir(parents=True, exist_ok=True)
+                shutil.copyfile(source, destination)
+                write_json_atomic(metadata_path, metadata)
             if destination.is_file() and metadata_path.is_file():
                 metadata = _load_json(metadata_path)
                 if any(metadata.get(key) != value for key, value in expected.items()):
@@ -416,6 +445,7 @@ class CacheAdapterSlicePredictions:
         manifest = {
             "schema_version": 1,
             "foundation_checkpoint": str(request.checkpoint),
+            "comparison_method": request.comparison_method,
             "foundation_sha256": foundation["sha256"],
             "dataset": str(request.dataset),
             "dataset_selection_sha256": dataset["selection_sha256"],
@@ -442,6 +472,9 @@ class CacheAdapterSlicePredictions:
             "analysis_seed": request.analysis_seed,
         }
         manifest_path = root / "analysis_manifest.json"
+        if (manifest_path.exists() and "comparison_method" not in _load_json(manifest_path)
+                and request.comparison_method == "drax"):
+            manifest.pop("comparison_method")
         if manifest_path.exists() and _load_json(manifest_path) != manifest:
             raise MLXUserError(f"Existing slice manifest differs: {manifest_path}")
         _write_compatible_json(manifest_path, manifest)
@@ -699,6 +732,8 @@ class GenerateAdapterSliceReport:
                 f"Slice predictions are not prepared: {manifest_path}. Run adapter-slice-predict first."
             )
         manifest = _load_json(manifest_path)
+        if request.comparison_method != manifest.get("comparison_method", "drax"):
+            raise MLXUserError("--comparison-method differs from the fixed analysis manifest")
         if request.bootstrap_samples != int(manifest.get("bootstrap_samples", request.bootstrap_samples)):
             raise MLXUserError("--bootstrap-samples differs from the fixed analysis manifest")
         if request.analysis_seed != int(manifest.get("analysis_seed", request.analysis_seed)):
@@ -809,6 +844,7 @@ class GenerateAdapterSliceReport:
         paired = self._paired_results(
             rows, slice_specs, test_gt, prediction_cache,
             request.bootstrap_samples, request.analysis_seed,
+            candidate=request.comparison_method,
         )
         write_csv(root / "paired_differences.csv", paired, fieldnames=PAIR_FIELDS)
         results = {
@@ -823,7 +859,7 @@ class GenerateAdapterSliceReport:
             "paired_differences": paired,
         }
         write_json_atomic(root / "results.json", results)
-        self._write_summary(root / "summary.md", rows, paired)
+        self._write_summary(root / "summary.md", rows, paired, candidate=request.comparison_method)
         return {
             "runs": len(runs),
             "slice_rows": len(rows),
@@ -833,12 +869,14 @@ class GenerateAdapterSliceReport:
         }
 
     @staticmethod
-    def _paired_results(rows, slice_specs, ground_truth, prediction_cache, samples, seed):
+    def _paired_results(rows, slice_specs, ground_truth, prediction_cache, samples, seed, *, candidate="drax"):
         by_key = {
             (row["method"], int(row["seed"]), row["slice_family"], row["slice_name"]): row
             for row in rows
         }
-        seeds = sorted({int(row["seed"]) for row in rows if row["method"] == "drax"})
+        seeds = sorted({int(row["seed"]) for row in rows if row["method"] == candidate})
+        if not seeds:
+            raise MLXUserError(f"No completed candidate runs for {candidate}")
         quality_cache: dict[tuple[str, int, tuple[int, ...], str], dict[int, float]] = {}
 
         def qualities(method, run_seed, categories, area_label):
@@ -860,17 +898,19 @@ class GenerateAdapterSliceReport:
 
         paired = []
         for comparator in COMPARATORS:
+            if comparator == candidate:
+                continue
             if not all((comparator, value) in prediction_cache for value in seeds):
                 continue
             for index, (family, name, image_ids, categories, area_label) in enumerate(slice_specs):
                 differences = [
-                    float(by_key[("drax", value, family, name)]["mAP50_95"])
+                    float(by_key[(candidate, value, family, name)]["mAP50_95"])
                     - float(by_key[(comparator, value, family, name)]["mAP50_95"])
                     for value in seeds
                 ]
                 ci_low, ci_high = _t_interval(differences)
                 drax_quality = {
-                    value: qualities("drax", value, categories, area_label) for value in seeds
+                    value: qualities(candidate, value, categories, area_label) for value in seeds
                 }
                 comparator_quality = {
                     value: qualities(comparator, value, categories, area_label) for value in seeds
@@ -893,7 +933,7 @@ class GenerateAdapterSliceReport:
                 )
                 paired.append(
                     {
-                        "comparison": f"drax-minus-{comparator}",
+                        "comparison": f"{candidate}-minus-{comparator}",
                         "slice_family": family,
                         "slice_name": name,
                         "n_seeds": len(seeds),
@@ -910,7 +950,7 @@ class GenerateAdapterSliceReport:
         return paired
 
     @staticmethod
-    def _write_summary(path: Path, rows, paired) -> None:
+    def _write_summary(path: Path, rows, paired, *, candidate="drax") -> None:
         overall = [row for row in rows if row["slice_family"] == "overall"]
         grouped: dict[str, list[float]] = {}
         for row in overall:
@@ -924,13 +964,13 @@ class GenerateAdapterSliceReport:
         for method, values in sorted(grouped.items()):
             lines.append(f"| {method} | {len(values)} | {mean(values):.4f} |")
         lines.extend([
-            "", "## Drax targeted slices", "",
+            "", f"## {candidate} targeted slices", "",
             "| Slice family | Slice | Images | Objects | Mean mAP50-95 | Support |",
             "|---|---|---:|---:|---:|---|",
         ])
         drax_slices: dict[tuple[str, str], list[dict[str, Any]]] = {}
         for row in rows:
-            if row["method"] == "drax" and row["slice_family"] in {
+            if row["method"] == candidate and row["slice_family"] in {
                 "weather", "weather_group", "difficulty", "object_size"
             }:
                 drax_slices.setdefault((row["slice_family"], row["slice_name"]), []).append(row)
@@ -940,7 +980,7 @@ class GenerateAdapterSliceReport:
                 f"| {family} | {name} | {values[0]['image_count']} | {values[0]['object_count']} | "
                 f"{mean(float(row['mAP50_95']) for row in values):.4f} | {support} |"
             )
-        lines.extend(["", "## Drax paired comparisons", ""])
+        lines.extend(["", f"## {candidate} paired comparisons", ""])
         for row in paired:
             if row["slice_family"] != "overall":
                 continue

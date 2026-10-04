@@ -170,7 +170,9 @@ class CalibrateAdapterBatchSize:
 
     def __init__(self, model_name: str, checkpoint_path: Path, output: Path, *,
                  device: str = "cuda", image_size: int = 640, amp: bool = True,
-                 reduction: int = 8, maximum_batch: int = 8):
+                 reduction: int = 8, maximum_batch: int = 8,
+                 profiles: tuple[str, ...] = ("full-finetune", "drax"),
+                 rank: int = 8, alpha: float = 1.0, target: str = "neck"):
         self.model_name = model_name
         self.checkpoint_path = Path(checkpoint_path)
         self.output = Path(output)
@@ -179,6 +181,10 @@ class CalibrateAdapterBatchSize:
         self.amp = bool(amp)
         self.reduction = int(reduction)
         self.maximum_batch = int(maximum_batch)
+        self.profiles = profiles
+        self.rank = rank
+        self.alpha = alpha
+        self.target = target
 
     def execute(self) -> dict:
         if self.device.type != "cuda":
@@ -188,14 +194,16 @@ class CalibrateAdapterBatchSize:
 
         profiles = {}
         info = None
-        for profile in ("full-finetune", "drax"):
+        if not self.profiles:
+            raise MLXUserError("Calibration requires at least one training profile")
+        for profile in self.profiles:
             model, info = VerifyFoundationCheckpoint(
                 self.model_name, self.checkpoint_path
             ).execute()
-            if profile == "drax":
+            if profile != "full-finetune":
                 inject_adapters(
-                    model, "drax", yolox_targets(model, "neck", "drax"),
-                    reduction=self.reduction,
+                    model, profile, yolox_targets(model, self.target, profile),
+                    reduction=self.reduction, rank=self.rank, alpha=self.alpha,
                 )
             model.to(self.device)
             torch.cuda.empty_cache()
@@ -218,8 +226,10 @@ class CalibrateAdapterBatchSize:
             "image_size": self.image_size,
             "amp": self.amp,
             "profiles": profiles,
-            "adapter_target": "neck",
+            "adapter_target": self.target,
             "adapter_reduction": self.reduction,
+            "adapter_rank": self.rank,
+            "adapter_alpha": self.alpha,
             "probed_batches": [value for value in (1, 2, 4, 8) if value <= self.maximum_batch],
             "selected_physical_batch_size": chosen,
             "target_vram_fraction": 0.60,

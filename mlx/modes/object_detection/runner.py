@@ -79,7 +79,11 @@ def run_object_detection(config: dict[str, Any]) -> Any:
             )
             return command.execute()
         if action == "adapter-report":
-            return GenerateAdapterReport(Path(config.get("output_path") or DEFAULT_OUTPUT)).execute()
+            return GenerateAdapterReport(
+                Path(config.get("output_path") or DEFAULT_OUTPUT),
+                baseline_study=config.get("baseline_study"),
+                comparison_method=config.get("comparison_method") or "drax",
+            ).execute()
         if action == "adapter-prepare":
             source = Path(config.get("dataset_path") or "~/Desktop/datasets/object-detection/dawn/original")
             destination = Path(config.get("output_path") or DEFAULT_DATASET)
@@ -99,6 +103,8 @@ def run_object_detection(config: dict[str, Any]) -> Any:
                 request.model, request.checkpoint, request.output,
                 device=request.device, image_size=request.image_size, amp=request.amp,
                 reduction=request.reduction,
+                profiles=("drax-hybrid",) if request.methods == ("drax-hybrid",) else ("full-finetune", "drax"),
+                rank=request.rank, alpha=request.alpha, target=request.target,
             ).execute()
         return RunAdapterExperiment(request).execute()
     if action == "ls-models" and config.get("names_only"):

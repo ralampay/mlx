@@ -9,6 +9,7 @@ from pathlib import Path
 from statistics import mean, stdev
 
 from mlx.core.exceptions import MLXUserError
+from mlx.modes.object_detection.adapter_baselines import recorded_baseline_runs, read_artifact
 
 
 FIELDS = (
@@ -37,8 +38,10 @@ def _summary(values: list[float]) -> dict:
 
 
 class GenerateAdapterReport:
-    def __init__(self, root: Path):
+    def __init__(self, root: Path, *, baseline_study: Path | None = None, comparison_method: str = "drax"):
         self.root = Path(root).expanduser().resolve()
+        self.baseline_study = baseline_study
+        self.comparison_method = comparison_method
 
     def execute(self) -> dict:
         environment = {}
@@ -46,12 +49,17 @@ class GenerateAdapterReport:
         if environment_path.exists():
             environment = json.loads(environment_path.read_text())
         rows = []
-        raw_runs = []
         for path in sorted(self.root.glob("*/seed-*/metrics.json")):
             metrics = json.loads(path.read_text())
-            raw_runs.append(metrics)
             row = {field: metrics.get(field) for field in FIELDS}
             row["gpu"] = environment.get("gpu_name")
+            rows.append(row)
+        known = {(row["method"], row["seed"]) for row in rows}
+        for run in recorded_baseline_runs(self.root, self.baseline_study):
+            if (run.method, run.seed) in known:
+                raise MLXUserError(f"Duplicate comparison run: {run.method}/seed-{run.seed}")
+            row = {field: run.metrics.get(field) for field in FIELDS}
+            row["gpu"] = read_artifact(run.directory.parent.parent / "environment.json").get("gpu_name")
             rows.append(row)
         if not rows:
             raise MLXUserError(f"No adapter runs found under {self.root}")
@@ -75,15 +83,17 @@ class GenerateAdapterReport:
             for method, values in grouped.items()
         }
         paired = {}
-        for comparator in ("bottleneck", "conv-adapter", "full-finetune"):
-            drax = {row["seed"]: row for row in grouped.get("drax", [])}
+        for comparator in ("bottleneck", "conv-adapter", "full-finetune", "lora", "convpass", "drax", "frozen"):
+            if comparator == self.comparison_method:
+                continue
+            drax = {row["seed"]: row for row in grouped.get(self.comparison_method, [])}
             other = {row["seed"]: row for row in grouped.get(comparator, [])}
             differences = [
                 float(drax[seed]["mAP50_95"]) - float(other[seed]["mAP50_95"])
                 for seed in sorted(drax.keys() & other.keys())
             ]
             if differences:
-                paired[f"drax_minus_{comparator}"] = _summary(differences)
+                paired[f"{self.comparison_method}_minus_{comparator}"] = _summary(differences)
         results = {"runs": rows, "method_summaries": method_summaries, "paired_differences": paired}
         (aggregate / "results.json").write_text(
             json.dumps(results, indent=2, sort_keys=True) + "\n", encoding="utf-8"
@@ -103,7 +113,7 @@ class GenerateAdapterReport:
                 f"{mean(float(row['peak_cuda_memory_mb'] or 0) for row in values):.1f} | "
                 f"{mean(float(row['training_seconds']) for row in values):.1f} |"
             )
-        lines.extend(["", "## Paired Drax comparisons", ""])
+        lines.extend(["", f"## Paired {self.comparison_method} comparisons", ""])
         if not paired:
             lines.append("No paired comparator results are available yet.")
         for name, values in paired.items():

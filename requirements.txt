@@ -20,4 +20,4 @@ torch
 torchvision
 tqdm
 ultralytics @ git+https://github.com/ralampay/ultralytics
-libreyolo[onnx] @ git+https://github.com/ralampay/libreyolo.git@aebe0e08b3b4613401ac1ec298aeafdabfcd46a9
+libreyolo[onnx] @ git+https://github.com/ralampay/libreyolo.git@0f55a32969582442ad7904befe326d96ec16934d

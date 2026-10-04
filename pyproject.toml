@@ -24,13 +24,13 @@ object-detection-ultralytics = [
 ]
 object-detection-libreyolo = [
     "pyarrow",
-    "libreyolo[onnx] @ git+https://github.com/ralampay/libreyolo.git@0f55a32969582442ad7904befe326d96ec16934d"
+    "libreyolo[onnx] @ git+https://github.com/ralampay/libreyolo.git@dd1ac8d3b2d1e7b99ab078b5c589621f7c4bddc8"
 ]
 object-detection = [
     "onnxruntime",
     "pyarrow",
     "ultralytics @ git+https://github.com/ralampay/ultralytics",
-    "libreyolo[onnx] @ git+https://github.com/ralampay/libreyolo.git@0f55a32969582442ad7904befe326d96ec16934d"
+    "libreyolo[onnx] @ git+https://github.com/ralampay/libreyolo.git@dd1ac8d3b2d1e7b99ab078b5c589621f7c4bddc8"
 ]
 tracking = [
     "motmetrics>=1.4.0",

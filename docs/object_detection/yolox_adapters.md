@@ -209,10 +209,12 @@ different epoch count, seed set, precision mode, batch, or adapter configuration
 ## Drax hybrid follow-up
 
 `drax-hybrid` adds exact rank-8 LoRA weight updates and compressed local/dilated
-spatial bypasses at three final neck projections. The spatial path uses
+spatial bypasses at the same 26 neck convolutions as LoRA. The spatial path uses
 depthwise convolutions plus a compressed channel mixer, inspired by Convpass
-and the existing Drax adapter. This placement is narrower than the original
-LoRA condition. At reduction 8 it trains 400,966 parameters (0.735%).
+and the existing Drax adapter. At reduction 8 it trains 2,234,900 parameters
+(3.964%). This replaces the earlier three-projection default; saved injection
+paths preserve reconstruction of earlier checkpoints. Use a new output directory
+for the wider-placement experiment. Memory and runtime must be recalibrated.
 Initialization is explicitly seeded before hybrid injection; historical runs
 seeded training but did not record a separate adapter-initialization seed.
 Reused baselines therefore support an exploratory comparison, not a controlled
@@ -226,18 +228,18 @@ python -m mlx --mode object-detection --action adapter-experiment --model yolox-
   --adapter drax-hybrid --experiment-seeds 1,2,3,4,5 --epochs 20 \
   --checkpoint ~/Desktop/object-detection-models/foundational-yolox-l.pt \
   --dataset ~/Desktop/datasets/object-detection/dawn/processed \
-  --output ~/Desktop/experiments/yolox-l-adapters/drax-hybrid-five-seed-20ep \
+  --output ~/Desktop/experiments/yolox-l-adapters/drax-hybrid-lora-matched-five-seed-20ep \
   --baseline-study ~/Desktop/experiments/yolox-l-adapters/five-seed-20ep \
   --device cuda --height 640 --width 640 --batch-size 8 --gradient-accumulation 1 \
   --adapter-target neck --adapter-reduction 8 --adapter-rank 8 --adapter-alpha 1 --amp
 python -m mlx --mode object-detection --action adapter-report \
-  --output ~/Desktop/experiments/yolox-l-adapters/drax-hybrid-five-seed-20ep \
+  --output ~/Desktop/experiments/yolox-l-adapters/drax-hybrid-lora-matched-five-seed-20ep \
   --comparison-method drax-hybrid
 python -m mlx --mode object-detection --action adapter-slice-predict \
-  --output ~/Desktop/experiments/yolox-l-adapters/drax-hybrid-five-seed-20ep \
+  --output ~/Desktop/experiments/yolox-l-adapters/drax-hybrid-lora-matched-five-seed-20ep \
   --comparison-method drax-hybrid --device cuda
 python -m mlx --mode object-detection --action adapter-slice-report \
-  --output ~/Desktop/experiments/yolox-l-adapters/drax-hybrid-five-seed-20ep \
+  --output ~/Desktop/experiments/yolox-l-adapters/drax-hybrid-lora-matched-five-seed-20ep \
   --comparison-method drax-hybrid --seed 42 --bootstrap-samples 2000
 ```
 

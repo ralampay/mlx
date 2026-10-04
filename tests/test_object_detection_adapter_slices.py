@@ -158,6 +158,21 @@ def test_slice_request_ignores_unrelated_global_parser_defaults(tmp_path):
     assert request.dataset == Path("~/Desktop/datasets/object-detection/dawn/processed").expanduser().resolve()
 
 
+def test_hybrid_reconstruction_uses_recorded_convolutions():
+    model = torch.nn.Sequential(torch.nn.Conv2d(4, 8, 1), torch.nn.Conv2d(8, 8, 1))
+    targets = LibreYOLOAdapterPredictionWriter._adapter_targets(
+        model, {"injected_modules": ["1"]}, "drax-hybrid"
+    )
+    assert targets == {"1": 8}
+
+
+@pytest.mark.parametrize("paths", [[], ["missing"], ["0", "0"], "0", [None]])
+def test_invalid_recorded_hybrid_targets_fail_clearly(paths):
+    model = torch.nn.Sequential(torch.nn.Conv2d(4, 8, 1))
+    with pytest.raises(MLXUserError, match="[Hh]ybrid"):
+        LibreYOLOAdapterPredictionWriter._adapter_targets(model, {"injected_modules": paths}, "drax-hybrid")
+
+
 def test_head_only_reconstruction_preserves_foundation_and_restores_head_buffers(tmp_path):
     class TinyModel(torch.nn.Module):
         def __init__(self):

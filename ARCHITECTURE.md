@@ -838,9 +838,12 @@ training, and records failures without retrying altered conditions. `GenerateAda
 analysis-ready CSV/JSON plus descriptive mean, standard deviation, paired differences, and 95%
 intervals. Single-seed output is explicitly exploratory.
 
-The `drax-hybrid` method is implemented only in LibreYOLO: three neck-output
-projection wrappers combine exact LoRA weight updates and compressed two-scale
-spatial bypasses. MLX forwards rank/reduction/alpha and records actual placement.
+The `drax-hybrid` method is implemented only in LibreYOLO: it shares LoRA's
+convolution target selector (26 dense 1x1 neck convolutions for YOLOX-L), combining
+exact LoRA weight updates and compressed two-scale spatial bypasses. MLX forwards
+rank/reduction/alpha and records actual placement. Prediction reconstruction uses
+the saved hybrid injection paths so earlier three-projection checkpoints remain
+loadable. Experiment resume rejects a completed hybrid with a different placement.
 `LoadAdapterBaseline` owns read-only reuse through `--baseline-study`: it verifies
 the complete seed matrix and matching checkpoint, split, precision, batch,
 optimizer and epoch conditions, then pins the source metadata checksums in

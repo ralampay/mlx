@@ -222,7 +222,7 @@ class RunAdapterExperiment:
         request = self.request
         request.validate()
         device = require_experiment_device(request.device)
-        _, foundation = VerifyFoundationCheckpoint(request.model, request.checkpoint).execute()
+        foundation_model, foundation = VerifyFoundationCheckpoint(request.model, request.checkpoint).execute()
         dataset = load_prepared_adapter_dataset(request.dataset)
         expected_classes = [foundation["classes"][index] for index in range(foundation["nc"])]
         if dataset["classes"] != expected_classes:
@@ -310,6 +310,9 @@ class RunAdapterExperiment:
                         "train_head": request.train_head,
                         "adapter_target": request.target if method not in {"frozen", "head-only", "full-finetune"} else None,
                     }
+                    if method == "drax-hybrid":
+                        from libreyolo.adapters import yolox_targets
+                        expected["injected_modules"] = list(yolox_targets(foundation_model, request.target, method))
                     if metrics.get("status") != "completed" or any(
                         metrics.get(key) != value for key, value in expected.items()
                     ):

@@ -66,6 +66,50 @@ def test_adapter_dataset_default_ignores_global_cli_default():
     assert explicit.dataset == Path("/custom")
 
 
+@pytest.mark.parametrize("matching_placement", [False, True])
+def test_resume_checks_hybrid_injection_placement(tmp_path, monkeypatch, matching_placement):
+    from mlx.modes.object_detection import adapter_experiment as experiment
+    import libreyolo.adapters
+
+    request = AdapterExperimentRequest.from_config({
+        "output_path": str(tmp_path / "output"), "dataset_path": str(tmp_path / "data"),
+        "model_path": str(tmp_path / "foundation.pt"), "adapter": "drax-hybrid",
+        "device": "cpu", "epochs": 20,
+    })
+    foundation = {"classes": {0: "car"}, "nc": 1, "sha256": "foundation"}
+    dataset = {"classes": ["car"], "dataset": "fixture", "selection_sha256": "split"}
+    monkeypatch.setattr(experiment.VerifyFoundationCheckpoint, "execute", lambda self: (torch.nn.Identity(), foundation))
+    monkeypatch.setattr(experiment.CollectAdapterEnvironment, "execute", lambda self: {})
+    monkeypatch.setattr(experiment, "load_prepared_adapter_dataset", lambda path: dataset)
+    monkeypatch.setattr(libreyolo.adapters, "yolox_targets", lambda *args: {"neck.conv": 4})
+
+    def unexpected_training(*args):
+        raise AssertionError("Resume validation must not start training")
+
+    monkeypatch.setattr(experiment.RunAdapterExperiment, "_run_one", unexpected_training)
+    for method in ("frozen", "drax-hybrid"):
+        hybrid = method == "drax-hybrid"
+        metrics = {
+            "status": "completed", "checkpoint_sha256": "foundation",
+            "dataset_selection_sha256": "split", "physical_batch_size": 1,
+            "effective_batch_size": 1, "image_size": 640, "device": "cpu", "amp": True,
+            "epochs": 20 if hybrid else 0, "method": method, "seed": 42,
+            "learning_rate": .0001, "adapter_rank": 8 if hybrid else None,
+            "adapter_reduction": 8 if hybrid else None, "adapter_alpha": 1.0 if hybrid else None,
+            "train_head": False, "adapter_target": "neck" if hybrid else None,
+            "injected_modules": ["neck.conv" if matching_placement else "old.conv"] if hybrid else [],
+        }
+        directory = request.output / method / "seed-42"
+        directory.mkdir(parents=True)
+        (directory / "metrics.json").write_text(json.dumps(metrics))
+    command = experiment.RunAdapterExperiment(request)
+    if matching_placement:
+        assert len(command.execute()) == 2
+    else:
+        with pytest.raises(MLXUserError, match="incompatible"):
+            command.execute()
+
+
 def _record(index: int) -> _DawnRecord:
     class_id = index % len(FOUNDATION_CLASSES)
     source_name = next(name for name, mapped in DAWN_CLASS_MAPPING.items() if mapped == class_id)

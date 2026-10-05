@@ -224,6 +224,18 @@ downstream use; pass `--no-use-best` to prefer the last checkpoint.
 Provider checkpoints are not interchangeable. Always select the same provider that
 created the `.pt` or `.onnx` artifact.
 
+To run a YOLOX foundation with an adapter-only checkpoint from an MLX adapter
+experiment, pass `--adapter`. Its saved configuration supplies the adapter method
+and hyperparameters; the foundation checksum must match. This works with camera
+and video inference using LibreYOLO and a standard YOLOX `.pt` foundation:
+
+```bash
+python -m mlx --mode object_detection --provider libreyolo --action infer-video \
+    --model-path ~/workspace/object-detection-models/foundational-yolox-l.pt \
+    --adapter ~/workspace/object-detection-models/yolox-l-lora-dawn-best.pt \
+    --file-path ~/videos/sample.mp4
+```
+
 The intended deployment flow is:
 
 ```text

@@ -15,6 +15,7 @@ class ObjectDetectionRequest(ConfigRequest):
     height: int = 640
     width: int = 640
     confidence: float = 0.25
+    adapter: Optional[str] = None
 
 @dataclass(frozen=True)
 class TrainObjectDetectionRequest(ObjectDetectionRequest):

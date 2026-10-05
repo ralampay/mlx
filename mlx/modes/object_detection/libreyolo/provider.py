@@ -51,6 +51,7 @@ class LibreYOLOProvider:
             device=request.device,
             imgsz=resolve_imgsz(request.to_config()),
             confidence=request.confidence,
+            adapter_path=request.adapter,
         )
 
     def convert(

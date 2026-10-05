@@ -16,6 +16,10 @@ from mlx.modes.object_detection.libreyolo.adapter_backend import (
     VerifyFoundationCheckpoint,
     build_experimental_yolox,
 )
+from mlx.modes.object_detection.libreyolo.adapter_loading import (
+    ApplyYOLOXAdapter,
+    resolve_adapter_targets,
+)
 
 
 class LibreYOLOAdapterPredictionWriter:
@@ -74,7 +78,6 @@ class ReconstructAdapterModel:
         self.device = device
 
     def execute(self, run):
-        from libreyolo.adapters import inject_adapters, load_adapter_state_dict
         from libreyolo.utils.serialization import load_untrusted_torch_file
 
         model_name = f"yolox-{self.foundation['size']}"
@@ -84,25 +87,10 @@ class ReconstructAdapterModel:
         method = run.method
         if method not in {"frozen", "head-only", "full-finetune"}:
             config = run.config
-            targets = self._adapter_targets(model, config, method)
-            inject_adapters(
-                model,
-                method,
-                targets,
-                reduction=int(config.get("adapter_reduction") or 8),
-                rank=int(config.get("adapter_rank") or 8),
-                alpha=float(config.get("adapter_alpha", 1.0)),
-                train_head=bool(config.get("train_head", False)),
-            )
             artifact = load_untrusted_torch_file(
                 str(run.directory / "adapter" / "checkpoint.pt"), map_location="cpu"
             )
-            try:
-                load_adapter_state_dict(model, artifact["state"])
-            except (KeyError, ValueError, RuntimeError) as exc:
-                raise MLXUserError(
-                    f"Cannot restore adapter state for {method}/seed-{run.seed}: {exc}"
-                ) from exc
+            ApplyYOLOXAdapter(model, {**config, "method": method}, artifact["state"]).execute()
         elif method in {"head-only", "full-finetune"}:
             self._restore_dense_checkpoint(model, run, load_untrusted_torch_file)
 
@@ -112,21 +100,7 @@ class ReconstructAdapterModel:
 
     @staticmethod
     def _adapter_targets(model, config, method):
-        from libreyolo.adapters import yolox_targets
-
-        # Historical hybrids used three projections. Reconstruct their recorded
-        # topology rather than applying the current 26-convolution policy.
-        if method == "drax-hybrid" and "injected_modules" in config:
-            paths = config["injected_modules"]
-            if not isinstance(paths, list) or not paths or any(not isinstance(p, str) for p in paths):
-                raise MLXUserError("Hybrid checkpoint requires a nonempty injected_modules list")
-            if len(set(paths)) != len(paths):
-                raise MLXUserError("Hybrid checkpoint contains duplicate injection paths")
-            try:
-                return {path: model.get_submodule(path).out_channels for path in paths}
-            except AttributeError as exc:
-                raise MLXUserError(f"Invalid hybrid checkpoint injection path: {exc}") from exc
-        return yolox_targets(model, str(config.get("adapter_target") or "neck"), method)
+        return resolve_adapter_targets(model, config, method)
 
     @staticmethod
     def _restore_dense_checkpoint(model, run, loader) -> None:

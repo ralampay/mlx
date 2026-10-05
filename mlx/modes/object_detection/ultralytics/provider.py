@@ -58,6 +58,10 @@ class UltralyticsProvider:
         return result
 
     def create_detector(self, request: ObjectDetectionRequest):
+        if request.adapter:
+            from mlx.core.exceptions import MLXUserError
+
+            raise MLXUserError("Detection --adapter requires --provider libreyolo and a YOLOX foundation .pt checkpoint.")
         from mlx.modes.object_detection.ultralytics.adapters import build_detection_adapter
         from mlx.modes.object_detection.ultralytics.utils import resolve_imgsz, resolve_model_paths
 

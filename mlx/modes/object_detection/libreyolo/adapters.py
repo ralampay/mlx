@@ -19,6 +19,7 @@ class LibreYOLODetectionAdapter:
         device: str,
         imgsz: int | tuple[int, int],
         confidence: float,
+        adapter_path: str | None = None,
     ) -> None:
         try:
             from libreyolo import LibreYOLO
@@ -26,7 +27,12 @@ class LibreYOLODetectionAdapter:
             raise dependency_error("running object-detection inference") from exc
 
         try:
-            self.model = LibreYOLO(str(model_path), device=device, task="detect")
+            if adapter_path:
+                from mlx.modes.object_detection.libreyolo.adapter_loading import LoadAdaptedYOLOX
+
+                self.model = LoadAdaptedYOLOX(model_path, adapter_path, device=device).execute()
+            else:
+                self.model = LibreYOLO(str(model_path), device=device, task="detect")
         except (
             AttributeError,
             FileNotFoundError,
@@ -69,6 +75,7 @@ def build_detection_adapter(
     device: str,
     imgsz: int | tuple[int, int],
     confidence: float,
+    adapter_path: str | None = None,
 ) -> DetectionAdapter:
     if model_path.suffix.lower() not in {".pt", ".onnx"}:
         raise MLXUserError(
@@ -79,6 +86,7 @@ def build_detection_adapter(
         device=device,
         imgsz=imgsz,
         confidence=confidence,
+        adapter_path=adapter_path,
     )
 
 

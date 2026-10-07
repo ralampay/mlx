@@ -206,6 +206,7 @@ mlx/
     │   ├── tracking/             tracking, MOT evaluation, replay export, registry, algorithms
     │   ├── libreyolo/            LibreYOLO implementation using the Ralampay fork
     │   │   ├── adapter_backend.py strict checkpoint/CUDA/environment/calibration and BN-safe trainer boundary
+    │   │   ├── adapter_loading.py standalone foundation/adapter loading and shared strict adapter restoration
     │   │   └── adapter_slice_backend.py strict checkpoint reconstruction and prediction-cache boundary
     │   └── ultralytics/          Ultralytics implementation and compatibility exports
     ├── video_anomaly_detection/  normal-only clip data, 3D/legacy backbones, SVDD, research artifacts
@@ -937,6 +938,22 @@ Before adapter training, the integration verifies that either the train signatur
 configuration fields explicitly declare all requested adapter controls. Generic `**kwargs` alone
 is not evidence of support. Unsupported versions fail with `MLXUserError` rather than silently
 performing full-model training. MLX does not invent a neural-adapter registry or provider hook.
+
+Detection inference accepts an optional `ObjectDetectionRequest.adapter` path through
+`--adapter`. The LibreYOLO provider constructs `LoadAdaptedYOLOX`, which reads the adapter's
+`config`/`state` artifact, verifies its standard YOLOX model identity and exact foundation
+SHA-256 against `--model-path`, then invokes `ApplyYOLOXAdapter` before wrapping the model
+for normalized frame prediction. Saved method, rank, reduction, alpha, head-training flag,
+and injection topology determine restoration; original study directories are not required.
+`ApplyYOLOXAdapter` and `resolve_adapter_targets` are also used by study reconstruction to
+keep injection and strict trainable-state loading at one provider boundary. Recorded LoRA
+and hybrid/residual-fusion convolution paths are honored, including historical hybrid
+topology; feature adapter paths are checked against the MLX-owned YOLOX target policy.
+Restoration uses MLX-owned feature-adapter injection and serialization. Camera/video streaming
+and presentation remain unchanged. ONNX foundations, incompatible checksums, malformed
+adapter artifacts, and Ultralytics inference with `--adapter` raise `MLXUserError`.
+This option does not apply standalone adapters during detection training, conversion, or
+benchmarking; adapter-study actions retain their existing method-selection semantics.
 
 The YOLOX-L feature-adapter study is a separate local research workflow. LibreYOLO owns the
 generic feature adapters, registry, injection, YOLOX target policy, standard model, and strict

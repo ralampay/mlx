@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import colorsys
 import hashlib
 
 import numpy as np
@@ -119,5 +120,7 @@ def annotate_detections(frame: np.ndarray, result: DetectionResult) -> np.ndarra
 
 
 def _color_for_label(label: str) -> tuple[int, int, int]:
-    digest = hashlib.sha256(label.encode("utf-8")).hexdigest()
-    return tuple(int(min(max(int(digest[index : index + 2], 16), 64), 255)) for index in (0, 2, 4))
+    digest = hashlib.sha256(label.encode("utf-8")).digest()
+    hue = int.from_bytes(digest[:2], "big") / 65536
+    red, green, blue = colorsys.hsv_to_rgb(hue, 0.55, 1.0)
+    return tuple(round(channel * 255) for channel in (blue, green, red))

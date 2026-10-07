@@ -5,6 +5,10 @@ dataset formats remain in `README.md` and the mode guides under `docs/`.
 
 ## Design Goals
 
+The CSP-Drax comparison supports explicit scratch initialization through `--scratch`.
+It dispatches `TrainObjectDetectionRequest` with no checkpoint and `pretrained=False`,
+uses a separate scratch manifest, and regenerates the statistical report after each run.
+
 MLX is organized so that machine-learning workflows can be invoked from the CLI, Python,
 tests, or another application without rewriting their orchestration. The governing rules are:
 
@@ -17,6 +21,118 @@ tests, or another application without rewriting their orchestration. The governi
 - old Python entry points remain thin compatibility wrappers when commands replace functions.
 
 ## Layers and Dependency Direction
+
+### Supervised adapter taxonomy transfer
+
+Active research adapters live in `object_detection.feature_adapters`, independent
+of LibreYOLO. This includes the layers, factory, injection and compact state
+serialization. `object_detection.libreyolo.adapter_targets` isolates YOLOX
+placement. LibreYOLO retains a frozen legacy copy for backward compatibility,
+not a dependency on MLX; state-dict names and original initialization are preserved.
+New adapter work must extend the MLX implementation, not the compatibility copy.
+Existing provider-owned detector definitions and taxonomy-head utilities remain
+provider-owned. Historical source snapshots are never rewritten during migration.
+
+`SnapshotRepositories` in `mlx.core.repository_snapshot` owns immutable source
+copies and checksums, shared by transfer and same-taxonomy study preparation.
+`RunDawnPriorityStudy` coordinates the explicitly paired same-taxonomy recipe,
+injecting calibration, experiment, report and export commands. Process holding
+and restoration are OS-specific launcher responsibilities, not training logic.
+The optional `include_lora100` recipe flag adds five rank-100/alpha-12.5 runs
+under a separate same-taxonomy study after the rank-eight comparison. It uses
+the same calibration, smoke and protocol checks. `GenerateAdapterReport` accepts
+explicit `extra_runs` for combined reporting, rejecting duplicate method/seed
+identities. Rank-100 rows have a reporting alias and a `source_run` path; their
+original model method remains LoRA. Original dispatchers resume after this stage.
+The optional Python request field `seed_adapter_initialization` seeds every
+method before construction when enabled; its default preserves legacy behavior.
+
+`RunPairedDawnStudy` coordinates a fixed 80-run overall-AP study using the existing
+calibration and experiment commands: fusion, rank-four LoRA, rank-100 LoRA and
+full fine-tuning, with twenty fresh paired seeds. Separate condition roots retain
+native model-method identities; reporting aliases carry explicit source paths.
+`GeneratePairedDawnReport` owns final paired TOST and directional superiority
+inference, applying one Holm correction across six prespecified claims. Interim
+reports are descriptive only; final claims require all planned observations.
+The priority launcher also supports identity-checked, in-memory suspended jobs.
+Only explicitly stopped CUDA clients are allowed alongside calibration, accounting
+for their retained VRAM. Its cleanup resumes held processes after the child exits,
+including failure. This preserves live state, not durability across host reboots
+or SIGKILL; the held-process manifest supports manual recovery.
+
+`ExportBestAdapterDetector` selects a seed only by validation AP and writes the
+tensor-only `mlx-yolox-adapter-detector-v1` format after an exact CUDA reload
+check. `LoadAdapterDetector` reconstructs it without an external foundation file.
+Both are callable commands at the LibreYOLO boundary; standard provider loaders
+are unchanged and must not be advertised as supporting this MLX-owned format.
+Publication backs up an existing destination. Dataset class order and original
+frozen detector weights are retained for same-taxonomy experiments.
+
+`neu_det.PrepareNeuDetDataset` owns the official download, validated VOC conversion,
+exact-pixel duplicate grouping and deterministic stratified splits. The local CLI
+action is `adapter-prepare-neu-det`. `AdapterExperimentRequest.head_policy` defaults
+to `preserve`; opt-in `reset-classifiers` requires training the full head and disables
+the automatic frozen baseline. LibreYOLO's `models.yolox.transfer` owns explicit
+classifier replacement and strict trainable-plus-head-buffer checkpoint loading.
+The foundation is always loaded strictly before changing the classifiers, even
+when source and target class counts happen to match.
+
+`PrepareTransferStudy` snapshots model/source provenance without duplicating data.
+`RunQueuedTransferStudy.execute()` owns the locked, fail-stop local CUDA queue,
+common-batch calibration, six smoke runs and interleaved seed matrix. CUDA provider
+details reside in `libreyolo.transfer_backend`; `GenerateTaxonomyTransferReport`
+reuses COCO scoring, paired statistics and qualitative rendering. The thin
+`scripts/experiments/neu_det_adapters.py` entrypoint runs through the existing detached
+`experiment-job.py` supervisor. Resume requires explicit acknowledgement and verifies
+snapshots; completed compatible conditions are reused, incomplete runs are not overwritten.
+Native best/last checkpoints are retained; compact transfer checkpoints include head
+BatchNorm buffers and are distinct from legacy same-taxonomy adapter checkpoints.
+
+Transfer plans optionally declare per-condition IDs, backend methods, ranks and alphas.
+`AdapterExperimentRequest.condition_id` (CLI `--condition-id`) separates run identity
+from adapter implementation for a single taxonomy-transfer method. Thus `lora-r100`
+reuses LoRA, while MLX registers `drax-spatial`, the hybrid's spatial-only
+convolution wrapper with reference-matched initialization and no retained LoRA branch.
+Both retain the existing 26-convolution neck policy.
+
+`drax-residual-fusion` is a separate MLX convolution adapter with a
+compressed channel-normalized path, internal spatial identity skip, and
+per-pixel softmax fusion of local and dilated depthwise convolutions. Its
+zero-initialized output projection preserves the frozen convolution initially.
+Singleton bottlenecks use the normalization affine parameters without centering
+to preserve input variation. The recommended reduction is explicitly 16; shared
+CLI/injection defaults remain 8 for compatibility. MLX records reduction, alpha,
+seed and injection paths for strict reconstruction and resume validation.
+See `docs/object_detection/drax-residual-fusion.md` for usage and parameter counts.
+
+Queue counts and order derive
+from the configured conditions; ablations require the original physical batch eight.
+`VerifyTransferBaseline` pins completed baseline artifacts and validates protocol/data
+compatibility. Baselines remain read-only; new snapshots, ten runs, combined reports
+and galleries live in a separate study. Combined reports consistently use cached COCO
+scores, retain native metrics separately, and declare four paired ablation comparisons.
+
+`remote_sensing_pilot` composes the same transfer-study lifecycle for already-prepared
+RSOD, NWPU-VHR-10, SSDD, HRSID and DIOR datasets. Dataset views link individual
+images/labels, preserve source COCO annotations and splits, verify source image hashes,
+and record known cross-split overlap. The pilot script is a thin command entrypoint;
+each dataset has immutable source/foundation snapshots and an independent fail-stop
+queue. Eight conditions use one seed, with calibrated common physical batch and
+effective batch eight per dataset. This is exploratory, not seed-level confirmation.
+Transfer requests expose label capacity and detection limits to the LibreYOLO boundary.
+YOLOX defaults remain 50 labels; dense pilots set capacity from annotation counts
+and retain up to 1000 predictions. Primary COCO AP retains standard maxDets=100.
+The existing one-pixel resized-box filter still applies. Remote reports use a single
+image group rather than NEU filename categories; expensive full galleries may be
+deferred while retaining predictions for later analysis. Parent aggregates identify
+each dataset explicitly and are updated after each dataset queue completes.
+
+`adapter_queue` isolates CUDA client filtering and read-only completed-study reuse.
+Nautilus is excluded only when its exact system executable is verified through
+procfs; unknown or unverifiable clients remain blocking. Recovery of immutable
+experiment snapshots may load a separately hashed scheduler-only override at the
+composition boundary. Training/model snapshots and study manifests remain unchanged;
+completed studies are verified and reused without rewriting their artifacts.
 
 ```text
 CLI (`mlx.cli`)

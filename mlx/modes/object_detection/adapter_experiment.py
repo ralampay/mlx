@@ -27,7 +27,7 @@ from mlx.modes.object_detection.libreyolo.adapter_backend import (
 
 METHODS = (
     "frozen", "head-only", "full-finetune", "bottleneck", "ssf", "lora",
-    "convpass", "conv-adapter", "drax", "drax-hybrid",
+    "convpass", "conv-adapter", "drax", "drax-hybrid", "drax-spatial", "drax-residual-fusion",
 )
 FOUNDATION = Path("~/Desktop/object-detection-models/foundational-yolox-l.pt")
 DEFAULT_DATASET = Path("~/Desktop/datasets/object-detection/dawn/processed")
@@ -56,6 +56,14 @@ class AdapterExperimentRequest:
     train_head: bool = False
     lr: float = 0.0001
     baseline_study: Path | None = None
+    head_policy: str = "preserve"
+    condition_id: str | None = None
+    max_labels: int = 50
+    max_detections: int = 300
+    seed_adapter_initialization: bool = False
+
+    def method_id(self, method: str) -> str:
+        return self.condition_id or method
 
     @classmethod
     def from_config(cls, config: dict) -> "AdapterExperimentRequest":
@@ -98,11 +106,23 @@ class AdapterExperimentRequest:
             train_head=bool(config.get("train_head", False)),
             lr=float(config.get("lr0") or 0.0001),
             baseline_study=Path(config["baseline_study"]).expanduser().resolve() if config.get("baseline_study") else None,
+            head_policy=str(config.get("head_policy") or "preserve"),
+            condition_id=config.get("condition_id"),
         )
         request.validate(width=int(value("width", 640)))
         return request
 
     def validate(self, *, width: int | None = None) -> None:
+        if self.max_labels < 1 or self.max_detections < 1:
+            raise MLXUserError("Label and detection capacities must be positive")
+        if self.condition_id is not None:
+            import re
+            if len(self.methods) != 1 or self.head_policy != "reset-classifiers" or not re.fullmatch(r"[a-z0-9][a-z0-9-]*", self.condition_id):
+                raise MLXUserError("A condition ID requires one taxonomy-transfer method and a safe lowercase slug")
+        if self.head_policy not in {"preserve", "reset-classifiers"}:
+            raise MLXUserError("Unknown head policy")
+        if self.head_policy == "reset-classifiers" and (not self.train_head or "frozen" in self.methods or self.baseline_study):
+            raise MLXUserError("Taxonomy transfer requires --train-head, no frozen method and no reused baseline")
         if self.model not in MODEL_SIZES:
             raise MLXUserError(f"--model must be one of {', '.join(MODEL_SIZES)}")
         if not self.methods or set(self.methods) - set(METHODS):
@@ -223,9 +243,11 @@ class RunAdapterExperiment:
         request.validate()
         device = require_experiment_device(request.device)
         foundation_model, foundation = VerifyFoundationCheckpoint(request.model, request.checkpoint).execute()
-        dataset = load_prepared_adapter_dataset(request.dataset)
+        transfer = request.head_policy == "reset-classifiers"
+        dataset = (load_prepared_adapter_dataset(request.dataset, expected_classes=None) if transfer
+                   else load_prepared_adapter_dataset(request.dataset))
         expected_classes = [foundation["classes"][index] for index in range(foundation["nc"])]
-        if dataset["classes"] != expected_classes:
+        if not transfer and dataset["classes"] != expected_classes:
             raise MLXUserError("Dataset class order differs from foundation checkpoint")
         request.output.mkdir(parents=True, exist_ok=True)
         environment = CollectAdapterEnvironment(
@@ -247,7 +269,7 @@ class RunAdapterExperiment:
             "foundation_sha256": foundation["sha256"],
             "dataset": dataset["dataset"],
             "dataset_selection_sha256": dataset["selection_sha256"],
-            "available_methods": list(dict.fromkeys(("frozen", *request.methods))),
+            "available_methods": list(dict.fromkeys((request.method_id(m) for m in request.methods) if transfer else ("frozen", *request.methods))),
             "planned_seeds": list(request.seeds),
         }
         previous_study = request.output / "study.json"
@@ -284,12 +306,12 @@ class RunAdapterExperiment:
 
         rows = []
         for seed in request.seeds:
-            methods = tuple(dict.fromkeys(("frozen", *request.methods)))
+            methods = tuple(dict.fromkeys(request.methods if transfer else ("frozen", *request.methods)))
             for method in methods:
                 if (method, seed) in reused:
                     rows.append(dict(reused[(method, seed)]))
                     continue
-                existing = request.output / method / f"seed-{seed}" / "metrics.json"
+                existing = request.output / request.method_id(method) / f"seed-{seed}" / "metrics.json"
                 if existing.exists():
                     metrics = json.loads(existing.read_text())
                     expected = {
@@ -301,17 +323,27 @@ class RunAdapterExperiment:
                         "device": str(device),
                         "amp": request.amp,
                         "epochs": 0 if method == "frozen" else request.epochs,
-                        "method": method,
+                        "method": request.method_id(method),
                         "seed": seed,
                         "learning_rate": request.lr,
                         "adapter_rank": request.rank if method in {"lora", "drax-hybrid"} else None,
-                        "adapter_reduction": request.reduction if method in {"bottleneck", "convpass", "conv-adapter", "drax", "drax-hybrid"} else None,
+                        "adapter_reduction": request.reduction if method in {"bottleneck", "convpass", "conv-adapter", "drax", "drax-hybrid", "drax-spatial", "drax-residual-fusion"} else None,
                         "adapter_alpha": request.alpha if method not in {"frozen", "head-only", "full-finetune"} else None,
                         "train_head": request.train_head,
                         "adapter_target": request.target if method not in {"frozen", "head-only", "full-finetune"} else None,
                     }
-                    if method == "drax-hybrid":
-                        from libreyolo.adapters import yolox_targets
+                    if transfer:
+                        expected["head_policy"] = request.head_policy
+                        expected["target_classes"] = dataset["classes"]
+                        if request.condition_id:
+                            expected["adapter_method"] = method
+                        if request.max_labels != 50 or request.max_detections != 300:
+                            expected.update(max_labels=request.max_labels,max_detections=request.max_detections)
+                    if request.seed_adapter_initialization:
+                        expected["seed_adapter_initialization"] = True
+                        expected["adapter_initialization_seed"] = seed
+                    if method in {"drax-hybrid", "drax-spatial", "drax-residual-fusion"}:
+                        from mlx.modes.object_detection.libreyolo.adapter_targets import yolox_targets
                         expected["injected_modules"] = list(yolox_targets(foundation_model, request.target, method))
                     if metrics.get("status") != "completed" or any(
                         metrics.get(key) != value for key, value in expected.items()
@@ -322,6 +354,11 @@ class RunAdapterExperiment:
                     rows.append(metrics)
                     continue
                 rows.append(self._run_one(method, seed, dataset, foundation, device))
+                if transfer:
+                    import gc
+                    gc.collect()
+                    if device.type == "cuda":
+                        torch.cuda.empty_cache()
         return rows
 
     @staticmethod
@@ -333,18 +370,33 @@ class RunAdapterExperiment:
         _write_json(path, value)
 
     def _run_one(self, method, seed, manifest, info, device):
-        from libreyolo.adapters import adapter_state_dict, count_parameters, inject_adapters, yolox_targets
-        if method == "drax-hybrid":
+        from mlx.modes.object_detection.libreyolo.adapter_targets import yolox_targets
+        from mlx.modes.object_detection.feature_adapters import adapter_state_dict, count_parameters, inject_adapters
+        transfer = self.request.head_policy == "reset-classifiers"
+        if self.request.seed_adapter_initialization or method in {"drax-hybrid", "drax-residual-fusion"} or transfer:
             from mlx.core.random import seed_everything
             seed_everything(seed)
 
-        run_dir = self.request.output / method / f"seed-{seed}"
+        run_dir = self.request.output / self.request.method_id(method) / f"seed-{seed}"
         if run_dir.exists() and any(run_dir.iterdir()):
             raise MLXUserError(f"Run directory already contains data: {run_dir}")
         run_dir.mkdir(parents=True, exist_ok=True)
         model, current = VerifyFoundationCheckpoint(self.request.model, self.request.checkpoint).execute()
         if current["sha256"] != info["sha256"]:
             raise MLXUserError("Foundation checkpoint changed during the experiment")
+        if transfer:
+            from libreyolo.models.yolox.transfer import reset_classifiers
+            initial = reset_classifiers(model, len(manifest["classes"]), seed=seed)
+            initial_dir = self.request.output / "initial-heads"
+            initial_dir.mkdir(exist_ok=True)
+            initial_path = initial_dir / f"seed-{seed}.pt"
+            if initial_path.exists():
+                previous = torch.load(initial_path, map_location="cpu", weights_only=True)
+                if set(previous) != set(initial) or any(not torch.equal(previous[k], v) for k,v in initial.items()):
+                    raise MLXUserError("Paired classifier initialization differs")
+            else:
+                torch.save(initial, initial_path)
+            info = {**info, "nc": len(manifest["classes"]), "classes": dict(enumerate(manifest["classes"]))}
         model.to(device)
         targets = {}
         identity_error = None
@@ -373,6 +425,8 @@ class RunAdapterExperiment:
         counts = count_parameters(model)
         wrapper = build_experimental_yolox(model, info, str(device))
         wrapper._adapter_expected_trainable = counts["trainable"]
+        wrapper._adapter_measure_epochs = transfer
+        wrapper._adapter_epoch_cuda = []
         frozen_before = {
             name: parameter.detach().cpu().clone()
             for name, parameter in model.named_parameters()
@@ -395,11 +449,11 @@ class RunAdapterExperiment:
         split_counts = manifest["splits"]
         effective_batch = self.request.batch_size * self.request.gradient_accumulation
         config = {
-            "experiment_id": f"{method}-seed-{seed}",
-            "method": method,
+            "experiment_id": f"{self.request.method_id(method)}-seed-{seed}",
+            "method": self.request.method_id(method),
             "seed": seed,
             "model": self.request.model,
-            "adapter_initialization_seed": seed if method == "drax-hybrid" else None,
+            "adapter_initialization_seed": seed if method in {"drax-hybrid", "drax-residual-fusion"} else None,
             "foundation_checkpoint": info["checkpoint"],
             "checkpoint_sha256": info["sha256"],
             "dataset": manifest["dataset"],
@@ -418,7 +472,7 @@ class RunAdapterExperiment:
             "optimizer": "adamw",
             "learning_rate": self.request.lr,
             "adapter_target": self.request.target if method not in {"frozen", "head-only", "full-finetune"} else None,
-            "adapter_reduction": self.request.reduction if method in {"bottleneck", "convpass", "conv-adapter", "drax", "drax-hybrid"} else None,
+            "adapter_reduction": self.request.reduction if method in {"bottleneck", "convpass", "conv-adapter", "drax", "drax-hybrid", "drax-spatial", "drax-residual-fusion"} else None,
             "adapter_rank": self.request.rank if method in {"lora", "drax-hybrid"} else None,
             "adapter_alpha": self.request.alpha if method not in {"frozen", "head-only", "full-finetune"} else None,
             "train_head": self.request.train_head,
@@ -429,6 +483,20 @@ class RunAdapterExperiment:
             "total_params": counts["total"],
             "trainable_percent": counts["trainable_percent"],
         }
+        if transfer:
+            head_count = sum(p.numel() for p in model.head.parameters() if p.requires_grad)
+            config.update(head_policy=self.request.head_policy, target_classes=manifest["classes"],
+                adapter_method=method,
+                max_labels=self.request.max_labels,max_detections=self.request.max_detections,
+                head_trainable_params=head_count, adapter_trainable_params=(counts["trainable"]-head_count if targets else 0),
+                adapter_initialization_seed=seed, weight_decay=0.0005,
+                warmup_epochs=min(5, max(0,self.request.epochs-1)), patience=0,
+                scheduler="yoloxwarmcos", evaluation_precision="float32", hsv_prob=0.0,
+                flip_prob=0.5, mosaic_prob=0.0, mixup_prob=0.0,
+                cuda_memory_scope="training epochs including validation; excludes final test and export")
+        if self.request.seed_adapter_initialization:
+            config["adapter_initialization_seed"] = seed
+            config["seed_adapter_initialization"] = True
         _write_json(run_dir / "config.json", config)
 
         gpu = device.type == "cuda"
@@ -441,14 +509,17 @@ class RunAdapterExperiment:
         result = None
         observed_gradients = set()
         hooks = []
-        if method == "drax-hybrid":
+        if method in {"drax-hybrid", "drax-residual-fusion"} or transfer:
             for name, parameter in model.named_parameters():
-                if parameter.requires_grad:
+                if parameter.requires_grad and (not transfer or not name.startswith("head.")):
                     hooks.append(parameter.register_hook(
                         lambda gradient, key=name: observed_gradients.add(key)
                     ))
         try:
             if method != "frozen":
+                if transfer:
+                    from mlx.core.random import seed_everything
+                    seed_everything(seed)
                 started = time.perf_counter()
                 result = wrapper.train(
                     data=str(self.request.dataset / "data.yaml"),
@@ -472,15 +543,27 @@ class RunAdapterExperiment:
                     mosaic_prob=0.0,
                     mixup_prob=0.0,
                     flip_prob=0.5,
-                    hsv_prob=1.0,
+                    hsv_prob=0.0 if transfer else 1.0,
+                    **({"warmup_epochs": min(5, max(0,self.request.epochs-1)), "patience": 0,
+                        "save_period": 0,
+                        "max_labels": self.request.max_labels, "eval_max_det": self.request.max_detections,
+                        "weight_decay": 0.0005, "degrees": 0.0, "translate": 0.0,
+                        "shear": 0.0, "mosaic_scale": (1.0,1.0), "mixup_scale": (1.0,1.0)} if transfer else {}),
                 )
                 if gpu:
                     torch.cuda.synchronize(device)
                 training_seconds = time.perf_counter() - started
                 epoch_metrics = result.get("epoch_metrics") or []
+                if transfer:
+                    measurements = {row["epoch"]:row for row in wrapper._adapter_epoch_cuda}
+                    for event in epoch_metrics:
+                        event.update(measurements[event["epoch"]])
+                    _write_json(run_dir / "cuda-epochs.json", wrapper._adapter_epoch_cuda)
+                if transfer and len(epoch_metrics) != self.request.epochs:
+                    raise MLXUserError(f"Expected {self.request.epochs} epochs, recorded {len(epoch_metrics)}")
                 if any(not math.isfinite(float(event["train_loss"])) for event in epoch_metrics):
                     raise MLXUserError(f"Nonfinite training loss during {method}")
-                if method == "drax-hybrid" and not observed_gradients:
+                if (method in {"drax-hybrid", "drax-residual-fusion"} or (transfer and targets)) and not observed_gradients:
                     raise MLXUserError("Hybrid training produced no adapter gradients")
                 changed_frozen, trainable_parameters_changed = _verify_training_checkpoint(
                     result, frozen_before, trainable_before
@@ -493,6 +576,11 @@ class RunAdapterExperiment:
                     )
                 if not trainable_parameters_changed:
                     raise MLXUserError(f"No trainable parameter changed during {method} training")
+                if transfer and targets:
+                    _, adapter_changed = _verify_training_checkpoint(result, {},
+                        {name:value for name,value in trainable_before.items() if not name.startswith("head.")})
+                    if not adapter_changed:
+                        raise MLXUserError("Training changed the head but not the adapter")
 
                 artifact, selection = _restore_best_checkpoint(model, result)
                 if method != "full-finetune":
@@ -518,11 +606,20 @@ class RunAdapterExperiment:
                         f"Validation-selected {method} checkpoint has no trainable update"
                     )
                 config.update(selection)
+                if transfer and method in {"head-only", "full-finetune"}:
+                    from libreyolo.utils.serialization import load_untrusted_torch_file
+                    exported = load_untrusted_torch_file(str(artifact), map_location="cpu")
+                    exported["model"] = {k:v.detach().cpu().clone() for k,v in model.state_dict().items()}
+                    exported = {k:v for k,v in exported.items() if k not in {"optimizer","train_model","ema","scaler","rng_state"}}
+                    artifact = run_dir / "checkpoint.pt"
+                    torch.save(exported,artifact)
+                    config["export_checkpoint_path"] = str(artifact)
+                    del exported
                 config.update(
                     {
                         "foundation_parameters_unchanged": foundation_parameters_unchanged,
                         "frozen_buffers_verified": len(frozen_buffers),
-                        "adapter_gradient_tensors": len(observed_gradients) if method == "drax-hybrid" else None,
+                        "adapter_gradient_tensors": len(observed_gradients) if method in {"drax-hybrid", "drax-residual-fusion"} or (transfer and targets) else None,
                         "trainable_parameters_changed": trainable_parameters_changed,
                         "selected_trainable_parameters_changed": selected_trainable_parameters_changed,
                     }
@@ -532,9 +629,15 @@ class RunAdapterExperiment:
                     artifact_dir = run_dir / "adapter"
                     artifact_dir.mkdir()
                     artifact = artifact_dir / "checkpoint.pt"
-                    torch.save({"state": adapter_state_dict(model), "config": config}, artifact)
+                    if transfer:
+                        from libreyolo.models.yolox.transfer import transfer_state_dict, load_transfer_state_dict
+                        state = transfer_state_dict(model)
+                        torch.save({"format": "yolox-taxonomy-transfer-v1", "state": state, "config": config}, artifact)
+                        load_transfer_state_dict(model, torch.load(artifact, map_location="cpu", weights_only=True)["state"])
+                    else:
+                        torch.save({"state": adapter_state_dict(model), "config": config}, artifact)
                     weights = run_dir / "training" / "weights"
-                    if weights.exists():
+                    if weights.exists() and not transfer:
                         for redundant in weights.glob("*.pt"):
                             redundant.unlink()
                 checkpoint_size = artifact.stat().st_size if artifact.is_file() else 0
@@ -544,18 +647,23 @@ class RunAdapterExperiment:
                 data=str(self.request.dataset / "data.yaml"), split="test",
                 imgsz=self.request.image_size, batch=self.request.batch_size,
                 device=str(device), workers=self.request.workers, conf=0.001, iou=0.6,
-                verbose=False, save_json=False, save_plots=False,
+                verbose=False, save_json=transfer, save_plots=False,
+                **({"max_det":self.request.max_detections} if transfer else {}),
                 save_dir=str(run_dir / "evaluation"),
             )
             metrics = normalize_detection_metrics(native)
             metrics.update(
                 measure_precision_recall(
-                    wrapper, self.request.dataset, image_size=self.request.image_size
+                    wrapper, self.request.dataset, image_size=self.request.image_size,
+                    **({"max_detections":self.request.max_detections} if transfer else {}),
                 )
             )
             latency = self._forward_latency_ms(wrapper, device)
             peak_allocated = torch.cuda.max_memory_allocated(device) if gpu else None
             peak_reserved = torch.cuda.max_memory_reserved(device) if gpu else None
+            if transfer and gpu:
+                peak_allocated = max(row["peak_cuda_memory_mb"] for row in wrapper._adapter_epoch_cuda) * 2**20
+                peak_reserved = max(row["peak_cuda_reserved_mb"] for row in wrapper._adapter_epoch_cuda) * 2**20
             seconds_per_epoch = training_seconds / self.request.epochs if method != "frozen" else 0.0
             images_per_second = (
                 split_counts["train"]["images"] * self.request.epochs / training_seconds
@@ -620,7 +728,7 @@ class RunAdapterExperiment:
                         "recall": None,
                         "learning_rate": next(iter(lr.values()), None),
                         "epoch_seconds": event.get("epoch_seconds"),
-                        "peak_cuda_memory_mb": torch.cuda.max_memory_allocated() / 2**20 if gpu else None,
+                        "peak_cuda_memory_mb": event.get("peak_cuda_memory_mb") if self.request.head_policy == "reset-classifiers" else (torch.cuda.max_memory_allocated() / 2**20 if gpu else None),
                     }
                 )
 

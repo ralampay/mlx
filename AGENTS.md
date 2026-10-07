@@ -1,5 +1,18 @@
 # MLX Instructions
 
+## Research adapter ownership
+
+- MLX owns experimental object-detection adapter implementations, registries,
+  injection, serialization, and experiment workflows. New adapters belong in
+  `mlx.modes.object_detection.feature_adapters`; detector-specific placement and
+  reconstruction belong in the corresponding provider integration boundary.
+- Do not add research adapter implementations to LibreYOLO. Its existing
+  `libreyolo.adapters` package is frozen legacy compatibility support; preserve
+  old imports and checkpoint behavior without making LibreYOLO depend on MLX.
+- Preserve upstream license notices when moving project-owned implementations.
+- Ordinary detector models and generic provider training facilities remain
+  provider-owned. This rule does not move unrelated model-family components.
+
 This project is a Python CLI for computer-vision workflows. New code must stay consistent with the current package layout in `mlx.core` and `mlx.modes.*`, preserve existing public behavior unless the task explicitly changes it, and favor implementations that are modular, portable, testable, and reusable across workflows.
 
 ## Development Workflow and Refinement Loop

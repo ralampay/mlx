@@ -18,7 +18,8 @@ def _iou(box, others: torch.Tensor) -> torch.Tensor:
 
 
 def measure_precision_recall(model, dataset: Path, *, image_size: int,
-                             confidence: float = 0.25, match_iou: float = 0.5) -> dict[str, float]:
+                             confidence: float = 0.25, match_iou: float = 0.5,
+                             max_detections: int | None = None) -> dict[str, float]:
     """Class-aware greedy matching at a declared score and IoU threshold."""
     true_positive = false_positive = false_negative = 0
     for image in sorted((dataset / "images" / "test").iterdir()):
@@ -33,7 +34,8 @@ def measure_precision_recall(model, dataset: Path, *, image_size: int,
             ground_truth.append((int(cls), [width * (cx - bw / 2), height * (cy - bh / 2),
                                             width * (cx + bw / 2), height * (cy + bh / 2)]))
         results = model.predict(source=str(image), conf=confidence, iou=0.6,
-                                imgsz=image_size, save=False)
+                                imgsz=image_size, save=False,
+                                **({"max_det":max_detections} if max_detections is not None else {}))
         result = results[0] if isinstance(results, list) else results
         boxes = result.boxes
         gt_classes = torch.tensor([row[0] for row in ground_truth], dtype=torch.long)

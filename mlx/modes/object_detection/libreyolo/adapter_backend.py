@@ -42,6 +42,9 @@ def require_experiment_device(requested: str) -> torch.device:
 
 
 def _git_commit(path: Path) -> str | None:
+    snapshot = path / ".mlx-source.json"
+    if snapshot.is_file():
+        return json.loads(snapshot.read_text())["commit"]
     try:
         return subprocess.check_output(
             ["git", "-C", str(path), "rev-parse", "HEAD"], text=True,
@@ -189,7 +192,8 @@ class CalibrateAdapterBatchSize:
     def execute(self) -> dict:
         if self.device.type != "cuda":
             raise MLXUserError("Batch-size calibration for this study requires --device cuda")
-        from libreyolo.adapters import inject_adapters, yolox_targets
+        from mlx.modes.object_detection.libreyolo.adapter_targets import yolox_targets
+        from mlx.modes.object_detection.feature_adapters import inject_adapters
         from libreyolo.training.autobatch import autobatch
 
         profiles = {}
@@ -246,6 +250,26 @@ class CalibrateAdapterBatchSize:
 
 class _AdapterYOLOXTrainerMixin:
     """Keep frozen BN statistics and trainable counts fixed during setup."""
+
+    def _train_epoch(self, epoch):
+        if not getattr(self.wrapper_model, "_adapter_measure_epochs", False):
+            return super()._train_epoch(epoch)
+        import time
+        gpu = self.device.type == "cuda"
+        if gpu:
+            torch.cuda.synchronize(self.device)
+            torch.cuda.reset_peak_memory_stats(self.device)
+        started = time.perf_counter()
+        result = super()._train_epoch(epoch)
+        if gpu:
+            torch.cuda.synchronize(self.device)
+        self.wrapper_model._adapter_epoch_cuda.append({
+            "epoch": epoch + 1,
+            "epoch_seconds": time.perf_counter() - started,
+            "peak_cuda_memory_mb": torch.cuda.max_memory_allocated(self.device) / 2**20 if gpu else None,
+            "peak_cuda_reserved_mb": torch.cuda.max_memory_reserved(self.device) / 2**20 if gpu else None,
+        })
+        return result
 
     def _apply_freeze_config(self):
         super()._apply_freeze_config()

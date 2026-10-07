@@ -86,6 +86,8 @@ def build_parser() -> RichArgumentParser:
     parser.add_argument("--adapter-alpha", type=float, default=1.0)
     parser.add_argument("--adapter-target", choices=("backbone", "neck", "backbone+neck"), default="neck")
     parser.add_argument("--train-head", action="store_true")
+    parser.add_argument("--head-policy", choices=("preserve", "reset-classifiers"), default="preserve")
+    parser.add_argument("--condition-id", help="Distinct identity for a single taxonomy-transfer condition")
     parser.add_argument("--gradient-accumulation", type=int, default=1)
     parser.add_argument("--trust-checkpoint-code", action="store_true")
     parser.add_argument("--input-dim", type=int, default=None, dest="input_dim")

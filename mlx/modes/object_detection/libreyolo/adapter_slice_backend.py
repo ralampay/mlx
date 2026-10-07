@@ -74,7 +74,7 @@ class ReconstructAdapterModel:
         self.device = device
 
     def execute(self, run):
-        from libreyolo.adapters import inject_adapters, load_adapter_state_dict
+        from mlx.modes.object_detection.feature_adapters import inject_adapters, load_adapter_state_dict
         from libreyolo.utils.serialization import load_untrusted_torch_file
 
         model_name = f"yolox-{self.foundation['size']}"
@@ -112,20 +112,20 @@ class ReconstructAdapterModel:
 
     @staticmethod
     def _adapter_targets(model, config, method):
-        from libreyolo.adapters import yolox_targets
+        from mlx.modes.object_detection.libreyolo.adapter_targets import yolox_targets
 
-        # Historical hybrids used three projections. Reconstruct their recorded
-        # topology rather than applying the current 26-convolution policy.
-        if method == "drax-hybrid" and "injected_modules" in config:
+        # Restore the recorded topology, including historical three-projection
+        # hybrids, rather than assuming the current target-selection policy.
+        if method in {"drax-hybrid", "drax-residual-fusion"} and "injected_modules" in config:
             paths = config["injected_modules"]
             if not isinstance(paths, list) or not paths or any(not isinstance(p, str) for p in paths):
-                raise MLXUserError("Hybrid checkpoint requires a nonempty injected_modules list")
+                raise MLXUserError(f"Hybrid/convolution adapter {method} requires a nonempty injected_modules list")
             if len(set(paths)) != len(paths):
-                raise MLXUserError("Hybrid checkpoint contains duplicate injection paths")
+                raise MLXUserError(f"Hybrid/convolution adapter {method} contains duplicate injection paths")
             try:
                 return {path: model.get_submodule(path).out_channels for path in paths}
             except AttributeError as exc:
-                raise MLXUserError(f"Invalid hybrid checkpoint injection path: {exc}") from exc
+                raise MLXUserError(f"Invalid hybrid/convolution adapter {method} injection path: {exc}") from exc
         return yolox_targets(model, str(config.get("adapter_target") or "neck"), method)
 
     @staticmethod

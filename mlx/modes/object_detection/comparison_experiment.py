@@ -19,6 +19,7 @@ from mlx.modes.object_detection.evaluation import normalize_detection_metrics
 from mlx.modes.object_detection.requests import (
     BenchmarkObjectDetectionRequest,
     FineTuneObjectDetectionRequest,
+    TrainObjectDetectionRequest,
 )
 
 
@@ -32,6 +33,7 @@ class CSPDraxComparisonRequest:
     dataset: Path
     output: Path
     source_checkpoint: Path
+    scratch: bool = False
     seeds: tuple[int, ...] = (17, 29, 43, 59, 71, 89, 101, 127)
     initialization_seed: int = 20261003
     epochs: int = 100
@@ -74,7 +76,7 @@ class CSPDraxComparisonRequest:
             raise MLXUserError("Learning rate and equivalence margin must be positive.")
         if not (self.dataset / "data.yaml").is_file():
             raise MLXUserError(f"Prepared dataset YAML not found: {self.dataset / 'data.yaml'}")
-        if require_source and not self.source_checkpoint.is_file():
+        if require_source and not self.scratch and not self.source_checkpoint.is_file():
             raise MLXUserError(
                 f"YOLOX-M source checkpoint not found: {self.source_checkpoint}"
             )
@@ -91,6 +93,19 @@ class PrepareCSPDraxComparison:
         request.validate(require_source=True)
         class_count = self._dataset_class_count(request.dataset / "data.yaml")
         dataset_record = self._dataset_record(request.dataset)
+        if request.scratch:
+            manifest = {
+                "schema_version": 1,
+                "created_at": _now(),
+                "initialization": "scratch",
+                "source_checkpoint": None,
+                "dataset": dataset_record,
+                "classes": class_count,
+                "models": {model: {"sha256": None} for model in MODELS},
+                "protocol": asdict(request),
+            }
+            write_json_atomic(request.output / "initialization/manifest.json", manifest)
+            return manifest
         try:
             from libreyolo import LibreYOLOX, LibreYOLOXDraxCSPFusionM
             from libreyolo.models.yolox_drax_csp_fusion import (
@@ -223,7 +238,7 @@ class RunCSPDraxComparison:
                 self._validate_existing(existing, manifest, model, seed, smoke)
                 records.append(existing)
                 continue
-            initial = Path(manifest["models"][model]["path"])
+            initial = None if request.scratch else Path(manifest["models"][model]["path"])
             started = time.perf_counter()
             training = self.train(self._training_request(model, seed, initial, run_dir, smoke))
             checkpoint = self._checkpoint_path(training)
@@ -239,11 +254,12 @@ class RunCSPDraxComparison:
                 "model": model,
                 "seed": seed,
                 "smoke": smoke,
-                "initial_checkpoint": str(initial),
-                "initial_sha256": sha256_file(initial),
+                "initial_checkpoint": str(initial) if initial else None,
+                "initial_sha256": sha256_file(initial) if initial else None,
+                "initialization": "scratch" if request.scratch else "transfer",
                 "checkpoint": str(checkpoint),
                 "checkpoint_sha256": sha256_file(checkpoint),
-                "parameters": manifest["models"][model]["parameters"],
+                "parameters": self._parameter_count(checkpoint),
                 "training_seconds": training_seconds,
                 "benchmark_seconds": time.perf_counter() - benchmark_started,
                 "metrics": normalize_detection_metrics(native_metrics),
@@ -256,7 +272,16 @@ class RunCSPDraxComparison:
             }
             write_json_atomic(completed, record)
             records.append(record)
+            if not smoke:
+                AnalyzeCSPDraxComparison(request).execute()
         return records
+
+    @staticmethod
+    def _parameter_count(checkpoint: Path) -> int:
+        from libreyolo import LibreYOLO
+
+        detector = LibreYOLO(str(checkpoint), device="cpu")
+        return sum(parameter.numel() for parameter in detector.model.parameters())
 
     def _validate_existing(
         self,
@@ -303,6 +328,10 @@ class RunCSPDraxComparison:
                 f"Initialization manifest not found: {path}. Run prepare first."
             )
         manifest = json.loads(path.read_text(encoding="utf-8"))
+        if self.request.scratch:
+            if manifest.get("initialization") != "scratch":
+                raise MLXUserError("Scratch training requires a scratch experiment directory.")
+            return manifest
         for model in MODELS:
             record = manifest.get("models", {}).get(model, {})
             checkpoint = Path(record.get("path", ""))
@@ -316,13 +345,15 @@ class RunCSPDraxComparison:
         return manifest
 
     def _training_request(
-        self, model: str, seed: int, initial: Path, run_dir: Path, smoke: bool
+        self, model: str, seed: int, initial: Path | None, run_dir: Path, smoke: bool
     ) -> FineTuneObjectDetectionRequest:
         batch = 2 if smoke else self.request.batch_size
-        return FineTuneObjectDetectionRequest(
+        request_class = TrainObjectDetectionRequest if self.request.scratch else FineTuneObjectDetectionRequest
+        return request_class(
             provider="libreyolo",
             model=model,
-            model_path=str(initial),
+            model_path=None if self.request.scratch else str(initial),
+            pretrained=False,
             dataset_path=str(self.request.dataset),
             output_path=str(run_dir / "training"),
             run_name="formal",
@@ -380,9 +411,17 @@ class RunCSPDraxComparison:
 
     @staticmethod
     def _train(request: FineTuneObjectDetectionRequest):
-        from mlx.modes.object_detection.commands import FineTuneObjectDetectionModel
+        from mlx.modes.object_detection.commands import TrainObjectDetectionModel
+        import random
+        import numpy as np
+        import torch
 
-        return FineTuneObjectDetectionModel(request).execute()
+        # Seed before construction as well as the provider's training loop.
+        random.seed(request.random_seed)
+        np.random.seed(request.random_seed)
+        torch.manual_seed(request.random_seed)
+
+        return TrainObjectDetectionModel(request).execute()
 
     @staticmethod
     def _benchmark(request: BenchmarkObjectDetectionRequest):
@@ -559,7 +598,17 @@ class AnalyzeCSPDraxComparison:
             ),
             "",
         ])
-        return "\n".join(lines)
+        report = "\n".join(lines)
+        if self.request.scratch:
+            report = report.replace(
+                "Both models receive the same pretrained YOLOX-M backbone/PAN "
+                "tensors. Both detection heads are reset from the same recorded "
+                "seed; candidate-only fusion and Drax parameters retain their "
+                "identity-oriented initialization.",
+                "Both models are independently initialized from scratch for each paired "
+                "seed with pretrained=False. No pretrained or transferred weights are used.",
+            )
+        return report
 
 
 def _now() -> str:

@@ -44,6 +44,11 @@ def run_object_detection(config: dict[str, Any]) -> Any:
     config = with_explicit_options(config)
     from mlx.modes.object_detection.distillation import validate_distillation_options
     validate_distillation_options(config)
+    if config.get("action") == "adapter-prepare-neu-det":
+        if config.get("platform", "local") != "local":
+            raise MLXUserError("NEU-DET preparation is local only")
+        from mlx.modes.object_detection.neu_det import PrepareNeuDetDataset
+        return PrepareNeuDetDataset(Path(config.get("dataset_path") or "~/Desktop/datasets/neu-det")).execute()
     if config.get("action") in {"adapter-zero-shot", "adapter-zero-shot-report"}:
         if config.get("platform", "local") != "local":
             raise MLXUserError("Adapter zero-shot studies run locally only.")
@@ -108,7 +113,7 @@ def run_object_detection(config: dict[str, Any]) -> Any:
                 request.model, request.checkpoint, request.output,
                 device=request.device, image_size=request.image_size, amp=request.amp,
                 reduction=request.reduction,
-                profiles=("drax-hybrid",) if request.methods == ("drax-hybrid",) else ("full-finetune", "drax"),
+                profiles=request.methods if request.methods in {("drax-hybrid",), ("drax-residual-fusion",)} else ("full-finetune", "drax"),
                 rank=request.rank, alpha=request.alpha, target=request.target,
             ).execute()
         return RunAdapterExperiment(request).execute()

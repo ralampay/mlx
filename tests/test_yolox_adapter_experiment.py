@@ -66,14 +66,15 @@ def test_adapter_dataset_default_ignores_global_cli_default():
     assert explicit.dataset == Path("/custom")
 
 
+@pytest.mark.parametrize("adapter_method", ["drax-hybrid", "drax-residual-fusion"])
 @pytest.mark.parametrize("matching_placement", [False, True])
-def test_resume_checks_hybrid_injection_placement(tmp_path, monkeypatch, matching_placement):
+def test_resume_checks_hybrid_injection_placement(tmp_path, monkeypatch, matching_placement, adapter_method):
     from mlx.modes.object_detection import adapter_experiment as experiment
-    import libreyolo.adapters
+    from mlx.modes.object_detection.libreyolo import adapter_targets
 
     request = AdapterExperimentRequest.from_config({
         "output_path": str(tmp_path / "output"), "dataset_path": str(tmp_path / "data"),
-        "model_path": str(tmp_path / "foundation.pt"), "adapter": "drax-hybrid",
+        "model_path": str(tmp_path / "foundation.pt"), "adapter": adapter_method,
         "device": "cpu", "epochs": 20,
     })
     foundation = {"classes": {0: "car"}, "nc": 1, "sha256": "foundation"}
@@ -81,20 +82,20 @@ def test_resume_checks_hybrid_injection_placement(tmp_path, monkeypatch, matchin
     monkeypatch.setattr(experiment.VerifyFoundationCheckpoint, "execute", lambda self: (torch.nn.Identity(), foundation))
     monkeypatch.setattr(experiment.CollectAdapterEnvironment, "execute", lambda self: {})
     monkeypatch.setattr(experiment, "load_prepared_adapter_dataset", lambda path: dataset)
-    monkeypatch.setattr(libreyolo.adapters, "yolox_targets", lambda *args: {"neck.conv": 4})
+    monkeypatch.setattr(adapter_targets, "yolox_targets", lambda *args: {"neck.conv": 4})
 
     def unexpected_training(*args):
         raise AssertionError("Resume validation must not start training")
 
     monkeypatch.setattr(experiment.RunAdapterExperiment, "_run_one", unexpected_training)
-    for method in ("frozen", "drax-hybrid"):
-        hybrid = method == "drax-hybrid"
+    for method in ("frozen", adapter_method):
+        hybrid = method == adapter_method
         metrics = {
             "status": "completed", "checkpoint_sha256": "foundation",
             "dataset_selection_sha256": "split", "physical_batch_size": 1,
             "effective_batch_size": 1, "image_size": 640, "device": "cpu", "amp": True,
             "epochs": 20 if hybrid else 0, "method": method, "seed": 42,
-            "learning_rate": .0001, "adapter_rank": 8 if hybrid else None,
+            "learning_rate": .0001, "adapter_rank": 8 if hybrid and adapter_method == "drax-hybrid" else None,
             "adapter_reduction": 8 if hybrid else None, "adapter_alpha": 1.0 if hybrid else None,
             "train_head": False, "adapter_target": "neck" if hybrid else None,
             "injected_modules": ["neck.conv" if matching_placement else "old.conv"] if hybrid else [],
@@ -244,3 +245,16 @@ def test_freezing_verification_detects_batchnorm_buffer_updates(tmp_path):
     )
     assert changed == [("bn.running_mean", 1.0)]
     assert learned
+
+
+def test_residual_fusion_cli_configuration():
+    options = build_parser().parse_args([
+        '--mode', 'object-detection', '--action', 'adapter-experiment',
+        '--adapter', 'drax-residual-fusion', '--adapter-reduction', '16',
+        '--adapter-alpha', '1', '--adapter-target', 'neck',
+    ])
+    request = AdapterExperimentRequest.from_config(vars(options))
+    assert request.methods == ('drax-residual-fusion',)
+    assert request.reduction == 16
+    assert request.alpha == 1
+    assert request.target == 'neck'

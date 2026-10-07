@@ -158,7 +158,7 @@ function render(){{let filtered=entries.filter(e=>JSON.stringify(e).toLowerCase(
         return {"images": len(entries), "highlights": len(highlights)}
 
     @staticmethod
-    def _image_page(directory, item, boxes, names, models):
+    def _image_page(directory, item, boxes, names, models, panel_labels=None):
         identifier = item["id"]
         with Image.open(item["path"]) as original:
             image = original.convert("RGB")
@@ -166,7 +166,7 @@ function render(){{let filtered=entries.filter(e=>JSON.stringify(e).toLowerCase(
         image.save(directory / f"{identifier}.jpg", quality=88)
         panel = Image.new("RGB", (1280, 800), "#15171b")
         for n, label in enumerate(
-            ("Ground truth", "frozen", "lora/seed-1", "drax-hybrid/seed-1")
+            panel_labels or ("Ground truth", "frozen", "lora/seed-1", "drax-hybrid/seed-1")
         ):
             tile = image.copy()
             tile.thumbnail((640, 360))

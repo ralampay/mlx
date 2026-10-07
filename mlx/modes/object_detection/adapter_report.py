@@ -20,7 +20,7 @@ FIELDS = (
     "adapter_reduction", "adapter_rank", "trainable_params", "total_params",
     "trainable_percent", "mAP50", "mAP50_95", "precision", "recall",
     "training_seconds", "seconds_per_epoch", "images_per_second",
-    "peak_cuda_memory_mb", "checkpoint_size_mb", "inference_latency_ms", "status",
+    "peak_cuda_memory_mb", "checkpoint_size_mb", "inference_latency_ms", "status", "source_run",
 )
 
 
@@ -38,10 +38,11 @@ def _summary(values: list[float]) -> dict:
 
 
 class GenerateAdapterReport:
-    def __init__(self, root: Path, *, baseline_study: Path | None = None, comparison_method: str = "drax"):
+    def __init__(self, root: Path, *, baseline_study: Path | None = None, comparison_method: str = "drax", extra_runs: tuple[dict, ...] = ()):
         self.root = Path(root).expanduser().resolve()
         self.baseline_study = baseline_study
         self.comparison_method = comparison_method
+        self.extra_runs = extra_runs
 
     def execute(self) -> dict:
         environment = {}
@@ -54,7 +55,11 @@ class GenerateAdapterReport:
             row = {field: metrics.get(field) for field in FIELDS}
             row["gpu"] = environment.get("gpu_name")
             rows.append(row)
+        for metrics in self.extra_runs:
+            rows.append({**{field: metrics.get(field) for field in FIELDS}, "gpu": environment.get("gpu_name")})
         known = {(row["method"], row["seed"]) for row in rows}
+        if len(known) != len(rows):
+            raise MLXUserError("Duplicate method/seed in comparison inputs")
         for run in recorded_baseline_runs(self.root, self.baseline_study):
             if (run.method, run.seed) in known:
                 raise MLXUserError(f"Duplicate comparison run: {run.method}/seed-{run.seed}")
@@ -83,7 +88,7 @@ class GenerateAdapterReport:
             for method, values in grouped.items()
         }
         paired = {}
-        for comparator in ("bottleneck", "conv-adapter", "full-finetune", "lora", "convpass", "drax", "frozen"):
+        for comparator in ("bottleneck", "conv-adapter", "full-finetune", "lora", "lora-r100", "convpass", "drax", "frozen"):
             if comparator == self.comparison_method:
                 continue
             drax = {row["seed"]: row for row in grouped.get(self.comparison_method, [])}

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+from dataclasses import replace
 from pathlib import Path
 
 import pytest
@@ -39,6 +40,17 @@ def test_schedule_reverses_pair_order_between_seeds(tmp_path):
         (5, CANDIDATE),
         (5, CONTROL),
     ]
+
+
+def test_scratch_request_never_supplies_initial_weights(tmp_path):
+    request = replace(_request(tmp_path), scratch=True)
+    request.source_checkpoint.unlink()
+    request.validate()
+    command = RunCSPDraxComparison(request)
+    training = command._training_request(CANDIDATE, 3, None, request.output, False)
+    assert training.model_path is None
+    assert training.pretrained is False
+    assert training.random_seed == 3
 
 
 def test_training_request_disables_accumulation_and_uses_common_protocol(tmp_path):

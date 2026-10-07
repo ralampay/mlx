@@ -158,10 +158,11 @@ def test_slice_request_ignores_unrelated_global_parser_defaults(tmp_path):
     assert request.dataset == Path("~/Desktop/datasets/object-detection/dawn/processed").expanduser().resolve()
 
 
-def test_hybrid_reconstruction_uses_recorded_convolutions():
+@pytest.mark.parametrize("method", ["drax-hybrid", "drax-residual-fusion"])
+def test_hybrid_reconstruction_uses_recorded_convolutions(method):
     model = torch.nn.Sequential(torch.nn.Conv2d(4, 8, 1), torch.nn.Conv2d(8, 8, 1))
     targets = LibreYOLOAdapterPredictionWriter._adapter_targets(
-        model, {"injected_modules": ["1"]}, "drax-hybrid"
+        model, {"injected_modules": ["1"]}, method
     )
     assert targets == {"1": 8}
 

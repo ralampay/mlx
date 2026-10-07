@@ -30,12 +30,14 @@ def main() -> int:
     parser.add_argument("--output", type=Path, default=DEFAULT_OUTPUT)
     parser.add_argument("--source-checkpoint", type=Path, default=DEFAULT_SOURCE)
     parser.add_argument("--device", default="0")
+    parser.add_argument("--scratch", action="store_true")
     args = parser.parse_args()
     request = CSPDraxComparisonRequest(
         dataset=args.dataset,
         output=args.output,
         source_checkpoint=args.source_checkpoint,
         device=args.device,
+        scratch=args.scratch,
     )
     if args.action == "prepare":
         PrepareCSPDraxComparison(request).execute()

@@ -38,7 +38,7 @@ MODE_DESCRIPTORS: tuple[ModeDescriptor, ...] = (
         aliases=("object-detection",),
         runner="mlx.modes.object_detection.runner:run_object_detection",
         default_action="train",
-        actions=("train", "fine-tune", "benchmark", "best-model", "resume", "status", "stop", "compare-models", "comparison-status", "comparison-test", "convert", "infer-camera", "infer-video", "ls-models", "adapter-verify", "adapter-prepare", "adapter-calibrate", "adapter-experiment", "adapter-report", "adapter-slice-predict", "adapter-slice-report", "adapter-zero-shot", "adapter-zero-shot-report"),
+        actions=("train", "fine-tune", "benchmark", "best-model", "resume", "status", "stop", "compare-models", "comparison-status", "comparison-test", "convert", "infer-camera", "infer-video", "ls-models", "adapter-verify", "adapter-prepare", "adapter-prepare-neu-det", "adapter-calibrate", "adapter-experiment", "adapter-report", "adapter-slice-predict", "adapter-slice-report", "adapter-zero-shot", "adapter-zero-shot-report"),
         purpose="Provider-backed detection training, evaluation, and inference",
     ),
     ModeDescriptor(

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+import os
 from pathlib import Path
 from typing import Protocol, runtime_checkable
 
@@ -34,24 +35,62 @@ class NullFrameSink:
 class OpenCVFrameSink:
     """Shared lazy OpenCV display that stops on q or Escape."""
 
-    def __init__(self, *, title: str, delay_ms: int) -> None:
+    def __init__(self, *, title: str, delay_ms: int,
+                 max_size: tuple[int, int] | None = None) -> None:
+        if max_size is not None and (
+            len(max_size) != 2 or any(
+                not isinstance(value, int) or isinstance(value, bool) or value < 1
+                for value in max_size
+            )
+        ):
+            raise MLXUserError("Display max_size must contain positive integer width and height.")
+        font_directory = os.environ.get("QT_QPA_FONTDIR")
         try:
             import cv2
         except ImportError as exc:
             raise MLXUserError(
                 "OpenCV is required for stream display. Install opencv-python and try again."
             ) from exc
+        from mlx.core.opencv_display import configure_opencv_display
+
+        configure_opencv_display(os.environ, font_directory=font_directory)
         self._cv2 = cv2
         self.title = title
         self.delay_ms = delay_ms
+        self.max_size = max_size
+        self._window_initialized = False
 
     def show(self, frame: np.ndarray) -> bool:
-        self._cv2.imshow(self.title, frame)
+        from mlx.core.opencv_display import opencv_display_environment
+
+        display_frame = self._display_frame(frame)
+        with opencv_display_environment(os.environ):
+            if self.max_size is not None and not self._window_initialized:
+                self._cv2.namedWindow(
+                    self.title,
+                    self._cv2.WINDOW_NORMAL | self._cv2.WINDOW_KEEPRATIO
+                    | self._cv2.WINDOW_GUI_NORMAL,
+                )
+                height, width = display_frame.shape[:2]
+                self._cv2.resizeWindow(self.title, width, height)
+                self._window_initialized = True
+            self._cv2.imshow(self.title, display_frame)
         key = self._cv2.waitKey(self.delay_ms) & 0xFF
         return key not in (ord("q"), 27)
 
+    def _display_frame(self, frame: np.ndarray) -> np.ndarray:
+        if self.max_size is None:
+            return frame
+        height, width = frame.shape[:2]
+        scale = min(self.max_size[0] / width, self.max_size[1] / height, 1.0)
+        if scale == 1.0:
+            return frame
+        size = (max(1, round(width * scale)), max(1, round(height * scale)))
+        return self._cv2.resize(frame, size, interpolation=self._cv2.INTER_AREA)
+
     def close(self) -> None:
         self._cv2.destroyAllWindows()
+        self._window_initialized = False
 
 
 @dataclass(frozen=True, slots=True)

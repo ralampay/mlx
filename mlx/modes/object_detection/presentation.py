@@ -21,12 +21,36 @@ class RichWorkflowReporter:
         self._infrastructure_events = (
             infrastructure_events or RichInfrastructureEventRenderer()
         )
+        self._fps_line_width = 0
 
     def emit(self, event: WorkflowEvent) -> None:
+        event_name = event.payload.get("event") if isinstance(event.payload, dict) else None
+        if event_name != "stream_fps":
+            self._finish_fps_line()
         if self._infrastructure_events.handle(event):
             return
         if isinstance(event.payload, dict):
-            event_name = event.payload.get("event")
+            if event_name == "inference_device":
+                details = event.payload
+                message = f"Requested inference device: {details['requested_device']}"
+                if details["available"]:
+                    message += (
+                        f" | PyTorch backend: {details['backend']} {details['runtime_version']}"
+                        f" | GPU: {details['gpu_name']}"
+                    )
+                else:
+                    message += " | GPU unavailable in PyTorch"
+                print_info(message)
+                return
+            if event_name == "stream_fps":
+                self._print_fps(
+                    f"FPS: {event.payload['fps']:.2f} "
+                    f"({event.payload['frames_processed']} frames processed)"
+                )
+                return
+            if event_name == "stream_summary":
+                print_success(f"{event.message} Average FPS: {event.payload['average_fps']:.2f}")
+                return
             if event_name == "training_summary":
                 _print_key_value_panel(
                     "Training Configuration",
@@ -53,6 +77,22 @@ class RichWorkflowReporter:
             print_success(event.message)
         else:
             print_info(event.message)
+
+    def _print_fps(self, message: str) -> None:
+        if not console.is_terminal:
+            print_info(message)
+            return
+        available_width = max(1, console.width - 1)
+        message = message[:available_width]
+        console.file.write("\r" + message.ljust(min(self._fps_line_width, available_width)))
+        console.file.flush()
+        self._fps_line_width = len(message)
+
+    def _finish_fps_line(self) -> None:
+        if self._fps_line_width:
+            console.file.write("\n")
+            console.file.flush()
+            self._fps_line_width = 0
 
 
 def _print_key_value_panel(title: str, values: object) -> None:

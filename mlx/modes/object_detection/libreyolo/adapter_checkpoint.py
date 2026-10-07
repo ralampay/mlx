@@ -1,9 +1,11 @@
 """Self-contained MLX adapter-detector checkpoints, without pickled modules."""
 
+from collections.abc import Mapping
 from datetime import datetime, timezone
 import json
 from pathlib import Path
 import tempfile
+from pickle import UnpicklingError
 
 import torch
 
@@ -24,35 +26,51 @@ FORMAT = "mlx-yolox-adapter-detector-v1"
 class LoadAdapterDetector:
     """Load a complete adapter detector; no external foundation file is needed."""
 
-    def __init__(self, checkpoint, *, device="cpu", registry=None):
+    def __init__(self, checkpoint, *, device="cpu", registry=None, payload=None):
         self.registry = registry
         self.checkpoint = Path(checkpoint)
         self.device = device
+        self.payload = payload
 
     def execute(self):
         from libreyolo.models.yolox.nn import LibreYOLOXModel
 
         device = require_experiment_device(self.device)
         try:
-            payload = torch.load(self.checkpoint, map_location="cpu", weights_only=True)
-            if payload.get("format") != FORMAT:
+            payload = self.payload
+            if payload is None:
+                payload = torch.load(self.checkpoint, map_location="cpu", weights_only=True)
+            if not isinstance(payload, Mapping) or payload.get("format") != FORMAT:
                 raise ValueError(f"Expected {FORMAT}")
             config = payload["config"]
-            model = LibreYOLOXModel(config=payload["size"], nb_classes=len(payload["names"]))
+            names = payload["names"]
+            if not isinstance(config, Mapping):
+                raise ValueError("config must be a mapping")
+            if (not isinstance(names, list) or not names
+                    or any(not isinstance(name, str) or not name for name in names)):
+                raise ValueError("names must be a nonempty list of class labels")
+            if not isinstance(config.get("train_head", False), bool):
+                raise ValueError("train_head must be a boolean")
+            model = LibreYOLOXModel(config=payload["size"], nb_classes=len(names))
             from .adapter_loading import resolve_adapter_targets
             targets = resolve_adapter_targets(model, config, config["method"], registry=self.registry)
+            reduction = config.get("adapter_reduction")
+            rank = config.get("adapter_rank")
             inject_adapters(model, config["method"], targets,
-                            reduction=config.get("adapter_reduction") or 8,
-                            rank=config.get("adapter_rank") or 8,
+                            reduction=8 if reduction is None else reduction,
+                            rank=8 if rank is None else rank,
                             alpha=config.get("adapter_alpha", 1.0),
                             train_head=config.get("train_head", False), registry=self.registry)
             model.load_state_dict(payload["model"], strict=True)
             model.to(device).eval()
             info = {"checkpoint": str(self.checkpoint), "size": payload["size"],
-                    "nc": len(payload["names"]), "classes": dict(enumerate(payload["names"]))}
+                    "nc": len(names), "classes": dict(enumerate(names))}
             return build_experimental_yolox(model, info, str(device))
-        except (OSError, ValueError, KeyError, TypeError, AttributeError, RuntimeError) as exc:
-            raise MLXUserError(f"Cannot load adapter detector {self.checkpoint}: {exc}") from exc
+        except (OSError, ValueError, KeyError, TypeError, AttributeError, RuntimeError, EOFError, UnpicklingError) as exc:
+            raise MLXUserError(
+                f"Cannot load adapter detector {self.checkpoint}: {exc}. "
+                "Inspect its configuration, class labels, and tensor state."
+            ) from exc
 
 
 class ExportBestAdapterDetector:

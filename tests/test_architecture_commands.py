@@ -253,6 +253,105 @@ def test_stream_command_is_headless_and_closes_injected_ports() -> None:
     assert events[-1].level == "success"
 
 
+def test_stream_reports_interval_and_average_processing_fps():
+    source = FakeFrameSource()
+    source.frames *= 2
+    events = []
+    times = iter([0.0, 0.25, 1.0, 1.25, 2.5])
+    result = RunObjectDetectionStream(
+        detector=FakeDetector(), frame_source=source, frame_sink=FakeFrameSink(),
+        renderer=lambda frame, detection: frame,
+        reporter=CallbackWorkflowReporter(events.append), clock=lambda: next(times),
+    ).execute()
+
+    progress = [event for event in events if event.level == "progress"]
+    assert [event.current for event in progress] == [2, 4]
+    assert [event.payload["fps"] for event in progress] == pytest.approx([2.0, 2 / 1.5])
+    assert result.elapsed_seconds == 2.5
+    assert result.average_fps == pytest.approx(4 / 2.5)
+    assert events[-1].payload == {"event": "stream_summary", "average_fps": result.average_fps}
+    assert source.released and not result.stopped_by_user
+
+
+@pytest.mark.parametrize("frames,times,expected_elapsed,expected_fps", [
+    (0, [10.0], 0.0, 0.0),
+    (2, [10.0, 10.0, 10.0], 0.0, 0.0),
+    (2, [10.0, 10.25, 10.5], 0.5, 4.0),
+])
+def test_short_and_empty_streams_report_finite_average_fps(frames, times, expected_elapsed, expected_fps):
+    source = FakeFrameSource()
+    source.frames = source.frames[:frames]
+    ticks = iter(times)
+    events = []
+    result = RunObjectDetectionStream(
+        detector=FakeDetector(), frame_source=source, frame_sink=FakeFrameSink(),
+        renderer=lambda frame, detection: frame,
+        reporter=CallbackWorkflowReporter(events.append), clock=lambda: next(ticks),
+    ).execute()
+    assert result.elapsed_seconds == expected_elapsed
+    assert result.average_fps == expected_fps
+    assert len(events) == 1
+    assert source.released
+
+
+def test_stopping_stream_includes_last_displayed_frame_in_fps():
+    source = FakeFrameSource()
+    sink = FakeFrameSink()
+    sink.show = lambda frame: False
+    times = iter([0.0, 2.0])
+    result = RunObjectDetectionStream(
+        detector=FakeDetector(), frame_source=source, frame_sink=sink,
+        renderer=lambda frame, detection: frame, clock=lambda: next(times),
+    ).execute()
+    assert result.stopped_by_user
+    assert result.frames_processed == 1
+    assert result.average_fps == 0.5
+    assert sink.closed and source.released
+
+
+def test_detection_reporter_prints_live_and_average_fps(monkeypatch):
+    from io import StringIO
+    from rich.console import Console
+    from mlx.core.commands import WorkflowEvent
+    from mlx.modes.object_detection import presentation
+
+    messages = []
+    monkeypatch.setattr(presentation, "console", Console(file=StringIO(), force_terminal=False))
+    monkeypatch.setattr(presentation, "print_info", messages.append)
+    monkeypatch.setattr(presentation, "print_success", messages.append)
+    reporter = presentation.RichWorkflowReporter()
+    reporter.emit(WorkflowEvent("progress", "performance", payload={
+        "event": "stream_fps", "fps": 12.345, "frames_processed": 20,
+    }))
+    reporter.emit(WorkflowEvent("success", "Completed.", payload={
+        "event": "stream_summary", "average_fps": 10.125,
+    }))
+    assert messages == ["FPS: 12.35 (20 frames processed)", "Completed. Average FPS: 10.12"]
+
+
+def test_detection_reporter_refreshes_one_stdout_line_and_clears_shorter_updates(monkeypatch):
+    from io import StringIO
+    from rich.console import Console
+    from mlx.core.commands import WorkflowEvent
+    from mlx.modes.object_detection import presentation
+
+    output = StringIO()
+    monkeypatch.setattr(presentation, "console", Console(file=output, force_terminal=True, width=100))
+    monkeypatch.setattr(presentation, "print_success", lambda message: output.write(message + "\n"))
+    reporter = presentation.RichWorkflowReporter()
+    for fps in (100.0, 9.0):
+        reporter.emit(WorkflowEvent("progress", "performance", payload={
+            "event": "stream_fps", "fps": fps, "frames_processed": 20,
+        }))
+    assert output.getvalue() == (
+        "\rFPS: 100.00 (20 frames processed)\rFPS: 9.00 (20 frames processed)  "
+    )
+    reporter.emit(WorkflowEvent("success", "Completed.", payload={
+        "event": "stream_summary", "average_fps": 10.0,
+    }))
+    assert output.getvalue().endswith("\nCompleted. Average FPS: 10.00\n")
+
+
 def test_legacy_ultralytics_detection_type_is_a_neutral_reexport() -> None:
     assert LegacyDetection is Detection
 
@@ -342,6 +441,49 @@ def test_detection_runner_transfers_ports_to_stream_once(monkeypatch, output_for
 
     assert result.frames_processed == 2
     assert cleanup == ["source", "sink"]
+
+
+@pytest.mark.parametrize("arguments,expected", [
+    ([], (640, 640)),
+    (["--height", "320"], (320, 640)),
+    (["--width=512"], (640, 512)),
+    (["--height", "256", "--width", "256"], (256, 256)),
+])
+def test_detection_cli_uses_mode_defaults_and_preserves_explicit_dimensions(monkeypatch, arguments, expected):
+    from mlx.cli import _build_config, _explicit_option_destinations
+    from mlx.modes.object_detection import runner
+
+    args = ["--mode", "object_detection", "--action", "infer-video", "--format", "json", *arguments]
+    parser = build_parser()
+    config = _build_config(parser.parse_args(args))
+    config["_explicit_options"] = _explicit_option_destinations(parser, args)
+    original_size = config["input_size"]
+    received = []
+
+    def create(command):
+        received.append(command.request)
+        return FakeDetector()
+
+    monkeypatch.setattr(runner.CreateObjectDetector, "execute", create)
+    monkeypatch.setattr(runner, "OpenCVFrameSource", lambda **kwargs: FakeFrameSource())
+    monkeypatch.setattr(runner, "annotate_detections", lambda frame, result: frame)
+    runner.run_object_detection(config)
+    assert (received[0].height, received[0].width) == expected
+    assert received[0].extras["input_size"] == (expected[1], expected[0])
+    assert config["input_size"] == original_size
+
+
+def test_python_detection_dimensions_and_other_mode_defaults_are_preserved(monkeypatch):
+    from mlx.modes.object_detection import runner
+
+    received = []
+    monkeypatch.setattr(runner.CreateObjectDetector, "execute", lambda command: received.append(command.request) or FakeDetector())
+    monkeypatch.setattr(runner, "OpenCVFrameSource", lambda **kwargs: FakeFrameSource())
+    monkeypatch.setattr(runner, "annotate_detections", lambda frame, result: frame)
+    runner.run_object_detection({"action": "infer-video", "output_format": "json", "height": 256, "width": 320})
+    assert (received[0].height, received[0].width) == (256, 320)
+    classification = build_parser().parse_args(["--mode", "image_classification"])
+    assert (classification.height, classification.width) == (256, 256)
 
 
 def test_benchmark_command_is_in_public_object_detection_api() -> None:

@@ -42,6 +42,11 @@ from mlx.modes.object_detection.data import object_detection_dataset_root
 
 def run_object_detection(config: dict[str, Any]) -> Any:
     config = with_explicit_options(config)
+    defaults = ObjectDetectionRequest()
+    for dimension in ("height", "width"):
+        if dimension not in config["_explicit_options"]:
+            config[dimension] = getattr(defaults, dimension)
+    config["input_size"] = (config["width"], config["height"])
     from mlx.modes.object_detection.distillation import validate_distillation_options
     validate_distillation_options(config)
     if config.get("action") == "adapter-prepare-neu-det":
@@ -157,10 +162,6 @@ def run_object_detection(config: dict[str, Any]) -> Any:
             benchmark_config["confidence"] = 0.001
         if "batch_size" not in explicit:
             benchmark_config["batch_size"] = 16
-        if "height" not in explicit:
-            benchmark_config["height"] = 640
-        if "width" not in explicit:
-            benchmark_config["width"] = 640
         if "verbose" not in explicit:
             benchmark_config["verbose"] = True
         result = BenchmarkObjectDetectionModel(
@@ -184,6 +185,9 @@ def run_object_detection(config: dict[str, Any]) -> Any:
             print_model_parameter_table(summaries, title="Object Detection Models")
         return summaries
     if action in {"infer-camera", "infer-video"}:
+        from mlx.modes.object_detection.runtime import ReportInferenceDevice
+
+        ReportInferenceDevice(config.get("device", "cpu"), reporter=reporter).execute()
         stream_request = StreamObjectDetectionRequest.from_config(
             {**config, "source": "camera" if action == "infer-camera" else "video"}
         )
@@ -203,6 +207,7 @@ def run_object_detection(config: dict[str, Any]) -> Any:
                 else OpenCVFrameSink(
                     title=f"MLX Object Detection ({stream_request.source.title()})",
                     delay_ms=1 if stream_request.source == "camera" else 10,
+                    max_size=(960, 540),
                 )
             )
             setup.callback(sink.close)

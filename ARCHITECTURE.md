@@ -63,8 +63,15 @@ or SIGKILL; the held-process manifest supports manual recovery.
 `ExportBestAdapterDetector` selects a seed only by validation AP and writes the
 tensor-only `mlx-yolox-adapter-detector-v1` format after an exact CUDA reload
 check. `LoadAdapterDetector` reconstructs it without an external foundation file.
-Both are callable commands at the LibreYOLO boundary; standard provider loaders
-are unchanged and must not be advertised as supporting this MLX-owned format.
+Both are callable commands at the LibreYOLO boundary. MLX's `LoadLibreYOLODetector`
+inspects `.pt` checkpoints with safe CPU loading and routes this format to
+`LoadAdapterDetector`, reusing the inspected payload. Thus LibreYOLO inference
+accepts a self-contained adapter detector through `--model-path` without a separate
+foundation or `--adapter`. Supplying `--adapter` with an embedded adapter is rejected.
+Unrecognized ordinary checkpoints and ONNX files retain provider-owned loading;
+safe-inspection failures delegate to the provider's legacy conversion/error boundary.
+The native LibreYOLO loaders are unchanged. This routing applies to detector creation
+(including camera/video inference and tracking), not training, conversion, or benchmark loading.
 Publication backs up an existing destination. Dataset class order and original
 frozen detector weights are retained for same-taxonomy experiments.
 
@@ -307,6 +314,12 @@ the alternative. The CLI routes to
 the selected action executes. Importing the CLI or another mode therefore does not require either
 provider to be installed.
 
+The object-detection runner resolves omitted CLI height/width to the typed request's
+640 × 640 defaults for local and AWS actions and refreshes the derived `input_size`.
+Explicit CLI dimensions and Python-supplied dimensions are preserved independently.
+Other modes retain their existing defaults; shared CLI parser defaults do not
+override object detection's mode-owned image size.
+
 All providers normalize predictions to `DetectionResult` containing `Detection` values with
 floating-point `xyxy` boxes. Tracking,
 annotation, streaming, and downstream callers depend only on that contract. The provider protocol
@@ -317,6 +330,42 @@ supports five capabilities:
 3. create a `DetectionAdapter` from `ObjectDetectionRequest`;
 4. export from `ConvertObjectDetectionRequest`;
 5. list models from `ListObjectDetectionModelsRequest`.
+
+`RunObjectDetectionStream` measures processing throughput with an injected monotonic
+clock, emitting structured `stream_fps` events at most once per second. The mode's
+`RichWorkflowReporter` refreshes live FPS on one stdout line in a terminal and prints
+the final average. Redirected output uses ordinary newline-delimited updates; the
+reporter terminates a live line before displaying another event. Timing starts after
+model/port construction and includes frame decoding, detection, rendering, and display;
+end-of-stream reads and resource cleanup are excluded. `StreamInferenceResult` exposes
+`elapsed_seconds` and `average_fps`, including in headless JSON output. Empty streams
+and zero-duration measurements return zero FPS. The command remains independent of
+terminal formatting and provider-specific GPU timing APIs.
+
+Before camera/video detector construction, `ReportInferenceDevice` emits requested
+CUDA-device diagnostics, identifying the PyTorch ROCm/CUDA runtime and GPU when
+available. These describe the requested PyTorch device, not a guarantee about ONNX
+execution-provider selection. Presentation formats the startup event; JSON mode
+keeps progress/startup output disabled. LibreYOLO loading temporarily filters only
+the DINOv2 logger's optional `xFormers not available` notices and restores the filter
+after loading, including failures. Other provider diagnostics remain visible.
+
+The shared `OpenCVFrameSink` configures Linux Qt after importing OpenCV. It preserves
+usable font overrides or discovers installed fonts through optional fontconfig when
+the wheel's font directory is missing. On Wayland with an X11 display, it explicitly
+selects `xcb` only when OpenCV's configured plugin directory contains `xcb` and lacks
+Wayland plugins; explicit platform choices take precedence. Environment handling
+stays at this display integration boundary. While opening an XWayland window, Qt
+receives an X11 session hint scoped to window creation and `imshow`; the original session type is
+restored even on failure. Headless sinks do not configure Qt.
+The sink optionally accepts a maximum display width/height and scales only the
+rendered frame down with aspect ratio preserved. Bounded displays explicitly create
+a resizable window without Qt's expanded toolbar and set its initial canvas size
+to the rendered frame, avoiding wide side gutters from implicit window geometry.
+Object-detection camera/video canvases fit within 960 × 540; smaller frames are not
+enlarged. Subsequent frames preserve user window resizing. Model inputs and
+source frames retain their configured resolution, and other sink callers retain
+native-size display unless they request a bound.
 
 `BenchmarkObjectDetectionModel` normalizes both provider validators to `precision`, `recall`,
 `f1`, `map_50`, and `map_50_95`. Provider adapters retain responsibility for model loading,

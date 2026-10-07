@@ -16,6 +16,8 @@ from mlx.core.streaming import (
 class StreamInferenceResult:
     frames_processed: int
     stopped_by_user: bool
+    elapsed_seconds: float = 0.0
+    average_fps: float = 0.0
 
 
 __all__ = [

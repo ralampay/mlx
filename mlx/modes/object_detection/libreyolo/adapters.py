@@ -23,21 +23,16 @@ class LibreYOLODetectionAdapter:
         registry=None,
     ) -> None:
         try:
-            from libreyolo import LibreYOLO
+            from .detector_loading import LoadLibreYOLODetector
+
+            self.model = LoadLibreYOLODetector(
+                model_path, device=device, adapter_path=adapter_path, registry=registry,
+            ).execute()
         except ImportError as exc:
             raise dependency_error("running object-detection inference") from exc
-
-        try:
-            if adapter_path:
-                from mlx.modes.object_detection.libreyolo.adapter_loading import LoadAdaptedYOLOX
-
-                self.model = LoadAdaptedYOLOX(model_path, adapter_path, device=device, **({"registry": registry} if registry is not None else {})).execute()
-            else:
-                self.model = LibreYOLO(str(model_path), device=device, task="detect")
         except (
             AttributeError,
             FileNotFoundError,
-            ImportError,
             TypeError,
             ValueError,
             RuntimeError,

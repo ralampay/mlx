@@ -16,8 +16,20 @@ See the repository's canonical [architecture](../../ARCHITECTURE.md).
 
 The `mlx-yolox-adapter-detector-v1` checkpoint includes all foundation and adapter
 tensors. It does not need the foundation file at its historical path and does
-not pickle a custom module instance. Use MLX's loader, not an unmodified standard
-LibreYOLO checkpoint constructor:
+not pickle a custom module instance. MLX's LibreYOLO inference integration detects
+this format from checkpoint metadata, so camera/video inference accepts it directly:
+
+```bash
+mlx --mode object_detection --action infer-video --provider libreyolo \
+  --model-path ./adapter-detector.pt --file-path ./video.mp4 --device cuda:0
+```
+
+Do not supply `--adapter` with this format; that option is for a separate adapter
+and its exact foundation. On ROCm PyTorch, use the same `cuda:0` device name.
+Ordinary checkpoints and ONNX retain provider loading. Training, conversion, and
+benchmark actions do not use this embedded-adapter inference loader.
+
+For direct Python use, load it with MLX's command:
 
 ```python
 from pathlib import Path

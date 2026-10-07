@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from pathlib import Path
+from time import perf_counter
 from typing import Any, Callable, Optional
 
 import numpy as np
@@ -191,24 +192,37 @@ class RunObjectDetectionStream:
         frame_sink: FrameSink,
         renderer: Callable[[np.ndarray, DetectionResult], np.ndarray],
         reporter: Optional[WorkflowReporter] = None,
+        clock: Callable[[], float] = perf_counter,
     ) -> None:
         self.detector = detector
         self.frame_source = frame_source
         self.frame_sink = frame_sink
         self.renderer = renderer
         self.reporter = reporter or NullWorkflowReporter()
+        self.clock = clock
 
     def execute(self) -> StreamInferenceResult:
         frames_processed = 0
         stopped_by_user = False
         try:
+            started = completed = last_reported = self.clock()
+            reported_frames = 0
             while True:
                 ok, frame = self.frame_source.read()
                 if not ok:
                     break
                 result = self.detector.predict(frame)
                 frames_processed += 1
-                if not self.frame_sink.show(self.renderer(frame, result)):
+                keep_running = self.frame_sink.show(self.renderer(frame, result))
+                completed = self.clock()
+                interval = completed - last_reported
+                if interval >= 1.0:
+                    self._report_fps(
+                        frames_processed, (frames_processed - reported_frames) / interval,
+                    )
+                    last_reported = completed
+                    reported_frames = frames_processed
+                if not keep_running:
                     stopped_by_user = True
                     break
         finally:
@@ -217,14 +231,26 @@ class RunObjectDetectionStream:
             finally:
                 self.frame_sink.close()
 
+        elapsed = max(0.0, completed - started)
+        average_fps = frames_processed / elapsed if elapsed > 0 else 0.0
         emit(
             self.reporter,
             "success",
             f"Object-detection stream processed {frames_processed} frame(s).",
+            payload={"event": "stream_summary", "average_fps": average_fps},
         )
         return StreamInferenceResult(
             frames_processed=frames_processed,
             stopped_by_user=stopped_by_user,
+            elapsed_seconds=elapsed,
+            average_fps=average_fps,
+        )
+
+    def _report_fps(self, frames_processed: int, fps: float) -> None:
+        emit(
+            self.reporter, "progress", "Object-detection stream performance.",
+            current=frames_processed,
+            payload={"event": "stream_fps", "fps": fps, "frames_processed": frames_processed},
         )
 
 

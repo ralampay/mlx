@@ -43,7 +43,7 @@ def test_legacy_parity_initialization_gradient_state_and_update(method):
     torch.testing.assert_close(models[0](x), models[1](x), rtol=0, atol=0)
 
 
-def test_full_detector_load_without_foundation(tmp_path):
+def test_full_detector_load_without_foundation(tmp_path, monkeypatch):
     from libreyolo.models.yolox.nn import LibreYOLOXModel
     model = LibreYOLOXModel(config='n', nb_classes=6).eval()
     targets = yolox_targets(model, 'neck', 'drax-residual-fusion')
@@ -54,9 +54,33 @@ def test_full_detector_load_without_foundation(tmp_path):
     torch.save({'format': FORMAT, 'size': 'n', 'names': ['a','b','c','d','e','f'],
                 'config': config, 'model': model.state_dict()}, path)
     restored = LoadAdapterDetector(path).execute()
+    from mlx.modes.object_detection.commands import CreateObjectDetector
+    from mlx.modes.object_detection.requests import ObjectDetectionRequest
+
+    reads = []
+    original_load = torch.load
+
+    def read(*args, **kwargs):
+        reads.append(kwargs)
+        return original_load(*args, **kwargs)
+
+    monkeypatch.setattr(torch, "load", read)
+    detector = CreateObjectDetector(ObjectDetectionRequest(
+        provider="libreyolo", model_path=str(path),
+    )).execute()
+    assert reads == [{"map_location": "cpu", "weights_only": True}]
     x = torch.randn(1,3,64,64)
     with torch.no_grad():
         torch.testing.assert_close(model(x), restored.model(x), rtol=0, atol=0)
+        torch.testing.assert_close(model(x), detector.model.model(x), rtol=0, atol=0)
+    state = dict(model.state_dict())
+    state.pop(next(iter(state)))
+    torch.save({'format': FORMAT, 'size': 'n', 'names': ['a','b','c','d','e','f'],
+                'config': config, 'model': state}, path)
+    with pytest.raises(MLXUserError, match='Missing key'):
+        CreateObjectDetector(ObjectDetectionRequest(
+            provider="libreyolo", model_path=str(path),
+        )).execute()
     torch.save({'format': 'not-a-detector'}, path)
     with pytest.raises(MLXUserError, match='Expected'):
         LoadAdapterDetector(path).execute()

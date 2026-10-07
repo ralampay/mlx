@@ -103,8 +103,8 @@ def build_parser() -> RichArgumentParser:
         dest="normalize_inputs",
     )
     parser.add_argument("--backbone", default=None)
-    parser.add_argument("--height", type=int, default=256)
-    parser.add_argument("--width", type=int, default=256)
+    parser.add_argument("--height", type=int, default=256, help="Input height; object detection defaults to 640.")
+    parser.add_argument("--width", type=int, default=256, help="Input width; object detection defaults to 640.")
     parser.add_argument(
         "--transform",
         choices=("resize", "random-crop", "center-crop"),
@@ -173,7 +173,10 @@ def build_parser() -> RichArgumentParser:
     parser.add_argument("--test-ratio", type=float, default=None, dest="test_ratio")
     parser.add_argument("--split-mode", choices=("counts", "ratios"), default=None, dest="split_mode")
     parser.add_argument("--overwrite", action=argparse.BooleanOptionalAction, default=False)
-    parser.add_argument("--model-path", "--checkpoint", default=None, dest="model_path")
+    parser.add_argument(
+        "--model-path", "--checkpoint", default=None, dest="model_path",
+        help="Model checkpoint; LibreYOLO inference also accepts self-contained MLX adapter detectors.",
+    )
     parser.add_argument("--model-s3-uri", default=None, dest="model_s3_uri")
     parser.add_argument("--experiment-id", default=None, dest="experiment_id")
     parser.add_argument("--models", default=None, help="Comma-separated MLX model names for comparison.")
@@ -485,7 +488,7 @@ def _render_help() -> None:
     options.add_row("--test-ratio", "None", "Test split ratio applied within each label when building classification datasets.")
     options.add_row("--split-mode", "None", "Build-dataset split mode: counts or ratios. Ratio mode splits each label independently using the provided ratios.")
     options.add_row("--overwrite / --no-overwrite", "False", "Allow supported workflows to replace existing output artifacts without prompting.")
-    options.add_row("--model-path", "None", "Provider-compatible checkpoint path for inference, resume, autoencoder embedding, warm starts, or ONNX conversion.")
+    options.add_row("--model-path", "None", "Provider-compatible checkpoint path for inference, resume, autoencoder embedding, warm starts, or ONNX conversion. LibreYOLO inference also accepts self-contained MLX adapter detectors.")
     options.add_row("--model-s3-uri", "None", "Exact S3 .pt checkpoint used to initialize AWS object-detection fine-tuning.")
     options.add_row("--model-file", "None", "GGUF embedding model used by NLP embed.")
     options.add_row("--input-file", "None", "Input CSV used by NLP embed.")
@@ -515,7 +518,7 @@ def _render_help() -> None:
     options.add_row("--file-path", "None", "Video path for file-based inference.")
     options.add_row("--input-img", "/tmp/image.jpg", "Input image for classification or one-class recognition inference.")
     options.add_row("--device", "cpu", "Execution device such as cpu or cuda:0.")
-    options.add_row("--height / --width", "256 / 256", "Image size controls.")
+    options.add_row("--height / --width", "mode-specific", "Image size controls: object detection defaults to 640 / 640; other modes retain their existing defaults.")
     options.add_row("--transform", "resize", "Segmentation spatial transform: resize, random-crop, or center-crop. Random crops become center crops for validation and test.")
     options.add_row("--batch-size", "1", "Training or evaluation batch size; autoencoder mode defaults to 64.")
     options.add_row("--epochs", "100", "Training epoch count; autoencoder mode defaults to 50.")

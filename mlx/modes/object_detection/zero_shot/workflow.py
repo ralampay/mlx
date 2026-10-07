@@ -2,13 +2,9 @@
 
 from __future__ import annotations
 
-import importlib.metadata
-import platform
 from pathlib import Path
 import random
-import subprocess
 import time
-import hashlib
 
 from mlx.core.artifacts import sha256_file, write_json_atomic
 from mlx.core.exceptions import MLXUserError
@@ -18,7 +14,8 @@ from .scoring import ScoreTransferPredictions
 
 
 class RunTransferStudy:
-    def __init__(self, specification, output, evaluator, verifier, phase="all"):
+    def __init__(self, specification, output, evaluator, verifier, phase="all", *, provenance_collector=None):
+        self.provenance_collector = provenance_collector
         self.spec, self.output = specification, Path(output).expanduser().resolve()
         self.evaluator, self.verifier, self.phase = evaluator, verifier, phase
 
@@ -248,109 +245,10 @@ class RunTransferStudy:
             ) from exc
 
     def _provenance(self):
-        import torch
-        import libreyolo
-
-        path = self.output / "environment.json"
-        environment = {
-            "python": platform.python_version(),
-            "torch": torch.__version__,
-            "cuda": torch.version.cuda,
-            "cudnn": torch.backends.cudnn.version(),
-            "gpu": torch.cuda.get_device_name(self.evaluator.device),
-            "vram_bytes": torch.cuda.get_device_properties(
-                self.evaluator.device
-            ).total_memory,
-            "driver": subprocess.check_output(
-                ["nvidia-smi", "--query-gpu=driver_version", "--format=csv,noheader"],
-                text=True,
-            ).strip(),
-            "amp": False,
-            "cuda_matmul_allow_tf32": torch.backends.cuda.matmul.allow_tf32,
-            "cudnn_allow_tf32": torch.backends.cudnn.allow_tf32,
-            "cudnn_benchmark": torch.backends.cudnn.benchmark,
-            "packages": sorted(
-                f"{d.metadata['Name']}=={d.version}"
-                for d in importlib.metadata.distributions()
-            ),
-        }
-        if not path.exists():
-            write_json_atomic(path, environment)
-        sources = self.output / "source"
-        sources.mkdir(exist_ok=True)
-        records = []
-        for name, root in (
-            ("mlx", Path(__file__).resolve().parents[4]),
-            ("libreyolo", Path(libreyolo.__file__).resolve().parents[1]),
-        ):
-            diff = subprocess.check_output(
-                ["git", "-C", str(root), "diff", "HEAD", "--binary"]
-            )
-            untracked = subprocess.check_output(
-                ["git", "-C", str(root), "ls-files", "--others", "--exclude-standard"],
-                text=True,
-            ).splitlines()
-            commit = subprocess.check_output(
-                ["git", "-C", str(root), "rev-parse", "HEAD"], text=True
-            ).strip()
-            fingerprint = hashlib.sha256(
-                diff
-                + commit.encode()
-                + "".join(
-                    filename + sha256_file(root / filename)
-                    for filename in untracked
-                    if (root / filename).is_file()
-                ).encode()
-            ).hexdigest()
-            destination = sources / name / fingerprint
-            destination.mkdir(parents=True, exist_ok=True)
-            archive = destination / "source.tar"
-            if not archive.exists():
-                subprocess.run(
-                    [
-                        "git",
-                        "-C",
-                        str(root),
-                        "archive",
-                        "--format=tar",
-                        "HEAD",
-                        "-o",
-                        str(archive),
-                    ],
-                    check=True,
-                )
-                (destination / "changes.patch").write_bytes(diff)
-                # Include untracked implementation files absent from git archive/diff.
-                import tarfile
-
-                with tarfile.open(destination / "untracked.tar", "w") as tar:
-                    for filename in untracked:
-                        tar.add(root / filename, arcname=filename)
-                write_json_atomic(
-                    destination / "manifest.json",
-                    {
-                        "commit": commit,
-                        "archive_sha256": sha256_file(archive),
-                        "patch_sha256": sha256_file(destination / "changes.patch"),
-                        "untracked_sha256": sha256_file(destination / "untracked.tar"),
-                    },
-                )
-            records.append(
-                {
-                    "repository": name,
-                    "revision": fingerprint,
-                    "directory": str(destination.relative_to(self.output)),
-                }
-            )
-        self.source_revision = records
-        mode = Path(__file__).resolve().parent.parent
-        relevant = [
-            *Path(__file__).resolve().parent.glob("*.py"),
-            mode / "libreyolo/zero_shot_backend.py",
-            mode / "libreyolo/adapter_slice_backend.py",
-            mode / "libreyolo/adapter_backend.py",
-        ]
-        self.evaluation_signature = {
-            str(p.relative_to(mode)): sha256_file(p) for p in relevant
-        }
-        self.evaluation_signature["libreyolo"] = records[1]["revision"]
+        collector = self.provenance_collector
+        if collector is None:
+            from .composition import create_provenance_collector
+            collector = create_provenance_collector(self.output, self.evaluator.device)
+        provenance = collector.execute()
+        self.source_revision = provenance["source_revision"]
+        self.evaluation_signature = provenance["evaluation_signature"]

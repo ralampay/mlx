@@ -1,5 +1,4 @@
 import csv
-from collections import Counter
 import json
 from pathlib import Path
 
@@ -10,10 +9,7 @@ from PIL import Image
 from mlx.cli import build_parser
 from mlx.core.exceptions import MLXUserError
 from mlx.modes.object_detection.adapter_data import (
-    DAWN_CLASS_MAPPING,
     FOUNDATION_CLASSES,
-    _DawnRecord,
-    _stratified_partitions,
     load_prepared_adapter_dataset,
 )
 from mlx.modes.object_detection.adapter_experiment import (
@@ -59,9 +55,7 @@ def test_cuda_required_failure_is_explicit(monkeypatch):
     assert require_experiment_device("cpu") == torch.device("cpu")
 
 
-def test_adapter_dataset_default_ignores_global_cli_default():
-    request = AdapterExperimentRequest.from_config({"dataset_path": "./tmp/dataset", "_explicit_options": set()})
-    assert request.dataset == Path("~/Desktop/datasets/object-detection/dawn/processed").expanduser().resolve()
+def test_adapter_dataset_explicit_path():
     explicit = AdapterExperimentRequest.from_config({"dataset_path": "/custom", "_explicit_options": {"dataset_path"}})
     assert explicit.dataset == Path("/custom")
 
@@ -82,7 +76,7 @@ def test_resume_checks_hybrid_injection_placement(tmp_path, monkeypatch, matchin
     monkeypatch.setattr(experiment.VerifyFoundationCheckpoint, "execute", lambda self: (torch.nn.Identity(), foundation))
     monkeypatch.setattr(experiment.CollectAdapterEnvironment, "execute", lambda self: {})
     monkeypatch.setattr(experiment, "load_prepared_adapter_dataset", lambda path: dataset)
-    monkeypatch.setattr(adapter_targets, "yolox_targets", lambda *args: {"neck.conv": 4})
+    monkeypatch.setattr(adapter_targets, "yolox_targets", lambda *args, **kwargs: {"neck.conv": 4})
 
     def unexpected_training(*args):
         raise AssertionError("Resume validation must not start training")
@@ -103,39 +97,12 @@ def test_resume_checks_hybrid_injection_placement(tmp_path, monkeypatch, matchin
         directory = request.output / method / "seed-42"
         directory.mkdir(parents=True)
         (directory / "metrics.json").write_text(json.dumps(metrics))
-    command = experiment.RunAdapterExperiment(request)
+    command = experiment.RunAdapterExperiment(request, dataset_loader=lambda path: dataset)
     if matching_placement:
         assert len(command.execute()) == 2
     else:
         with pytest.raises(MLXUserError, match="incompatible"):
             command.execute()
-
-
-def _record(index: int) -> _DawnRecord:
-    class_id = index % len(FOUNDATION_CLASSES)
-    source_name = next(name for name, mapped in DAWN_CLASS_MAPPING.items() if mapped == class_id)
-    return _DawnRecord(
-        image_id=f"foggy-{index:04d}", image_bytes=b"image", image_suffix=".jpg",
-        width=10, height=10,
-        objects=({"class_name": source_name},), source_split="train",
-    )
-
-
-def test_dataset_mapping_and_subset_are_reproducible():
-    assert DAWN_CLASS_MAPPING == {
-        "Person": 0, "Bicycle": 1, "Motorcycle": 2,
-        "Car": 3, "Bus": 4, "Truck": 5,
-    }
-    records = [_record(index) for index in range(120)]
-    first = _stratified_partitions(records, 42)
-    second = _stratified_partitions(records, 42)
-    assert {key: [row.image_id for row in value] for key, value in first.items()} == {
-        key: [row.image_id for row in value] for key, value in second.items()
-    }
-    assert {key: len(value) for key, value in first.items()} == {"train": 84, "val": 18, "test": 18}
-    for rows in first.values():
-        counts = sum((row.class_counts for row in rows), Counter())
-        assert all(counts[class_id] for class_id in range(6))
 
 
 def test_prepared_dataset_validation(tmp_path):

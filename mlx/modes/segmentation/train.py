@@ -13,6 +13,7 @@ from torch.utils.data import DataLoader
 
 from mlx.core.commands import NullWorkflowReporter, WorkflowReporter, emit
 from mlx.core.exceptions import MLXUserError
+from mlx.core.configuration import resolve_data_loader_workers
 from mlx.core.losses import validate_scalar_loss
 from mlx.modes.segmentation.data import (
     load_segmentation_datasets,
@@ -61,6 +62,7 @@ class TrainSegmentationModel:
         self.device = str(config["device"])
         self.batch_size = max(1, int(config.get("batch_size", 4)))
         self.epochs = int(config.get("epochs", 50))
+        self.workers = resolve_data_loader_workers(config)
         self.learning_rate = float(config.get("lr") or 1e-3)
         self.input_size = tuple(config.get("input_size", (256, 256)))
         self.transform = str(config.get("transform", "resize"))
@@ -95,13 +97,13 @@ class TrainSegmentationModel:
             train_dataset,
             batch_size=self.batch_size,
             shuffle=True,
-            num_workers=2,
+            num_workers=self.workers,
         )
         val_loader = DataLoader(
             val_dataset,
             batch_size=self.batch_size,
             shuffle=False,
-            num_workers=2,
+            num_workers=self.workers,
         )
         model = build_segmentation_model(
             self.model_name,

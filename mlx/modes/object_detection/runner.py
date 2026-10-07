@@ -71,7 +71,7 @@ def run_object_detection(config: dict[str, Any]) -> Any:
             AdapterExperimentRequest, RunAdapterExperiment, DEFAULT_DATASET, DEFAULT_OUTPUT,
         )
         from mlx.modes.object_detection.libreyolo.adapter_backend import (
-            CalibrateAdapterBatchSize, CollectAdapterEnvironment, VerifyFoundationCheckpoint,
+            VerifyFoundationCheckpoint,
         )
         from mlx.modes.object_detection.adapter_data import PrepareDawnAdapterDataset
         from mlx.modes.object_detection.adapter_report import GenerateAdapterReport
@@ -103,20 +103,10 @@ def run_object_detection(config: dict[str, Any]) -> Any:
             _, info = VerifyFoundationCheckpoint(request.model, request.checkpoint).execute()
             return info
         if action == "adapter-calibrate":
-            import libreyolo
-            CollectAdapterEnvironment(
-                request.output, device=request.device, amp=request.amp,
-                mlx_root=Path(__file__).resolve().parents[3],
-                libreyolo_root=Path(libreyolo.__file__).resolve().parents[1],
-            ).execute()
-            return CalibrateAdapterBatchSize(
-                request.model, request.checkpoint, request.output,
-                device=request.device, image_size=request.image_size, amp=request.amp,
-                reduction=request.reduction,
-                profiles=request.methods if request.methods in {("drax-hybrid",), ("drax-residual-fusion",)} else ("full-finetune", "drax"),
-                rank=request.rank, alpha=request.alpha, target=request.target,
-            ).execute()
-        return RunAdapterExperiment(request).execute()
+            from .libreyolo.adapter_execution import CalibrateAdapterExperiment
+            return CalibrateAdapterExperiment(request).execute()
+        from .adapter_composition import create_experiment_backend
+        return RunAdapterExperiment(request, backend=create_experiment_backend()).execute()
     if action == "ls-models" and config.get("names_only"):
         from mlx.modes.object_detection.providers import get_provider
         from mlx.core.model_listing import ListComponentNames

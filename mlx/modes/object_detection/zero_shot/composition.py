@@ -50,7 +50,13 @@ def run_transfer_action(config):
         evaluator,
         VerifyFoundationCheckpoint("yolox-l", Path(spec["foundation"]).expanduser()),
         config.get("study_phase", "all"),
+        provenance_collector=create_provenance_collector(output, evaluator.device),
     ).execute()
     if config.get("study_phase", "all") == "all":
         return GenerateTransferReport(output, GenerateTransferGallery(output)).execute()
     return result
+
+
+def create_provenance_collector(output, device):
+    from ..libreyolo.transfer_provenance import CollectTransferProvenance
+    return CollectTransferProvenance(output, device)

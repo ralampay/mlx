@@ -25,14 +25,15 @@ from mlx.modes.object_detection.libreyolo.adapter_loading import (
 class LibreYOLOAdapterPredictionWriter:
     """Reconstruct one study checkpoint and cache native COCO predictions."""
 
-    def __init__(self, request: Any, foundation: Mapping[str, Any], device: torch.device):
+    def __init__(self, request: Any, foundation: Mapping[str, Any], device: torch.device, *, registry=None):
+        self.registry = registry
         self.request = request
         self.foundation = foundation
         self.device = device
 
     def __call__(self, run: Any, split: str, destination: Path) -> Mapping[str, Any]:
         wrapper = ReconstructAdapterModel(
-            self.request.checkpoint, self.foundation, self.device
+            self.request.checkpoint, self.foundation, self.device, registry=self.registry
         ).execute(run)
         destination.parent.mkdir(parents=True, exist_ok=True)
         with tempfile.TemporaryDirectory(
@@ -72,7 +73,8 @@ class LibreYOLOAdapterPredictionWriter:
 class ReconstructAdapterModel:
     """Strict foundation-first restoration shared by post-training evaluations."""
 
-    def __init__(self, checkpoint, foundation, device):
+    def __init__(self, checkpoint, foundation, device, *, registry=None):
+        self.registry = registry
         self.checkpoint = Path(checkpoint)
         self.foundation = foundation
         self.device = device
@@ -90,7 +92,7 @@ class ReconstructAdapterModel:
             artifact = load_untrusted_torch_file(
                 str(run.directory / "adapter" / "checkpoint.pt"), map_location="cpu"
             )
-            ApplyYOLOXAdapter(model, {**config, "method": method}, artifact["state"]).execute()
+            ApplyYOLOXAdapter(model, {**config, "method": method}, artifact["state"], registry=self.registry).execute()
         elif method in {"head-only", "full-finetune"}:
             self._restore_dense_checkpoint(model, run, load_untrusted_torch_file)
 

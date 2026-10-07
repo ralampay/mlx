@@ -20,6 +20,7 @@ class LibreYOLODetectionAdapter:
         imgsz: int | tuple[int, int],
         confidence: float,
         adapter_path: str | None = None,
+        registry=None,
     ) -> None:
         try:
             from libreyolo import LibreYOLO
@@ -30,7 +31,7 @@ class LibreYOLODetectionAdapter:
             if adapter_path:
                 from mlx.modes.object_detection.libreyolo.adapter_loading import LoadAdaptedYOLOX
 
-                self.model = LoadAdaptedYOLOX(model_path, adapter_path, device=device).execute()
+                self.model = LoadAdaptedYOLOX(model_path, adapter_path, device=device, **({"registry": registry} if registry is not None else {})).execute()
             else:
                 self.model = LibreYOLO(str(model_path), device=device, task="detect")
         except (
@@ -76,6 +77,7 @@ def build_detection_adapter(
     imgsz: int | tuple[int, int],
     confidence: float,
     adapter_path: str | None = None,
+    registry=None,
 ) -> DetectionAdapter:
     if model_path.suffix.lower() not in {".pt", ".onnx"}:
         raise MLXUserError(
@@ -87,6 +89,7 @@ def build_detection_adapter(
         imgsz=imgsz,
         confidence=confidence,
         adapter_path=adapter_path,
+        registry=registry,
     )
 
 

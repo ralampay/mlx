@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Any, Mapping, Optional
 
 from mlx.core.requests import ConfigRequest
@@ -17,6 +17,7 @@ class ImageClassificationRequest(ConfigRequest):
     output_path: Optional[str] = None
     input_img: str = "/tmp/image.jpg"
     device: str = "cpu"
+    workers: int = field(default=2, kw_only=True)
     width: int = 224
     height: int = 224
     input_size: tuple[int, int] = (224, 224)

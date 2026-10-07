@@ -20,7 +20,7 @@ import torch
 from mlx.core.artifacts import sha256_file, write_csv, write_json_atomic
 from mlx.core.exceptions import MLXUserError
 from mlx.modes.object_detection.adapter_data import load_prepared_adapter_dataset
-from mlx.modes.object_detection.adapter_experiment import DEFAULT_DATASET, DEFAULT_OUTPUT, METHODS
+from mlx.modes.object_detection.adapter_configuration import DEFAULT_DATASET, DEFAULT_OUTPUT, FOUNDATION
 from mlx.modes.object_detection.adapter_baselines import recorded_baseline_runs
 from mlx.modes.object_detection.libreyolo.adapter_backend import (
     VerifyFoundationCheckpoint,
@@ -78,7 +78,7 @@ class AdapterSliceRequest:
         return cls(
             output=Path(config.get("output_path") or DEFAULT_OUTPUT).expanduser().resolve(),
             checkpoint=Path(
-                config.get("model_path") or "~/Desktop/object-detection-models/foundational-yolox-l.pt"
+                config.get("model_path") or FOUNDATION
             ).expanduser().resolve(),
             dataset=Path(value("dataset_path", DEFAULT_DATASET) or DEFAULT_DATASET).expanduser().resolve(),
             device=str(value("device", "cuda") or "cuda"),
@@ -99,15 +99,17 @@ class AdapterSliceRequest:
     def analysis_root(self) -> Path:
         return self.output / "sliced-analysis"
 
-    def validate(self, *, prediction: bool) -> None:
+    def validate(self, *, prediction: bool, registry=None) -> None:
         if not self.output.is_dir():
             raise MLXUserError(f"Adapter study output does not exist: {self.output}")
         if self.bootstrap_samples < 1:
             raise MLXUserError("--bootstrap-samples must be positive")
-        if self.comparison_method not in METHODS:
+        from .feature_adapters import DEFAULT_FEATURE_ADAPTER_REGISTRY
+        methods = ("frozen", "head-only", "full-finetune", *(registry or DEFAULT_FEATURE_ADAPTER_REGISTRY).names())
+        if self.comparison_method not in methods:
             raise MLXUserError(f"Unknown comparison method: {self.comparison_method}")
-        if self.methods and set(self.methods) - set(METHODS):
-            raise MLXUserError(f"Slice methods must use {', '.join(METHODS)}")
+        if self.methods and set(self.methods) - set(methods):
+            raise MLXUserError(f"Slice methods must use {', '.join(methods)}")
         if self.seeds and any(seed < 0 for seed in self.seeds):
             raise MLXUserError("Slice seeds must be nonnegative integers")
         if prediction:
@@ -317,13 +319,15 @@ class CacheAdapterSlicePredictions:
         request: AdapterSliceRequest,
         *,
         prediction_writer_factory: Callable[[Mapping[str, Any], torch.device], Callable] | None = None,
+        registry=None,
     ):
         self.request = request
         self.prediction_writer_factory = prediction_writer_factory
+        self.registry = registry
 
     def execute(self) -> dict[str, Any]:
         request = self.request
-        request.validate(prediction=True)
+        request.validate(prediction=True, registry=self.registry)
         device = require_experiment_device(request.device)
         model_name = str(_load_json(request.output / "study.json").get("model") or "yolox-l")
         _, foundation = VerifyFoundationCheckpoint(model_name, request.checkpoint).execute()
@@ -360,7 +364,7 @@ class CacheAdapterSlicePredictions:
             )
 
             factory = lambda current, current_device: LibreYOLOAdapterPredictionWriter(
-                request, current, current_device
+                request, current, current_device, registry=self.registry
             )
         else:
             factory = self.prediction_writer_factory
@@ -719,12 +723,13 @@ def _quantile(values: Sequence[float], probability: float) -> float:
 class GenerateAdapterSliceReport:
     """Create weather, size, class, difficulty, and paired reports from caches."""
 
-    def __init__(self, request: AdapterSliceRequest):
+    def __init__(self, request: AdapterSliceRequest, *, registry=None):
+        self.registry = registry
         self.request = request
 
     def execute(self) -> dict[str, Any]:
         request = self.request
-        request.validate(prediction=False)
+        request.validate(prediction=False, registry=self.registry)
         root = request.analysis_root
         manifest_path = root / "analysis_manifest.json"
         if not manifest_path.is_file():

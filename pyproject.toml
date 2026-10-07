@@ -24,13 +24,13 @@ object-detection-ultralytics = [
 ]
 object-detection-libreyolo = [
     "pyarrow",
-    "libreyolo[onnx] @ git+https://github.com/ralampay/libreyolo.git@dd1ac8d3b2d1e7b99ab078b5c589621f7c4bddc8"
+    "libreyolo[onnx] @ git+https://github.com/ralampay/libreyolo.git@release"
 ]
 object-detection = [
     "onnxruntime",
     "pyarrow",
     "ultralytics @ git+https://github.com/ralampay/ultralytics",
-    "libreyolo[onnx] @ git+https://github.com/ralampay/libreyolo.git@dd1ac8d3b2d1e7b99ab078b5c589621f7c4bddc8"
+    "libreyolo[onnx] @ git+https://github.com/ralampay/libreyolo.git@release"
 ]
 tracking = [
     "motmetrics>=1.4.0",
@@ -74,3 +74,5 @@ mlx = [".dockerignore"]
 "mlx.modes.image_classification.aws" = ["Dockerfile"]
 "mlx.modes.video_anomaly_detection.aws" = ["Dockerfile"]
 "mlx.modes.image_recognition_oc.aws" = ["Dockerfile"]
+
+"mlx.modes.object_detection.feature_adapters" = ["LICENSE"]

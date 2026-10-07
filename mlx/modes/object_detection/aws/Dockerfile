@@ -20,6 +20,6 @@ RUN python -m pip install --upgrade pip \
         "boto3>=1.34.0" \
         "PyYAML>=6.0.1" \
         "ultralytics @ git+https://github.com/ralampay/ultralytics" \
-        "libreyolo[onnx] @ git+https://github.com/ralampay/libreyolo.git@dd1ac8d3b2d1e7b99ab078b5c589621f7c4bddc8"
+        "libreyolo[onnx] @ git+https://github.com/ralampay/libreyolo.git@release"
 
 ENTRYPOINT ["python", "-m", "mlx.modes.object_detection.aws.entrypoint"]

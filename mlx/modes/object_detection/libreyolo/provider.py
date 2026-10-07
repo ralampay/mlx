@@ -13,6 +13,9 @@ from mlx.modes.object_detection.requests import (
 class LibreYOLOProvider:
     name = "libreyolo"
 
+    def __init__(self, *, registry=None):
+        self.registry = registry
+
     def model_names(self):
         from mlx.modes.object_detection.libreyolo.utils import CANONICAL_MODEL_NAMES
         return CANONICAL_MODEL_NAMES
@@ -52,6 +55,7 @@ class LibreYOLOProvider:
             imgsz=resolve_imgsz(request.to_config()),
             confidence=request.confidence,
             adapter_path=request.adapter,
+            registry=self.registry,
         )
 
     def convert(

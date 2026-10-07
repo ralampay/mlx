@@ -49,7 +49,7 @@ def loading(monkeypatch, tmp_path):
 
     monkeypatch.setattr(feature_adapters, "inject_adapters", inject)
     monkeypatch.setattr(feature_adapters, "load_adapter_state_dict", restore)
-    monkeypatch.setattr(adapter_targets, "yolox_targets", lambda *args: {"0": 3})
+    monkeypatch.setattr(adapter_targets, "yolox_targets", lambda *args, **kwargs: {"0": 3})
     monkeypatch.setitem(sys.modules, "libreyolo.utils.serialization", SimpleNamespace(
         load_untrusted_torch_file=lambda *args, **kwargs: artifact,
     ))
@@ -71,7 +71,7 @@ def test_standalone_adapter_restores_saved_configuration(loading):
     assert raw is loading.model
     assert method == "lora"
     assert targets == {"0": 3}
-    assert kwargs == dict(reduction=8, rank=4, alpha=2.0, train_head=False)
+    assert kwargs == dict(reduction=8, rank=4, alpha=2.0, train_head=False, registry=None)
     assert loading.calls["state"] is loading.artifact["state"]
     assert loading.artifact["config"] == original
 

@@ -31,3 +31,15 @@ def with_explicit_options(config: Mapping[str, Any]) -> dict[str, Any]:
         }
     )
     return values
+
+
+def resolve_data_loader_workers(config: Mapping[str, Any], *, default: int = 2) -> int:
+    """Validate caller-selected loader concurrency, including in-process loading."""
+    value = config.get("workers", default)
+    try:
+        workers = int(value)
+    except (TypeError, ValueError, OverflowError) as exc:
+        raise MLXUserError("--workers must be a nonnegative integer.") from exc
+    if isinstance(value, bool) or workers < 0 or (isinstance(value, float) and workers != value):
+        raise MLXUserError("--workers must be a nonnegative integer.")
+    return workers

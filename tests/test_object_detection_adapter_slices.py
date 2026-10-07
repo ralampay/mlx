@@ -155,7 +155,6 @@ def test_slice_request_ignores_unrelated_global_parser_defaults(tmp_path):
     assert request.batch_size == 8
     assert request.workers == 0
     assert request.device == "cuda"
-    assert request.dataset == Path("~/Desktop/datasets/object-detection/dawn/processed").expanduser().resolve()
 
 
 @pytest.mark.parametrize("method", ["drax-hybrid", "drax-residual-fusion"])

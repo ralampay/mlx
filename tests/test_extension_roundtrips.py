@@ -27,7 +27,7 @@ def test_custom_segmenter_trains_reloads_and_infers(tmp_path):
     assert [item.model_name for item in ListSegmentationModels({}, model_registry=registry).execute()] == ["pixel"]
     TrainSegmentationModel(TrainSegmentationRequest(
         model="pixel", dataset_path=str(tmp_path / "data"), output_path=str(tmp_path / "run"),
-        epochs=1, batch_size=1, input_size=(8, 8),
+        epochs=1, batch_size=1, input_size=(8, 8), workers=0,
     ), model_registry=registry).execute()
     result = InferSegmentationImage(InferSegmentationRequest(
         model_path=str(tmp_path / "run/pixel.pth"), input_img=str(image),
@@ -74,3 +74,15 @@ def test_autoencoder_with_locally_registered_loss(tmp_path):
     ), loss_registry=loss_registry).execute()
     adapter = AutoencoderRepresentationTransformer(result.checkpoint_path)
     assert len(adapter.transform([[0., 1., 2.]])[0]) == 1
+
+
+def test_segmentation_rejects_negative_workers_before_loading_data(tmp_path):
+    import pytest
+    from mlx.core.exceptions import MLXUserError
+    from mlx.modes.segmentation.requests import TrainSegmentationRequest
+    from mlx.modes.segmentation.train import TrainSegmentationModel
+    request = TrainSegmentationRequest(model="unet", dataset_path=str(tmp_path/'missing'),
+                                       output_path=str(tmp_path/'out'), workers=-1)
+    with pytest.raises(MLXUserError, match='workers must be a nonnegative integer'):
+        TrainSegmentationModel(request).execute()
+    assert not (tmp_path/'out').exists()

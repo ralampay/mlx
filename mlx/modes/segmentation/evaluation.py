@@ -14,6 +14,7 @@ from torch.utils.data import DataLoader
 from mlx.core.commands import NullWorkflowReporter, WorkflowReporter, emit
 from mlx.core.artifacts import sha256_file as _sha256
 from mlx.core.exceptions import MLXUserError
+from mlx.core.configuration import resolve_data_loader_workers
 from mlx.modes.segmentation.data import (
     SegmentationEvaluationDataset,
     load_image_tensor,
@@ -61,6 +62,7 @@ class BenchmarkSegmentation:
         self.reporter = reporter or NullWorkflowReporter()
 
     def execute(self) -> dict[str, float]:
+        workers = resolve_data_loader_workers(self.config)
         self._validate_config()
         model, metadata = load_checkpoint_bundle(self.config, **({"model_registry": self.model_registry} if self.model_registry is not None else {}))
         model = model.to(self.device)
@@ -85,7 +87,7 @@ class BenchmarkSegmentation:
             dataset,
             batch_size=max(1, int(self.config.get("batch_size", 1))),
             shuffle=False,
-            num_workers=2,
+            num_workers=workers,
         )
         result, timing = self._evaluate(
             model,

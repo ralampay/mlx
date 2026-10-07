@@ -15,7 +15,7 @@ from mlx.modes.object_detection.libreyolo.adapter_backend import (
 )
 
 
-def resolve_adapter_targets(model, config, method):
+def resolve_adapter_targets(model, config, method, *, registry=None):
     from mlx.modes.object_detection.libreyolo.adapter_targets import yolox_targets
 
     paths = config.get("injected_modules")
@@ -30,7 +30,7 @@ def resolve_adapter_targets(model, config, method):
             return {path: model.get_submodule(path).out_channels for path in paths}
         except AttributeError as exc:
             raise MLXUserError(f"Invalid {method.title()} checkpoint injection path: {exc}") from exc
-    targets = yolox_targets(model, str(config.get("adapter_target") or "neck"), method)
+    targets = yolox_targets(model, str(config.get("adapter_target") or "neck"), method, registry=registry)
     if paths is not None and set(paths) != set(targets):
         raise MLXUserError("Recorded adapter injection paths do not match the YOLOX target policy")
     return targets
@@ -39,7 +39,8 @@ def resolve_adapter_targets(model, config, method):
 class ApplyYOLOXAdapter:
     """Attach and strictly restore adapter tensors on an already verified model."""
 
-    def __init__(self, model, config, state):
+    def __init__(self, model, config, state, *, registry=None):
+        self.registry = registry
         self.model = model
         self.config = config
         self.state = state
@@ -49,7 +50,7 @@ class ApplyYOLOXAdapter:
 
         try:
             method = self.config["method"]
-            targets = resolve_adapter_targets(self.model, self.config, method)
+            targets = resolve_adapter_targets(self.model, self.config, method, registry=self.registry)
             reduction = self.config.get("adapter_reduction")
             rank = self.config.get("adapter_rank")
             reduction = int(8 if reduction is None else reduction)
@@ -64,7 +65,7 @@ class ApplyYOLOXAdapter:
                 raise ValueError("adapter state must be a tensor mapping")
             inject_adapters(
                 self.model, method, targets, reduction=reduction, rank=rank,
-                alpha=alpha, train_head=train_head,
+                alpha=alpha, train_head=train_head, registry=self.registry,
             )
             load_adapter_state_dict(self.model, self.state)
         except (AttributeError, KeyError, TypeError, ValueError, RuntimeError) as exc:
@@ -75,7 +76,8 @@ class ApplyYOLOXAdapter:
 class LoadAdaptedYOLOX:
     """Load a standalone adapter with its exact foundation, independent of a study directory."""
 
-    def __init__(self, model_path, adapter_path, *, device="cpu"):
+    def __init__(self, model_path, adapter_path, *, device="cpu", registry=None):
+        self.registry = registry
         self.model_path = Path(model_path).expanduser()
         self.adapter_path = Path(adapter_path).expanduser()
         self.device = device
@@ -88,7 +90,7 @@ class LoadAdaptedYOLOX:
         model, info = VerifyFoundationCheckpoint(config["model"], self.model_path).execute()
         if info["sha256"] != config["checkpoint_sha256"]:
             raise MLXUserError("Adapter foundation checksum does not match --model-path. Supply the exact foundation used to train this adapter.")
-        ApplyYOLOXAdapter(model, config, artifact["state"]).execute()
+        ApplyYOLOXAdapter(model, config, artifact["state"], registry=self.registry).execute()
         model.eval()
         return build_experimental_yolox(model, info, self.device)
 

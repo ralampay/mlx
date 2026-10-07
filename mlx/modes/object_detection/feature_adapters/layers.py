@@ -124,22 +124,15 @@ class LoRAConv2d(nn.Module):
         return self.base(x) + self.scale * self.b(self.a(x))
 
 
-_REGISTRY = {
-    "bottleneck": BottleneckAdapter,
-    "ssf": SSFAdapter,
-    "convpass": ConvpassAdapter,
-    "conv-adapter": ConvAdapter,
-    "drax": DraxAdapter,
-}
+def available_adapters(*, registry=None) -> tuple[str, ...]:
+    from .registry import DEFAULT_FEATURE_ADAPTER_REGISTRY
+    return (registry or DEFAULT_FEATURE_ADAPTER_REGISTRY).names()
 
 
-def available_adapters() -> tuple[str, ...]:
-    return (*_REGISTRY, "lora", "drax-hybrid", "drax-spatial", "drax-residual-fusion")
-
-
-def create_adapter(name: str, channels: int, *, reduction: int = 8, alpha: float = 1.0) -> nn.Module:
-    try:
-        adapter = _REGISTRY[name]
-    except KeyError as exc:
-        raise ValueError(f"Unknown feature adapter {name!r}; choose from {tuple(_REGISTRY)}") from exc
-    return adapter(channels, reduction=reduction, alpha=alpha)
+def create_adapter(name: str, channels: int, *, reduction: int = 8, alpha: float = 1.0,
+                   rank: int = 8, registry=None) -> nn.Module:
+    from .registry import DEFAULT_FEATURE_ADAPTER_REGISTRY
+    definition = (registry or DEFAULT_FEATURE_ADAPTER_REGISTRY).resolve(name)
+    if definition.attachment != "feature":
+        raise ValueError(f"Adapter {name!r} requires a base convolution; use inject_adapters")
+    return definition.build(channels, reduction=reduction, rank=rank, alpha=alpha)

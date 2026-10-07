@@ -92,12 +92,6 @@ def test_conversion_retains_empty_text_qrels_and_reuses_verified_data(tmp_path):
         command.execute()
 
 
-def test_held_out_suite_selects_pinned_sources(tmp_path):
-    command = PrepareRetrievalDatasets(tmp_path, suite="held-out-nano-v1", source=FixtureSource())
-    assert [source.name for source in command.sources] == [
-        "nano-climatefever", "nano-fever", "nano-nq",
-    ]
-    assert all(len(source.revision) == 40 for source in command.sources)
 
 
 def test_preparation_failure_does_not_publish(tmp_path):

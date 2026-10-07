@@ -196,7 +196,7 @@ mlx/
     │   ├── evaluation.py         normalized benchmark metrics and research-artifact contract
     │   ├── adapter_data.py       deterministic DAWN conversion, class mapping, and stratified split
     │   ├── adapter_metrics.py    fixed-threshold detection precision and recall
-    │   ├── adapter_experiment.py typed request and checkpoint verification/training/evaluation commands
+    │   ├── adapter_experiment.py typed request and backend-independent experiment orchestration
     │   ├── adapter_report.py     comparative CSV and paired-seed Markdown report command
     │   ├── adapter_slices.py     post-training prediction cache and targeted slice-analysis commands
     │   ├── comparison_experiment.py paired low-data YOLOX/CSP-Drax preparation, execution, and statistical report commands
@@ -937,7 +937,7 @@ LibreYOLO incremental neural adapters remain provider-owned, distinct from infer
 Before adapter training, the integration verifies that either the train signature or the trainer's
 configuration fields explicitly declare all requested adapter controls. Generic `**kwargs` alone
 is not evidence of support. Unsupported versions fail with `MLXUserError` rather than silently
-performing full-model training. MLX does not invent a neural-adapter registry or provider hook.
+performing full-model training. These legacy incremental controls are separate from MLX-owned research feature adapters.
 
 Detection inference accepts an optional `ObjectDetectionRequest.adapter` path through
 `--adapter`. The LibreYOLO provider constructs `LoadAdaptedYOLOX`, which reads the adapter's
@@ -955,9 +955,10 @@ adapter artifacts, and Ultralytics inference with `--adapter` raise `MLXUserErro
 This option does not apply standalone adapters during detection training, conversion, or
 benchmarking; adapter-study actions retain their existing method-selection semantics.
 
-The YOLOX-L feature-adapter study is a separate local research workflow. LibreYOLO owns the
-generic feature adapters, registry, injection, YOLOX target policy, standard model, and strict
-checkpoint compatibility. MLX owns DAWN Parquet-to-YOLO conversion, the seed-42 stratified split,
+The YOLOX-L feature-adapter study is a separate local research workflow. MLX owns active
+feature adapters, registry, injection, serialization, and provider-bound YOLOX placement and
+reconstruction. LibreYOLO owns ordinary detector models and generic provider training. Its
+legacy adapter package is frozen compatibility support. MLX owns DAWN Parquet-to-YOLO conversion, the seed-42 stratified split,
 CUDA-required execution, batch calibration, training/evaluation orchestration, memory/timing,
 per-seed artifacts, and aggregate statistics. The workflow loads the unmodified foundation state
 dict before injection and defaults to the three PAFPN outputs at strides 8, 16, and 32. It never
@@ -971,7 +972,7 @@ training, and records failures without retrying altered conditions. `GenerateAda
 analysis-ready CSV/JSON plus descriptive mean, standard deviation, paired differences, and 95%
 intervals. Single-seed output is explicitly exploratory.
 
-The `drax-hybrid` method is implemented only in LibreYOLO: it shares LoRA's
+The `drax-hybrid` method is implemented in MLX `feature_adapters`: it shares LoRA's
 convolution target selector (26 dense 1x1 neck convolutions for YOLOX-L), combining
 exact LoRA weight updates and compressed two-scale spatial bypasses. MLX forwards
 rank/reduction/alpha and records actual placement. Prediction reconstruction uses
@@ -996,6 +997,47 @@ training. `GenerateAdapterSliceReport` consumes those caches on CPU to report DA
 weather groups, COCO object sizes, classes, class-weather intersections, and validation-defined
 frozen-baseline difficulty. Seed-paired Drax comparisons and clustered image-bootstrap intervals are
 analysis outputs; low-support weather slices remain explicitly descriptive.
+
+## Adapter Extension Contracts
+
+`object_detection.feature_adapters.registry.FeatureAdapterRegistry` is an immutable, injected
+mapping. `FeatureAdapterDefinition` supplies a lazy factory reference or callable, feature-output
+or convolution attachment policy, supported construction parameters, target validation, and
+initialization/verification capabilities. Registering an adapter returns a new registry; no
+process-wide registration is required. Built-in state names and initialization remain compatible.
+
+`available_adapters`, `create_adapter`, and `inject_adapters` accept a keyword-only `registry`.
+Injection validates every target and additional trainable module path, rejects overlaps and aliases,
+and builds replacements before committing structural changes. Construction failures restore original
+trainability. Factories must construct adapters without modifying base weights or structure.
+`trainable_modules` selects explicit additional trainable paths; `train_head` preserves the historical
+head-path behavior. Target selection stays in the provider boundary and uses attachment metadata.
+
+`AdapterExperimentBackend` defines validation, study metadata, device resolution, foundation verification, runtime
+provenance, target selection, condition execution, and resource release. `RunAdapterExperiment`
+coordinates artifact identity, baseline reuse, ordering and resume through this interface. Backend,
+registry and dataset loader are keyword-only injectable dependencies. The compatibility default is
+constructed lazily in `adapter_composition`; runners explicitly select it. `LibreYOLOExperimentBackend`
+and `RunLibreYOLOAdapterCondition` contain provider execution, while `CalibrateAdapterExperiment`
+coordinates calibration outside the runner. Historical helper imports remain lazy compatibility exports.
+
+`prepared_adapter_data` reads manifests independently of dataset provenance. The old `adapter_data`
+loader retains its taxonomy default; explicit experiment inputs use manifest classes and compare
+against the foundation for same-taxonomy training. Historical CLI path defaults are isolated in
+`adapter_configuration`; Python request objects continue to take explicit paths.
+
+The same registry is passed to `ApplyYOLOXAdapter`, `LoadAdaptedYOLOX`, `LibreYOLOProvider`, `LoadAdapterDetector`,
+`ExportBestAdapterDetector`, `ReconstructAdapterModel`, calibration and slice prediction/report
+commands. Custom adapter checkpoints require the caller's registry; they never import implementation
+references from checkpoint data. Legacy target-policy exceptions stay in the LibreYOLO boundary.
+`RunTransferStudy` accepts a provenance collector whose `execute()` returns `source_revision` and
+`evaluation_signature`; the default `CollectTransferProvenance` owns provider/CUDA and source inspection.
+
+LibreYOLO installation declarations use the `release` branch of `ralampay/libreyolo` over HTTPS.
+Installed-package provenance uses VCS metadata and package-scoped snapshots instead of an enclosing
+checkout. Local installation, requirements, notebook setup and SageMaker build declarations agree. The branch
+moves; record the resolved VCS commit when validating an installation. No provider source changes or
+new checkpoint schemas are part of these boundaries.
 
 ## Testing and Change Rules
 
@@ -1026,6 +1068,9 @@ configuration, never package constants. Source snapshots, hashes, environment, f
 protocol, pilot, calibration and run-level failures stay under that output directory.
 See `docs/object_detection/zero-shot-adapters.md` for configuration and reconstruction.
 
+- Test MLX functionality and contracts using synthetic fixtures and injected collaborators.
+  Do not encode particular dataset inventories, local environments, experiment recipes or research
+  results as test requirements. Operational setup checks belong in documented manual procedures.
 - Unit-test commands with fake models, providers, reporters, frame sources, and frame sinks.
 - Test each provider against the neutral contract; provider-independent tests must not import its
   third-party package.
@@ -1221,3 +1266,12 @@ CLI `--workers` retains its existing default of four; `--eval-interval`,
 `--no-aug-epochs`, and `--patience` default to unset. Other providers retain their
 existing behavior. Research experiment supervisors compose these training and
 benchmark commands externally; they do not embed model logic in MLX runners.
+
+### Native loader concurrency
+
+Segmentation and image-classification requests expose keyword-only `workers` for training and benchmarking.
+`core.configuration.resolve_data_loader_workers` validates this shared setting, including zero
+for in-process loading, before workflow dataset access. Python and CLI
+calls preserve the historical default of two workers; explicitly supplied `--workers` values are
+honored. Zero workers permits in-process loading for portable synthetic round trips and constrained
+runtimes. Grouped training carries the same request setting into child commands.

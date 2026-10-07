@@ -66,7 +66,7 @@ def test_dependency_metadata_uses_current_ralampay_fork() -> None:
     project = metadata["project"]
     extras = project["optional-dependencies"]
     fork_reference = (
-        "libreyolo[onnx] @ git+https://github.com/ralampay/libreyolo.git@dd1ac8d3b2d1e7b99ab078b5c589621f7c4bddc8"
+        "libreyolo[onnx] @ git+https://github.com/ralampay/libreyolo.git@release"
     )
 
     assert project["requires-python"] == ">=3.10"

@@ -10,6 +10,7 @@ from torch.utils.data import DataLoader
 
 from mlx.core.commands import NullWorkflowReporter, WorkflowReporter, emit
 from mlx.core.exceptions import MLXUserError
+from mlx.core.configuration import resolve_data_loader_workers
 from mlx.core.losses import validate_scalar_loss
 from mlx.modes.image_classification.losses import build_loss
 from mlx.modes.image_classification.data import (
@@ -78,6 +79,7 @@ class TrainImageClassificationModel:
 
     def execute(self) -> None:
         config = self.request.to_config()
+        resolve_data_loader_workers(config)
         if int(config.get("epochs", 0)) < 1:
             raise MLXUserError("--epochs must be at least 1 for image-classification training.")
         model_name = resolve_model_name(config)
@@ -142,6 +144,7 @@ def _train_one_shot(
     model_registry=None,
     loss_factory=build_loss,
 ) -> None:
+    workers = resolve_data_loader_workers(config)
     reporter = reporter or NullWorkflowReporter()
     device = config["device"]
     dataset_path = config["dataset_path"]
@@ -178,8 +181,8 @@ def _train_one_shot(
         colored=colored,
         n_pairs_per_class=config.get("num_pairs", 100),
     )
-    train_loader = DataLoader(train_dataset, batch_size=batch_size, shuffle=True, num_workers=2)
-    val_loader = DataLoader(val_dataset, batch_size=batch_size, shuffle=False, num_workers=2)
+    train_loader = DataLoader(train_dataset, batch_size=batch_size, shuffle=True, num_workers=workers)
+    val_loader = DataLoader(val_dataset, batch_size=batch_size, shuffle=False, num_workers=workers)
 
     for epoch in range(start_epoch, epochs):
         model.train()
@@ -259,6 +262,7 @@ def _train_standard(
     model_registry=None,
     loss_factory=build_loss,
 ) -> None:
+    workers = resolve_data_loader_workers(config)
     reporter = reporter or NullWorkflowReporter()
     device = config["device"]
     dataset_path = config["dataset_path"]
@@ -297,8 +301,8 @@ def _train_standard(
 
     criterion = loss_factory(config).to(device)
     optimizer = optim.Adam(model.parameters(), lr=learning_rate)
-    train_loader = DataLoader(train_dataset, batch_size=batch_size, shuffle=True, num_workers=2)
-    val_loader = DataLoader(val_dataset, batch_size=batch_size, shuffle=False, num_workers=2)
+    train_loader = DataLoader(train_dataset, batch_size=batch_size, shuffle=True, num_workers=workers)
+    val_loader = DataLoader(val_dataset, batch_size=batch_size, shuffle=False, num_workers=workers)
     start_epoch, best_val_loss, history = _prepare_training_state(
         config,
         model,

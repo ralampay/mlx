@@ -128,13 +128,10 @@ def test_pca_training_partition_and_controls(tmp_path):
     assert np.array_equal(TruncateVectors(4, 2).transform(values), values.astype(np.float32)[:, :2])
 
 
-def test_templates_counts_and_config_failures(tmp_path):
-    for config, counts in [(pilot_config(), (102, 0, 0)),
-                           (confirmation_config({'mse-least-volume': .1, 'mse-covariance': .1}), (550, 50, 730))]:
-        path = tmp_path / 'config.json'; path.write_text(json.dumps(config))
-        got = load_experiment_config(path).counts()
-        assert (got['training_runs'], got['pca_fits'], got['retrieval_evaluations']) == counts
+def test_duplicate_variants_are_rejected(tmp_path):
+    config = tiny_config('pilot')
     config['variants'].append(config['variants'][0])
+    path = tmp_path / 'config.json'
     path.write_text(json.dumps(config))
     with pytest.raises(MLXUserError, match='unique'):
         load_experiment_config(path)

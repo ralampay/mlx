@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Any, Mapping, Optional
 
 from mlx.core.requests import ConfigRequest
@@ -18,6 +18,7 @@ class SegmentationRequest(ConfigRequest):
     input_img: str = "/tmp/image.jpg"
     file_path: Optional[str] = None
     device: str = "cpu"
+    workers: int = field(default=2, kw_only=True)
     width: int = 256
     height: int = 256
     input_size: tuple[int, int] = (256, 256)

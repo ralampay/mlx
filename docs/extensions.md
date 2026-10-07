@@ -15,7 +15,9 @@ is a Python API; a local alias is not automatically installed into a separate CL
 | Tracker — GOOD | `object_detection/tracking/protocols.py`: tracking lifecycle and neutral frame values; `algorithms/` | Immutable `TrackerRegistry`, `CreateTrackingAlgorithm`; explicit class references | `--tracker`, JSON options, `ls-trackers` | Tracking contract tests and tutorial reset/update exercise; no CLI/command edits |
 | Detection provider — GOOD | `object_detection/providers.py`: provider capabilities; provider-owned adapters return neutral detections | `ProviderRegistry.register`, lazy factory references | `--provider`; metadata `ls-models --names-only` | Fake provider tests and integration tests; default alias registration only |
 | Detection inference adapter — GOOD | `DetectionAdapter.predict` in `object_detection/models.py`; provider adapter modules | Provider creates detector, or stream command receives it directly | Provider/model request; no separate adapter catalog | Empty-detector tutorial runs stream with fake source/sink; no tracking/stream edits |
-| Detection neural adapter — ACCEPTABLE | Provider-specific feature-module attachment, shape/freeze/checkpoint policy | LibreYOLO provider owns selection; MLX validates capability before forwarding flags | Incremental-adapter flags; no MLX neural registry/discovery | Provider signature/config fakes; real attachment tests belong to supporting provider; unsupported versions reject |
+| Legacy incremental detector adapter — ACCEPTABLE | Provider-specific feature-module attachment, shape/freeze/checkpoint policy | LibreYOLO provider owns selection; MLX validates capability before forwarding flags | Incremental-adapter flags; no MLX neural registry/discovery | Provider signature/config fakes; real attachment tests belong to supporting provider; unsupported versions reject |
+| Research feature adapter — GOOD | MLX `object_detection/feature_adapters`: definition, construction, injection and tensor state | Immutable `FeatureAdapterRegistry`; injected through training and reconstruction | Metadata supplies attachment policy and supported parameters; built-in CLI names unchanged | Synthetic custom-adapter round trip; no method-name branching for new adapters using supported placement policies |
+| Adapter experiment backend — GOOD | Mode-owned `AdapterExperimentBackend` | Inject backend, registry and dataset loader into `RunAdapterExperiment`; lazy LibreYOLO compatibility default | Existing CLI research actions use explicit LibreYOLO composition | Fake-backend sequencing, resume and failure checks; no real dataset or GPU |
 | Classification model — GOOD | `image_classification/models/`: builder returning module; optional feature adapter | `models/standard.py:StandardModelRegistry`; built-ins in `catalog.py` | `--model` alias/import reference; `ls-models` and names-only | Model/command tests and mean-classifier tutorial; no runner edits; feature-based workflows additionally need feature adapter |
 | Segmentation model — GOOD | `segmentation/models/`: builder with output class count | `models/registry.py:SegmentationModelRegistry` | `--model` alias/import reference, listing; registry propagated across reload and batch commands | Pixel-model train/save/infer test; no inference, sampling, or runner edits |
 | Saliency model — GOOD | `saliency_mapping/models/`: builder producing single-channel logits | Mode-owned `SaliencyModelRegistry`; built-ins use `compatibility.py` | `--model` alias/import reference, detailed listing and explicit groups | Pixel-model train/save/infer test; no segmentation registration or command edits |
@@ -85,10 +87,25 @@ models. Existing training engines remain mode-owned where objectives/checkpoints
   AE trust controls are not a general checkpoint sandbox for all existing CV providers.
 - Video/one-class Python experiments bind registries into checkpoint/model factories explicitly.
   This is explicit composition, not automatic process-wide plugin installation.
-- Neural adapter implementation and pretrained-weight compatibility require a supporting provider.
+- Detector-specific placement and pretrained-weight compatibility require a supporting provider;
+  active research adapter implementations and their immutable registry are MLX-owned.
   MLX's forwarding tests do not prove a provider's neural attachment algorithm.
 - Current text CLI embedding input remains GGUF-focused; remote backends warrant a separate,
   explicit configuration design if introduced.
 - Spatial augmentation selection and mode-specific training engines remain intentionally separate.
 
 No new runtime dependency or checkpoint schema migration is introduced by this refinement.
+
+## Extending research adapters
+
+Create a `FeatureAdapterDefinition` with a factory (callable or explicit import reference),
+`attachment="feature"` or `attachment="conv"`, and its supported `parameters` tuple. Extend
+`DEFAULT_FEATURE_ADAPTER_REGISTRY.register(name, definition)` and retain the returned value.
+Pass it as `registry=` to experiment construction and to loaders when restoring its checkpoints.
+The factory receives channels for feature adapters or the base convolution for convolution adapters.
+It must return a torch module without modifying base weights or structure. Optional target validation
+runs before any model changes; constructors that freeze base parameters are supported.
+
+A different detector placement policy belongs in that detector's provider boundary. A different
+experiment engine implements `AdapterExperimentBackend` and is injected into the command. Neither
+requires registration in a global service locator or changes to workflow ordering.

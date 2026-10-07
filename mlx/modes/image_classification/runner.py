@@ -9,6 +9,7 @@ from mlx.core.datasets import (
 )
 from mlx.core.commands import NullWorkflowReporter
 from mlx.core.exceptions import MLXUserError
+from mlx.core.configuration import with_explicit_options
 from mlx.core.ui import print_model_parameter_table
 from mlx.modes.image_classification.cam import GenerateImageClassificationCams
 from mlx.modes.image_classification.data import BuildImageClassificationDataset, classification_dataset_root
@@ -174,6 +175,9 @@ def run_image_classification(mode_config: dict[str, Any]) -> Any:
         return run_aws_image_classification(mode_config)
 
     config = {**DEFAULT_CONFIG, **mode_config}
+    explicit = with_explicit_options(mode_config)["_explicit_options"]
+    if "workers" not in explicit:
+        config["workers"] = 2
     action = config.get("action") or DEFAULT_CONFIG["action"]
     config["action"] = action
     validate_dataset_source_options(config, action=action)

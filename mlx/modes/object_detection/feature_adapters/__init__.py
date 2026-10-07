@@ -7,3 +7,7 @@ from .residual_fusion import DraxResidualFusionConv2d
 from .hybrid import DraxHybridConv2d, DraxSpatialConv2d
 
 __all__ = ["create_adapter", "available_adapters", "inject_adapters", "count_parameters", "adapter_state_dict", "load_adapter_state_dict", "DraxHybridConv2d", "DraxSpatialConv2d", "DraxResidualFusionConv2d"]
+
+from .registry import FeatureAdapterDefinition, FeatureAdapterRegistry, DEFAULT_FEATURE_ADAPTER_REGISTRY
+
+__all__ += ["FeatureAdapterDefinition", "FeatureAdapterRegistry", "DEFAULT_FEATURE_ADAPTER_REGISTRY"]

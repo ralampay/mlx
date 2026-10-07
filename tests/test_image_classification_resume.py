@@ -23,7 +23,7 @@ def _tiny_model() -> nn.Module:
 def _config(tmp_path, **overrides):
     config = {
         "apply_transformations": False,
-        "batch_size": 2,
+        "batch_size": 2, "workers": 0,
         "colored": True,
         "dataset_path": str(tmp_path / "dataset"),
         "device": "cpu",

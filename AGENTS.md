@@ -261,12 +261,21 @@ class ExportPredictions:
 
 ## Testing Expectations
 
+- Tests must verify functionality and contracts of MLX itself. Do not write tests specific
+  to a particular dataset, machine or environment, or individual experiment, deployment,
+  or user use case. Use minimal synthetic fixtures, temporary paths, and injected
+  collaborators. Assertions must describe reusable software behavior rather than
+  prescribed dataset inventories, local paths, experiment recipes, or expected research
+  results. Provider integration tests must verify MLX's integration contracts. Checks
+  requiring a particular operational setup belong in separately documented manual
+  validation procedures.
+
 - Add or update tests for material behavior changes when the repository has an applicable testing structure.
 - Prefer testing commands through their public `execute()` entrypoint.
 - Inject lightweight fakes/stubs for expensive or external collaborators where practical.
 - Keep provider-specific tests separate from project-owned workflow tests when that distinction improves clarity.
 - Test user-facing failure behavior for important validation paths.
-- For integrations that cannot be fully unit tested, add a focused smoke test or document/run a reproducible validation command.
+- For integrations that cannot be fully unit tested, add a portable contract smoke test using synthetic inputs, or document/run a manual validation command when a particular operational setup is required.
 - A bug fix should include a regression test when practical.
 - Do not weaken or delete a valid test merely to make an implementation pass.
 

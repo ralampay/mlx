@@ -8,7 +8,7 @@ from mlx.core.exceptions import MLXUserError
 from mlx.modes.object_detection.adapter_experiment import AdapterExperimentRequest
 from mlx.modes.object_detection.adapter_transfer import RunQueuedTransferStudy
 from mlx.modes.object_detection.remote_sensing_pilot import (
-    PrepareRemoteAdapterDataset, RunRemoteAdapterPilot, pilot_conditions,
+    PrepareRemoteAdapterDataset, RunRemoteAdapterPilot,
 )
 
 
@@ -62,14 +62,12 @@ def test_remote_view_rejects_class_mismatch_before_writes(tmp_path):
     assert not target.exists()
 
 
-def test_pilot_conditions_and_dynamic_dataset(tmp_path):
-    conditions = pilot_conditions()
-    assert len({c["id"] for c in conditions}) == 8
-    assert [c for c in conditions if c["id"] == "lora-r100"][0]["rank"] == 100
+def test_study_preserves_dynamic_dataset(tmp_path):
+    conditions = [{"id": "example", "method": "lora", "rank": 2, "alpha": 1.0}]
     config = {"checkpoint": "f.pt", "checkpoint_sha256": "hash", "dataset_selection_sha256": "split",
-              "dataset_name": "DIOR"}
+              "dataset_name": "example"}
     RunQueuedTransferStudy._declare_study(config, tmp_path, conditions, [1])
-    assert json.loads((tmp_path / "study.json").read_text())["dataset"] == "DIOR"
+    assert json.loads((tmp_path / "study.json").read_text())["dataset"] == "example"
 
 
 def test_label_capacity_validation(tmp_path):

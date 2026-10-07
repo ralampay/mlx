@@ -2,7 +2,6 @@
 
 import gc
 import json
-from pathlib import Path
 import time
 
 import torch
@@ -12,7 +11,7 @@ from mlx.core.exceptions import MLXUserError
 from .adapter_backend import VerifyFoundationCheckpoint, build_experimental_yolox, require_experiment_device
 
 
-def build_transfer_model(request, method, seed, classes):
+def build_transfer_model(request, method, seed, classes, *, registry=None):
     from mlx.modes.object_detection.libreyolo.adapter_targets import yolox_targets
     from mlx.modes.object_detection.feature_adapters import inject_adapters
     from libreyolo.models.yolox.transfer import reset_classifiers
@@ -24,14 +23,15 @@ def build_transfer_model(request, method, seed, classes):
         model.requires_grad_(False)
         model.head.requires_grad_(True)
     elif method != "full-finetune":
-        inject_adapters(model, method, targets=yolox_targets(model,request.target,method), reduction=request.reduction,
-                        rank=request.rank, alpha=request.alpha, train_head=True)
+        inject_adapters(model, method, targets=yolox_targets(model,request.target,method, registry=registry), reduction=request.reduction,
+                        rank=request.rank, alpha=request.alpha, train_head=True, registry=registry)
     return model, {**info, "nc": len(classes), "classes": dict(enumerate(classes))}
 
 
 class CalibrateTransferBatch:
     """Conservative real-loss/AdamW probes, reserving memory for EMA and evaluation."""
-    def __init__(self, request, classes):
+    def __init__(self, request, classes, *, registry=None):
+        self.registry = registry
         self.request, self.classes = request, classes
 
     def execute(self):
@@ -47,7 +47,7 @@ class CalibrateTransferBatch:
             for batch in (1,2,4,8):
                 model = optimizer = scaler = images = targets = loss = outputs = None
                 try:
-                    model, _ = build_transfer_model(request, method, 42, self.classes)
+                    model, _ = build_transfer_model(request, method, 42, self.classes, registry=self.registry)
                     model.to(device).train()
                     for module in model.modules():
                         if isinstance(module, torch.nn.modules.batchnorm._BatchNorm) and not any(p.requires_grad for p in module.parameters()):
@@ -103,7 +103,8 @@ class CalibrateTransferBatch:
 
 class CacheTransferPredictions:
     """Reload the saved model, then cache FP32 test predictions and synchronized timings."""
-    def __init__(self, request, method, seed, classes):
+    def __init__(self, request, method, seed, classes, *, registry=None):
+        self.registry = registry
         self.request,self.method,self.seed,self.classes = request,method,seed,classes
 
     def execute(self):
@@ -113,7 +114,7 @@ class CacheTransferPredictions:
         run = request.output / request.method_id(self.method) / f"seed-{self.seed}"
         if (run / "predictions.json").exists() and (run / "inference.json").exists():
             return
-        model, info = build_transfer_model(request,self.method,self.seed,self.classes)
+        model, info = build_transfer_model(request,self.method,self.seed,self.classes, registry=self.registry)
         compact = run / "adapter" / "checkpoint.pt"
         if compact.exists():
             payload = torch.load(compact,map_location="cpu",weights_only=True)

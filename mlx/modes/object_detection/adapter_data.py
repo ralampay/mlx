@@ -257,31 +257,9 @@ class PrepareDawnAdapterDataset:
 
 
 def load_prepared_adapter_dataset(source: Path, *, expected_classes=FOUNDATION_CLASSES) -> dict:
-    source = Path(source).expanduser().resolve()
-    manifest_path = source / "manifest.json"
-    yaml_path = source / "data.yaml"
-    if not manifest_path.is_file() or not yaml_path.is_file():
-        raise MLXUserError(
-            f"Prepared adapter dataset requires manifest.json and data.yaml at {source}"
-        )
-    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
-    if expected_classes is not None and manifest.get("classes") != list(expected_classes):
-        raise MLXUserError("Prepared dataset class order does not match the foundation taxonomy")
-    classes = manifest.get("classes")
-    if not isinstance(classes, list) or not classes or len(set(classes)) != len(classes):
-        raise MLXUserError("Prepared dataset requires unique, nonempty class names")
-    if expected_classes is None:
-        import yaml
-        configuration = yaml.safe_load(yaml_path.read_text())
-        names = configuration.get("names")
-        if isinstance(names, dict):
-            names = [names.get(index) for index in range(len(names))]
-        if names != classes:
-            raise MLXUserError("Dataset YAML class order differs from manifest")
-    for split in ("train", "val", "test"):
-        if not (source / "images" / split).is_dir() or not (source / "labels" / split).is_dir():
-            raise MLXUserError(f"Prepared dataset is missing {split} images or labels")
-    return manifest
+    """Compatibility loader retaining the historical foundation taxonomy default."""
+    from .prepared_adapter_data import load_prepared_adapter_dataset as load
+    return load(source, expected_classes=expected_classes)
 
 
 def prepare_adapter_dataset(source: Path, destination: Path, seed: int = 42) -> dict:

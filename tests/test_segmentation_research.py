@@ -440,7 +440,7 @@ def test_training_writes_research_outputs_and_resumes(
     monkeypatch.setattr(segmentation_train, "build_segmentation_model", build_model)
     output_dir = tmp_path / "training"
     config = {
-        "batch_size": 2,
+        "batch_size": 2, "workers": 0,
         "class_names": "background,foreground",
         "colored": True,
         "dataset_path": str(tmp_path / "dataset"),
@@ -513,7 +513,7 @@ def test_benchmark_command_writes_predictions_and_research_package(
     events = []
     result = segmentation_evaluation.BenchmarkSegmentation(
         {
-            "batch_size": 2,
+            "batch_size": 2, "workers": 0,
             "boundary_tolerance": 1,
             "calibration_bins": 5,
             "dataset_path": str(tmp_path / "dataset"),

@@ -392,7 +392,7 @@ def test_joint_training_calibrates_final_checkpoint_and_extends_history(monkeypa
     monkeypatch.setattr(train, "build_image_classification_model", lambda *args, **kwargs: _joint())
     config = {
         "apply_transformations": False,
-        "batch_size": 2,
+        "batch_size": 2, "workers": 0,
         "colored": True,
         "dataset_path": str(tmp_path / "dataset"),
         "device": "cpu",

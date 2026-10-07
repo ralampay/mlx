@@ -26,6 +26,7 @@ from torch.utils.data import DataLoader
 
 from mlx.core.commands import NullWorkflowReporter, WorkflowReporter, emit
 from mlx.core.exceptions import MLXUserError
+from mlx.core.configuration import resolve_data_loader_workers
 from mlx.modes.image_classification.data import (
     load_image_tensor,
     load_standard_classification_directory,
@@ -88,6 +89,7 @@ def _run_benchmark(
     model_registry=None,
 ) -> dict[str, float]:
     reporter = reporter or NullWorkflowReporter()
+    resolve_data_loader_workers(config)
     model, metadata = load_checkpoint_bundle(config, **({"model_registry": model_registry} if model_registry is not None else {}))
     family = metadata["family"]
     device = config.get("device", "cpu")
@@ -224,7 +226,7 @@ def _benchmark_standard(
     )
     emit(reporter, "info", f"Loaded {len(dataset)} labelled images from {eval_dir}")
 
-    loader = DataLoader(dataset, batch_size=config.get("batch_size", 16), shuffle=False, num_workers=2)
+    loader = DataLoader(dataset, batch_size=config.get("batch_size", 16), shuffle=False, num_workers=resolve_data_loader_workers(config))
     preds = []
     probabilities = []
     targets = []

@@ -41,10 +41,19 @@ def require_experiment_device(requested: str) -> torch.device:
     raise MLXUserError("Adapter experiments support explicit --device cpu or cuda[:index]")
 
 
-def _git_commit(path: Path) -> str | None:
+def _git_commit(path: Path, *, distribution: str | None = None) -> str | None:
     snapshot = path / ".mlx-source.json"
     if snapshot.is_file():
         return json.loads(snapshot.read_text())["commit"]
+    if not (path / ".git").exists():
+        if distribution:
+            from importlib.metadata import distribution as installed_distribution, PackageNotFoundError
+            try:
+                metadata = json.loads(installed_distribution(distribution).read_text("direct_url.json") or "{}")
+                return metadata.get("vcs_info", {}).get("commit_id")
+            except (PackageNotFoundError, ValueError):
+                return None
+        return None
     try:
         return subprocess.check_output(
             ["git", "-C", str(path), "rev-parse", "HEAD"], text=True,
@@ -91,7 +100,7 @@ class CollectAdapterEnvironment:
             "cuda_available": torch.cuda.is_available(),
             "gpu_count": torch.cuda.device_count(),
             "python_version": platform.python_version(),
-            "libreyolo_git_commit": _git_commit(self.libreyolo_root),
+            "libreyolo_git_commit": _git_commit(self.libreyolo_root, distribution="libreyolo"),
             "mlx_git_commit": _git_commit(self.mlx_root),
             "device": str(self.device),
             "amp": self.amp,
@@ -175,7 +184,8 @@ class CalibrateAdapterBatchSize:
                  device: str = "cuda", image_size: int = 640, amp: bool = True,
                  reduction: int = 8, maximum_batch: int = 8,
                  profiles: tuple[str, ...] = ("full-finetune", "drax"),
-                 rank: int = 8, alpha: float = 1.0, target: str = "neck"):
+                 rank: int = 8, alpha: float = 1.0, target: str = "neck", registry=None):
+        self.registry = registry
         self.model_name = model_name
         self.checkpoint_path = Path(checkpoint_path)
         self.output = Path(output)
@@ -206,8 +216,8 @@ class CalibrateAdapterBatchSize:
             ).execute()
             if profile != "full-finetune":
                 inject_adapters(
-                    model, profile, yolox_targets(model, self.target, profile),
-                    reduction=self.reduction, rank=self.rank, alpha=self.alpha,
+                    model, profile, yolox_targets(model, self.target, profile, registry=self.registry),
+                    reduction=self.reduction, rank=self.rank, alpha=self.alpha, registry=self.registry,
                 )
             model.to(self.device)
             torch.cuda.empty_cache()

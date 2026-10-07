@@ -4,12 +4,14 @@
 from torch import nn
 
 
-def yolox_targets(model: nn.Module, placement: str = "neck", adapter: str = "drax") -> dict[str, int]:
+def yolox_targets(model: nn.Module, placement: str = "neck", adapter: str = "drax", *, registry=None) -> dict[str, int]:
     if placement not in {"backbone", "neck", "backbone+neck"}:
         raise ValueError("placement must be backbone, neck, or backbone+neck")
     if not hasattr(model, "backbone") or not hasattr(model, "head"):
         raise ValueError("Expected a LibreYOLOXModel")
-    if adapter in {"lora", "drax-hybrid", "drax-spatial", "drax-residual-fusion"}:
+    from ..feature_adapters import DEFAULT_FEATURE_ADAPTER_REGISTRY
+    definition = (registry or DEFAULT_FEATURE_ADAPTER_REGISTRY).resolve(adapter)
+    if definition.attachment == "conv":
         roots = ("backbone.backbone.",) if placement == "backbone" else (("backbone.",) if placement == "backbone+neck" else ("backbone.lateral_conv0.", "backbone.reduce_conv1.", "backbone.C3_", "backbone.bu_conv"))
         return {name: module.out_channels for name, module in model.named_modules()
                 if isinstance(module, nn.Conv2d) and module.kernel_size == (1, 1)

@@ -201,6 +201,8 @@ ACTION_HANDLERS = {
 def run_segmentation(mode_config: dict[str, Any]) -> Any:
     mode_config = with_explicit_options(mode_config)
     config = {**DEFAULT_CONFIG, **mode_config}
+    if "workers" not in mode_config["_explicit_options"]:
+        config["workers"] = 2
     config["action"] = config.get("action") or DEFAULT_CONFIG["action"]
     validate_dataset_source_options(config, action=config["action"])
     if config["action"] in {"ls-models", "ls-losses"}:

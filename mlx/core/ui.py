@@ -14,6 +14,18 @@ console = Console()
 stderr_console = Console(stderr=True)
 
 
+def print_environment_report(report: dict) -> None:
+    console.print(Panel(report["summary"], title="MLX Doctor", border_style="cyan"))
+    table = Table(title="Optional environment variables")
+    table.add_column("Variable", no_wrap=True)
+    table.add_column("Status")
+    table.add_column("Purpose")
+    for variable in report["optional_variables"]:
+        table.add_row(variable["name"], variable["status"], variable["description"])
+    console.print(table)
+    console.print(report["notes"])
+
+
 def print_startup(mode: str, action: Optional[str], model: Optional[str]) -> None:
     summary = (
         f"[bold cyan]Mode[/bold cyan]: {mode}\n"

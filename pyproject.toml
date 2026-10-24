@@ -18,6 +18,15 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
+sar = [
+    "asf_search>=10,<12",
+    "rasterio>=1.4",
+    "shapely>=2",
+    "pyproj>=3",
+    "python-dotenv>=1",
+    "defusedxml>=0.7",
+    "Pillow>=10",
+]
 object-detection-ultralytics = [
     "onnxruntime",
     "ultralytics @ git+https://github.com/ralampay/ultralytics"

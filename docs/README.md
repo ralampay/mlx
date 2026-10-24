@@ -22,6 +22,7 @@ Start with a shared-layer guide or select a task-specific package:
 | Mode Package | Purpose | Docs |
 | --- | --- | --- |
 | CLI modules | Parsing, defaults, help, dispatch, and result handling | [CLI and routing](cli.md) |
+| SAR | ASF Sentinel-1 discovery, downloads, and offline preparation | [SAR ingestion](sar.md) |
 | `mlx.core` | Shared workflow infrastructure and contracts | [Core infrastructure](core.md) |
 | `mlx.modes` | Task selection and shared workflow conventions | [Workflow modes](modes.md) |
 | `mlx.modes.object_detection` | Provider-neutral detection, Ultralytics/LibreYOLO integrations, and tracking | [Object detection](./object_detection/README.md) |

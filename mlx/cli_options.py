@@ -3,6 +3,10 @@ import argparse
 from mlx.core.cli_options import CliOption
 
 OPTIONS = (
+    CliOption(('--doctor',), {
+        'action': 'store_true',
+        'help': 'Show environment variable requirements and configuration status.',
+    }),
     CliOption(('-h', '--help'), {
         'action': 'store_true',
         'dest': 'help',
@@ -13,7 +17,7 @@ OPTIONS = (
         'help': (
             'Mode to run: autoencoder, object_detection, track, image_classification, '
             'image_recognition_oc, segmentation, saliency_mapping, video_anomaly_detection, '
-            'text_embedding.'
+            'text_embedding, sar.'
         ),
     }),
     CliOption(('--platform',), {

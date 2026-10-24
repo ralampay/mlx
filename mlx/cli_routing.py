@@ -29,6 +29,12 @@ class ModeDescriptor:
 
 MODE_DESCRIPTORS: tuple[ModeDescriptor, ...] = (
     ModeDescriptor(
+        name="sar", aliases=(), runner="mlx.modes.sar.runner:run_sar",
+        default_action="search", actions=("search", "download", "prepare"),
+        purpose="Sentinel-1 SAR discovery, verified downloads, and radar-grid preparation",
+        options="mlx.modes.sar.cli_options:OPTIONS",
+    ),
+    ModeDescriptor(
         name="autoencoder",
         options="mlx.modes.autoencoder.cli_options:OPTIONS",
         aliases=(),

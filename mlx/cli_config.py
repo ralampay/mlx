@@ -10,6 +10,7 @@ def build_runtime_config(namespace: argparse.Namespace) -> dict[str, Any]:
 
     config = vars(namespace).copy()
     config.pop("help", None)
+    config.pop("doctor", None)
     if config.get("mode"):
         config["mode"] = config["mode"].replace("-", "_")
     config["input_size"] = (config["width"], config["height"])

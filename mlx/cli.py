@@ -1,6 +1,7 @@
 import argparse
 from contextlib import redirect_stdout
 import json
+import os
 import sys
 from pathlib import Path
 from typing import Any, Dict, Optional, Sequence
@@ -65,6 +66,7 @@ def _render_help() -> None:
 
     usage = Table(title="Usage", show_header=False)
     usage.add_column("Command", style="bold cyan")
+    usage.add_row("python -m mlx --doctor")
     usage.add_row("python -m mlx --mode object_detection --action ls-models")
     usage.add_row("python -m mlx --mode object_detection --provider libreyolo --action ls-models")
     usage.add_row("python -m mlx --mode object_detection --provider libreyolo --action train --dataset coco8 --model yolo9-t")
@@ -177,6 +179,16 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
 
     if namespace.help:
         _render_help()
+        return 0
+    if namespace.doctor:
+        from mlx.core.doctor import InspectEnvironment
+        from mlx.core.ui import print_environment_report
+
+        report = InspectEnvironment(os.environ).execute()
+        if namespace.output_format == "json":
+            print(json.dumps(report, sort_keys=True))
+        else:
+            print_environment_report(report)
         return 0
     if not namespace.mode:
         print_error("Missing required argument: --mode")

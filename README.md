@@ -31,6 +31,7 @@ The [documentation index](docs/README.md) also links setup, development, AWS, an
 | Main module | Guide |
 | --- | --- |
 | `mlx.cli`, `mlx.cli_config`, `mlx.cli_options`, `mlx.cli_routing` | [CLI and routing](docs/cli.md) |
+| `mlx.modes.sar` | [Sentinel-1 SAR search, download, and preparation](docs/sar.md) |
 | `mlx.core` | [Shared core infrastructure](docs/core.md) |
 | `mlx.modes` | [Workflow modes and task selection](docs/modes.md) |
 | `mlx.modes.object_detection` | [Object detection](docs/object_detection/README.md) |
@@ -99,6 +100,7 @@ OpenCV, matplotlib, scikit-learn, Rich, and tqdm.
 
 | Workflow | Install from the repository root |
 | --- | --- |
+| Sentinel-1 SAR ingestion through NASA ASF | `python -m pip install -e ".[sar]"` |
 | Ultralytics detection | `python -m pip install -e ".[object-detection-ultralytics]"` |
 | LibreYOLO detection | `python -m pip install -e ".[object-detection-libreyolo]"` |
 | Both detection providers | `python -m pip install -e ".[object-detection]"` |
@@ -157,6 +159,7 @@ for the complete registered action inventory; action availability can depend on
 
 | Mode | Default action | Common actions |
 | --- | --- | --- |
+| `sar` | `search` | `search`, `download`, `prepare`; ASF Sentinel-1 GRD archives |
 | `object_detection` | `train` | `train`, `fine-tune`, `benchmark`, `convert`, `infer-video`, `ls-models`; adapter research and AWS lifecycle actions |
 | `track` | `run` | `run`, `benchmark`, `build-dataset`, `export-mot`, `ls-trackers` |
 | `image_classification` | `test` | `train`, `benchmark`, `infer-image`, `cam`, `build-dataset`, `ls-models`, `ls-losses`, `ls-cam-methods`; AWS lifecycle actions |

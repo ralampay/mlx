@@ -158,7 +158,46 @@ The CLI applies the selected default action before dispatch. Local
 `--format json` attaches null reporters and suppresses Rich/display presenters; the top-level
 boundary serializes the returned structured result once.
 
+The top-level `--doctor` flag bypasses mode dispatch and seed initialization.
+`core.doctor.InspectEnvironment` receives an explicit environment mapping and returns
+requirements and presence-only status without importing providers or making network calls.
+No variables are mandatory for ordinary local workflows; AWS variables are optional
+configuration alternatives. `core.ui.print_environment_report` renders the report, or
+the CLI emits it as JSON. Values are never included, and presence is not validation.
+
 ## Package Topology and Commands
+
+### SAR ingestion boundary
+
+`mlx.modes.sar` owns `SearchSarScenes`, `DownloadSarScenes`, and `PrepareSarImagery`,
+with immutable typed requests/results. Its runner resolves CLI/environment/default
+precedence, injects a provider/cache/reporter, and renders results. The existing top-level
+CLI serializes dataclasses through `json_safe`; JSON execution uses a null reporter.
+`sar.providers.ProviderRegistry` is immutable and resolves provider factories lazily;
+the mode-owned `SarProvider` protocol exposes search and archive download. Provider
+factories accept explicit environment/network settings at composition time; credentials
+stay inside the ASF integration and never enter request/result artifacts.
+
+`sar.asf` owns the official `asf_search` API, metadata translation, equal-area footprint
+coverage, session authentication, restricted network destinations, timeouts, and bounded
+transient retries. `selection` filters and deterministically ranks only the inspected
+catalogue subset. `ArchiveCache` separates search metadata from verified original products,
+uses isolated download staging and entry locks, validates ZIP integrity/exact known size,
+and rechecks SHA-256 before reuse. Raw outputs hard-link verified products when possible.
+Shared atomic JSON serialization and hashing remain in `core.artifacts`.
+
+`SafeRasterPreparer` owns offline ZIP measurement/annotation discovery, blockwise Rasterio
+reads, NumPy scientific arrays, and separate visualization previews. `SigmaCalibration`
+implements bilinear SAFE sigmaNought LUT interpolation and DN²/LUT² calibration. Prepared
+manifests record provenance, pixel windows and hashes. Native SAFE radar grids are never
+treated as affine geographic rasters: AOI preparation fails explicitly, and CRS/transform/
+geographic bounds remain null. No terrain or thermal-noise correction is claimed. A future
+geolocation implementation belongs behind the injected preparation boundary. No detector
+or segmentation loader is changed and no supervised labels are generated.
+
+`--doctor` includes presence-only Earthdata/SAR settings alongside AWS settings. Public
+search needs no credentials; protected downloads require token, paired credentials, or
+Earthdata `.netrc`. See [SAR usage](docs/sar.md) for setup, limitations and cleanup.
 
 ```text
 mlx/

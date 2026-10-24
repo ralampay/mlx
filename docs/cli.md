@@ -19,9 +19,16 @@ The installed `mlx` command and `python -m mlx` use the same entrypoint:
 
 ```bash
 python -m mlx --help
+python -m mlx --doctor
 python -m mlx --mode image-classification --action ls-models --names-only --format json
 python -m mlx --mode text-embedding --action ls-vector-stores
 ```
+
+`--doctor` runs without `--mode` and reports environment requirements. Ordinary local
+workflows require no environment variables. The report lists optional AWS and SAR variables
+with set/unset status, never their values; AWS profiles and workload roles can supply
+credentials instead. It does not contact AWS or validate credentials. Missing optional
+variables do not cause a failure. Use `--doctor --format json` for structured output.
 
 `--mode` selects a workflow; `--action` selects its operation. Modes have different defaults,
 including training, smoke testing, and listing. Always specify the action in scripts.

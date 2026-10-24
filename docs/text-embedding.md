@@ -1,8 +1,39 @@
 # Text Embedding and Retrieval Benchmarking
 
+## Contents
+
+- [Module quick reference](#module-quick-reference)
+- [Installation and model requirements](#installation-and-model-requirements)
+- [Vector-store selection and discovery](#vector-store-selection-and-discovery)
+- [BEIR dataset layout](#beir-dataset-layout)
+- [Create embeddings](#create-embeddings)
+- [Benchmark retrieval](#benchmark-retrieval)
+- [Extension points](#extension-points)
+- [Pooling and model-specific formatting](#pooling-and-model-specific-formatting)
+
 The `text_embedding` mode creates reproducible embedding artifacts from BEIR datasets and
 benchmarks retrieval against their relevance judgments. The CLI also accepts `text-embedding`;
 `nlp` remains an alias for compatibility with the earlier CSV embedding command.
+
+## Module quick reference
+
+| Item | Contract |
+| --- | --- |
+| CLI mode / default action | `text-embedding` / `embed`; use an explicit action in scripts |
+| Installation | `.[text-embedding]`; `.[retrieval-benchmark]` for experiment acquisition; see the [installation guide](../README.md#installation) |
+| Inputs | Local GGUF embedding model and BEIR corpus/queries/qrels; completed artifacts for benchmarking |
+| Outputs | Embedding CSVs and manifests, exact or Chroma index, retrieval metrics and rankings |
+
+Benchmark existing artifacts without reloading the embedding model. Legacy CSV input/output is documented separately in the NLP guide.
+
+Discover available components before starting a workload:
+
+```bash
+python -m mlx --mode text-embedding --action ls-vector-stores
+```
+
+See [Legacy NLP compatibility](nlp.md), [all module guides](README.md), and the
+[canonical architecture](../ARCHITECTURE.md) for related workflows and extension contracts.
 
 ## Installation and model requirements
 
@@ -16,6 +47,27 @@ The model must be a local `.gguf` file that supports llama.cpp sequence embeddin
 with `Llama(model_path=..., embedding=True)` by default. Explicit pooling adds a
 `pooling_type` override. Token-level output is rejected because retrieval
 requires one fixed-width vector per query or document. No GPU is assumed.
+
+## Vector-store selection and discovery
+
+The default `--vector-store chroma` persists supplied vectors using the optional Chroma
+integration. Choose `--vector-store exact` for MLX's exact cosine index with memory-mapped
+vectors and bounded score chunks. Exact indexing does not require Chroma; generating GGUF
+embeddings still requires llama.cpp. The retrieval-benchmark extra supplies llama.cpp and
+experiment acquisition dependencies without adding Chroma.
+
+```bash
+python -m mlx --mode text-embedding --action ls-embedding-backends
+python -m mlx --mode text-embedding --action ls-vector-stores
+python -m mlx --mode text-embedding --action ls-metrics
+```
+
+Choose the store when creating embeddings. Benchmarking reopens the store recorded in the
+artifact manifest; an explicit provider that differs from the manifest is rejected rather
+than converting the existing index. For prepared-dataset
+acquisition, configured autoencoder/PCA/SVD comparisons, and resumable experiments, see the
+[retrieval experiment guide](retrieval-autoencoders.md). For CSV-only embedding and its different
+column names, see [legacy NLP](nlp.md).
 
 ## BEIR dataset layout
 

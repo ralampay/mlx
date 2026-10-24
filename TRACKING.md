@@ -1,5 +1,18 @@
 # Tracking by Detection
 
+## Contents
+
+- [Module quick reference](#module-quick-reference)
+- [Installation](#installation)
+- [CLI Usage](#cli-usage)
+- [Live Tracking Visualization](#live-tracking-visualization)
+- [Portable 2D Replay Without the Video](#portable-2d-replay-without-the-video)
+- [Class-Aware Output and MOT Extraction](#class-aware-output-and-mot-extraction)
+- [MOT Input and Output](#mot-input-and-output)
+- [Built-in Examples](#built-in-examples)
+- [Writing Your Own Tracker](#writing-your-own-tracker)
+- [Python API](#python-api)
+
 MLX exposes provider-neutral multi-object tracking through `--mode track`. A video
 frame is detected by the selected object-detection provider, normalized to MLX
 `TrackingDetection` values, and then passed to one stateful tracking class.
@@ -11,6 +24,26 @@ video → Ultralytics or LibreYOLO adapter → normalized detections
 
 The tracker never imports or invokes YOLO. This makes the same tracker compatible
 with every detector that implements MLX's `DetectionAdapter` contract.
+
+## Module quick reference
+
+| Item | Contract |
+| --- | --- |
+| CLI mode / default action | `track` / `run`; use an explicit action in scripts |
+| Installation | `.[tracking,object-detection-ultralytics]` or the LibreYOLO equivalent; see the [installation guide](README.md#installation) |
+| Inputs | Video plus a detector; optional MOT ground truth and tracker configuration |
+| Outputs | Class-aware JSONL, MOT text, replay artifacts, and optional metrics |
+
+Tracker state belongs to one tracking session. Select the detector provider independently from the tracking algorithm.
+
+Discover available components before starting a workload:
+
+```bash
+python -m mlx --mode track --action ls-trackers
+```
+
+See [Custom trackers](CUSTOM_TRACKING.md), [all module guides](docs/README.md), and the
+[canonical architecture](ARCHITECTURE.md) for related workflows and extension contracts.
 
 ## Installation
 

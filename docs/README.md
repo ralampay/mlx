@@ -15,12 +15,15 @@
 - **Understand ownership and contracts:** [ARCHITECTURE.md](../ARCHITECTURE.md).
 - **Run retrieval experiments:** [autoencoder retrieval](retrieval-autoencoders.md).
 
-## Modes
+## Main modules
 
-The repository documentation is split by CLI mode and backing package:
+Start with a shared-layer guide or select a task-specific package:
 
 | Mode Package | Purpose | Docs |
 | --- | --- | --- |
+| CLI modules | Parsing, defaults, help, dispatch, and result handling | [CLI and routing](cli.md) |
+| `mlx.core` | Shared workflow infrastructure and contracts | [Core infrastructure](core.md) |
+| `mlx.modes` | Task selection and shared workflow conventions | [Workflow modes](modes.md) |
 | `mlx.modes.object_detection` | Provider-neutral detection, Ultralytics/LibreYOLO integrations, and tracking | [Object detection](./object_detection/README.md) |
 | `mlx.modes.object_detection.tracking` | Tracking, MOT benchmarking, and replay export | [Tracking](../TRACKING.md), [custom trackers](../CUSTOM_TRACKING.md) |
 | `mlx.modes.image_classification` | Image-classification workflows for one-shot and standard classifiers | [Image classification](./image_classification/README.md) |
@@ -30,7 +33,7 @@ The repository documentation is split by CLI mode and backing package:
 | `mlx.modes.text_embedding` | GGUF embedding, exact/Chroma indexing, and BEIR retrieval benchmarking | [Text embedding](./text-embedding.md) |
 | `mlx.modes.autoencoder` | Generic 1D vector autoencoder training and bottleneck export | [Autoencoder](./autoencoder.md) |
 | `mlx.modes.saliency_mapping` | Still-image single-channel salient-object detection | [Saliency mapping](./saliency-mapping/README.md) |
-| `mlx.core` | Shared commands, requests, errors, dataset staging, feature/streaming contracts, and UI helpers | [S3 dataset training](./s3-dataset-training.md) and [ARCHITECTURE.md](../ARCHITECTURE.md) |
+| `mlx.modes.nlp` | Historical text-column CSV embedding compatibility | [Legacy NLP](nlp.md) |
 
 ## CLI Mapping
 

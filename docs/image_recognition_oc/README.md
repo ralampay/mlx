@@ -1,8 +1,38 @@
 # One-Class Image Recognition
 
+## Contents
+
+- [Module quick reference](#module-quick-reference)
+- [Overview](#overview)
+- [Dataset contract](#dataset-contract)
+- [Models and training](#models-and-training)
+- [Image inference](#image-inference)
+- [Benchmarking](#benchmarking)
+- [Current boundaries](#current-boundaries)
+
 Mode: `image_recognition_oc` (alias: `image-recognition-oc`)
 
 Package: `mlx.modes.image_recognition_oc`
+
+## Module quick reference
+
+| Item | Contract |
+| --- | --- |
+| CLI mode / default action | `image-recognition-oc` / `ls-models`; use an explicit action in scripts |
+| Installation | Base package; `.[aws]` for S3/SageMaker; see the [installation guide](../../README.md#installation) |
+| Inputs | Normal-only training and validation images; normal/anomalous evaluation images |
+| Outputs | Calibrated Deep SVDD checkpoint, anomaly predictions, and benchmark artifacts |
+
+Keep anomaly examples out of normal-only training and threshold-calibration data. The algorithm and feature backbone are separate selections.
+
+Discover available components before starting a workload:
+
+```bash
+python -m mlx --mode image-recognition-oc --action ls-models --names-only
+```
+
+See [AWS execution](aws-sagemaker.md), [all module guides](../README.md), and the
+[canonical architecture](../../ARCHITECTURE.md) for related workflows and extension contracts.
 
 ## Overview
 

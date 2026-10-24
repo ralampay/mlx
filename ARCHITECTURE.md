@@ -2,6 +2,8 @@
 
 This document is the canonical architectural reference for MLX. User-facing commands and
 dataset formats remain in `README.md` and the mode guides under `docs/`.
+Use the [main module directory](README.md#module-documentation) for CLI, core, and workflow
+guides, and the [development guide](docs/development.md) for contribution steps.
 
 ## Design Goals
 

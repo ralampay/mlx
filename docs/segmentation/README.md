@@ -1,8 +1,44 @@
 # Segmentation
 
+## Contents
+
+- [Module quick reference](#module-quick-reference)
+- [Overview](#overview)
+- [Supported Models](#supported-models)
+- [Dataset Format](#dataset-format)
+- [Available Actions](#available-actions)
+- [Build Dataset](#build-dataset)
+- [Training](#training)
+- [Benchmarking](#benchmarking)
+- [Smoke Test](#smoke-test)
+- [Single Image Inference](#single-image-inference)
+- [Camera Inference](#camera-inference)
+- [Video Inference](#video-inference)
+- [Dependencies](#dependencies)
+
 Mode: `segmentation`
 
 Package: `mlx.modes.segmentation`
+
+## Module quick reference
+
+| Item | Contract |
+| --- | --- |
+| CLI mode / default action | `segmentation` / `test`; use an explicit action in scripts |
+| Installation | Base package; see the [installation guide](../../README.md#installation) |
+| Inputs | Paired images and semantic class masks; image/video for inference |
+| Outputs | Best-loss, best-Dice, and resumable checkpoints; masks and research metrics |
+
+Use class-index masks for semantic classes. Continuous foreground targets belong in saliency mapping.
+
+Discover available components before starting a workload:
+
+```bash
+python -m mlx --mode segmentation --action ls-models --names-only
+```
+
+See [Segmentation extension tutorial](../tutorials/adding-a-segmentation-model.md), [all module guides](../README.md), and the
+[canonical architecture](../../ARCHITECTURE.md) for related workflows and extension contracts.
 
 ## Overview
 
@@ -12,17 +48,9 @@ This mode provides semantic segmentation workflows exposed by:
 python -m mlx --mode segmentation
 ```
 
-The source is organized by responsibility:
-
-- `runner.py`: default config and action dispatch.
-- `train.py`: training loop and smoke test.
-- `inference.py`: single-image, webcam, and video inference.
-- `data.py`: paired image/mask dataset loading and preprocessing.
-- `data.py` also contains the interactive dataset split builder.
-- `models/`: segmentation model registry, U-Net decoders, and classification
-  backbone adapters.
-- `utils.py`: checkpoint metadata, metrics, and shared helpers.
-- `presentation.py`: rich tables and OpenCV visualization helpers.
+Package ownership and shared frame/data interfaces are documented in
+[ARCHITECTURE.md](../../ARCHITECTURE.md). For Python commands and extension patterns, see the
+[development guide](../development.md) and [segmentation tutorial](../tutorials/adding-a-segmentation-model.md).
 
 ## Supported Models
 
@@ -92,6 +120,7 @@ crop are symmetrically zero-padded first; mask padding therefore uses class `0`.
 
 ## Available Actions
 
+- `ls-losses`: list available segmentation losses.
 - `train`: train the selected segmentation model and write the best checkpoint to `--output`
 - `benchmark`: evaluate a trained checkpoint and optionally write research artifacts
 - `test`: run a random-tensor smoke test for the configured model

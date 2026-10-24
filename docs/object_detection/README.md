@@ -1,8 +1,44 @@
 # Object Detection
 
+## Contents
+
+- [Module quick reference](#module-quick-reference)
+- [Overview](#overview)
+- [AWS SageMaker Managed Spot Training](#aws-sagemaker-managed-spot-training)
+- [Generic Tracking by Detection](#generic-tracking-by-detection)
+- [Dataset Format](#dataset-format)
+- [Model Selection](#model-selection)
+- [End-to-End Workflow](#end-to-end-workflow)
+- [Training](#training)
+- [Provider-neutral benchmarking](#provider-neutral-benchmarking)
+- [Webcam Inference](#webcam-inference)
+- [Video Inference](#video-inference)
+- [ONNX Conversion](#onnx-conversion)
+- [Dependencies](#dependencies)
+
 Mode: `object-detection`
 
 Package: `mlx.modes.object_detection`
+
+## Module quick reference
+
+| Item | Contract |
+| --- | --- |
+| CLI mode / default action | `object-detection` / `train`; use an explicit action in scripts |
+| Installation | `.[object-detection-ultralytics]` or `.[object-detection-libreyolo]`; see the [installation guide](../../README.md#installation) |
+| Inputs | YOLO/provider-supported dataset, detector checkpoint, or camera/video source |
+| Outputs | Provider training checkpoints, normalized benchmark artifacts, ONNX exports, or detections |
+
+Provider checkpoints must be loaded with the same provider. Research feature adapters are MLX-owned and have separate experiment and reconstruction contracts.
+
+Discover available components before starting a workload:
+
+```bash
+python -m mlx --mode object-detection --provider ultralytics --action ls-models --names-only
+```
+
+See [Adapter ownership](adapter-ownership.md), [all module guides](../README.md), and the
+[canonical architecture](../../ARCHITECTURE.md) for related workflows and extension contracts.
 
 ## Overview
 

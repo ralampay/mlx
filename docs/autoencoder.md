@@ -1,8 +1,62 @@
 # Vector Autoencoders
 
+## Contents
+
+- [Module quick reference](#module-quick-reference)
+- [Discovery and input format](#discovery-and-input-format)
+- [Train](#train)
+- [Similarity-preserving reconstruction](#similarity-preserving-reconstruction)
+- [Normalization](#normalization)
+- [Export bottleneck vectors](#export-bottleneck-vectors)
+- [Custom models](#custom-models)
+- [Custom losses](#custom-losses)
+- [Checkpoint trust](#checkpoint-trust)
+
 The `autoencoder` mode trains reconstruction models over fixed-width numeric vectors and exports
 their bottleneck representations. It consumes MLX-compatible CSV files whose `embedding` column is
 a non-empty JSON array. All other columns and row order are preserved during export.
+
+## Module quick reference
+
+| Item | Contract |
+| --- | --- |
+| CLI mode / default action | `autoencoder` / `ls-models`; use an explicit action in scripts |
+| Installation | Base package; see the [installation guide](../README.md#installation) |
+| Inputs | CSV with a singular `embedding` column containing fixed-width JSON vectors |
+| Outputs | Autoencoder checkpoint/history or transformed CSV plus manifest |
+
+Training learns reconstruction over numeric vectors. Retrieval evaluation belongs to text embedding and uses the representation-transform boundary.
+
+Discover available components before starting a workload:
+
+```bash
+python -m mlx --mode autoencoder --action ls-models
+```
+
+See [Retrieval experiments](retrieval-autoencoders.md), [all module guides](README.md), and the
+[canonical architecture](../ARCHITECTURE.md) for related workflows and extension contracts.
+
+## Discovery and input format
+
+List the installed architecture and loss definitions:
+
+```bash
+python -m mlx --mode autoencoder --action ls-models
+python -m mlx --mode autoencoder --action ls-loss-functions
+```
+
+A minimal input CSV uses the singular column name `embedding`:
+
+```csv
+id,embedding
+first,"[0.1,0.2,0.3]"
+second,"[0.3,0.2,0.1]"
+```
+
+Rows must have a consistent numeric vector width. The training split and preprocessing depend
+on the request and available source manifest; see normalization below. Use enough rows for
+training and validation, and follow the selected objective's batching requirements.
+Legacy NLP CSV files use `embeddings` and must be converted explicitly before use here.
 
 ## Train
 
@@ -38,7 +92,9 @@ Built-ins are `mse`, `mae`, `smooth-l1`, and `mse-similarity`. Smooth L1 accepts
 ```
 
 ```bash
-python -m mlx --mode autoencoder --action train ... \
+python -m mlx --mode autoencoder --action train \
+  --model simple --input ./artifacts/scifact/corpus_embeddings.csv \
+  --output ./artifacts/autoencoder-smooth-l1 --bottleneck-dim 128 \
   --loss smooth-l1 --loss-config ./smooth-l1.json
 ```
 

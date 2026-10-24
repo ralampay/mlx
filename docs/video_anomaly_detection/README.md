@@ -1,8 +1,42 @@
 # Video Anomaly Detection
 
+## Contents
+
+- [Module quick reference](#module-quick-reference)
+- [Conceptual architecture and tensor shapes](#conceptual-architecture-and-tensor-shapes)
+- [Normal-only training and threshold calibration](#normal-only-training-and-threshold-calibration)
+- [Supported 3D backbones](#supported-3d-backbones)
+- [Generic dataset layout](#generic-dataset-layout)
+- [UCSD Ped2 preparation example](#ucsd-ped2-preparation-example)
+- [Training](#training)
+- [Resume](#resume)
+- [Benchmarking and artifacts](#benchmarking-and-artifacts)
+- [Video inference](#video-inference)
+- [Interpretation and limitations](#interpretation-and-limitations)
+
 Mode: `video_anomaly_detection` (alias: `video-anomaly-detection`)
 
 Package: `mlx.modes.video_anomaly_detection`
+
+## Module quick reference
+
+| Item | Contract |
+| --- | --- |
+| CLI mode / default action | `video-anomaly-detection` / `ls-models`; use an explicit action in scripts |
+| Installation | Base package; `.[aws]` for S3/SageMaker; see the [installation guide](../../README.md#installation) |
+| Inputs | Normal training/validation clips; test video or labelled frame sequences |
+| Outputs | Clip-based checkpoint, calibrated anomaly scores, evaluation reports, and inference artifacts |
+
+Scores describe clips or derived temporal outputs. This workflow does not produce object boxes or tracking identities.
+
+Discover available components before starting a workload:
+
+```bash
+python -m mlx --mode video-anomaly-detection --action ls-models --names-only
+```
+
+See [AWS training](aws-sagemaker-training.md), [all module guides](../README.md), and the
+[canonical architecture](../../ARCHITECTURE.md) for related workflows and extension contracts.
 
 ## Conceptual architecture and tensor shapes
 

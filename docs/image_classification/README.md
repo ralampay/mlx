@@ -1,8 +1,42 @@
 # Image Classification
 
+## Contents
+
+- [Module quick reference](#module-quick-reference)
+- [Overview](#overview)
+- [Supported Models](#supported-models)
+- [Dataset Expectations](#dataset-expectations)
+- [Training](#training)
+- [OOD Training and Benchmarking](#ood-training-and-benchmarking)
+- [Available Actions](#available-actions)
+- [Build Dataset](#build-dataset)
+- [Benchmarking](#benchmarking)
+- [Class Activation Maps](#class-activation-maps)
+- [Image Inference](#image-inference)
+
 Mode: `image_classification`
 
 Package: `mlx.modes.image_classification`
+
+## Module quick reference
+
+| Item | Contract |
+| --- | --- |
+| CLI mode / default action | `image-classification` / `test`; use an explicit action in scripts |
+| Installation | Base package; `.[image-explainability]` for CAM; see the [installation guide](../../README.md#installation) |
+| Inputs | Label-organized image directories, image pairs, or an image/checkpoint |
+| Outputs | Classifier checkpoints, training history, predictions, benchmark reports, or CAM images |
+
+Ordinary classification and Siamese similarity share this mode. Normal-only anomaly detection has a separate one-class mode.
+
+Discover available components before starting a workload:
+
+```bash
+python -m mlx --mode image-classification --action ls-models --names-only
+```
+
+See [Classifier extension tutorial](../tutorials/adding-a-classification-model.md), [all module guides](../README.md), and the
+[canonical architecture](../../ARCHITECTURE.md) for related workflows and extension contracts.
 
 ## Overview
 
@@ -738,6 +772,9 @@ The builder copies image files; it does not generate pairs on disk. Pair generat
 
 ## Available Actions
 
+- `ls-models`: list registered models; add `--names-only` for metadata-only discovery.
+- `ls-losses`: list available training losses.
+- `ls-cam-methods`: list registered explanation methods.
 - `train`: train the selected model and write artifacts to `--output`, including `{model}.pth` and `training.csv`.
 - `test`: run a random-tensor smoke test for the configured model.
 - `benchmark`: evaluate a trained checkpoint against a dataset directory. Standard models classify labels directly; one-shot models evaluate pair similarity.

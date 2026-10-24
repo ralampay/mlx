@@ -1,8 +1,41 @@
 # Saliency Mapping
 
+## Contents
+
+- [Module quick reference](#module-quick-reference)
+- [Task definition](#task-definition)
+- [Models and model groups](#models-and-model-groups)
+- [Dataset and builder](#dataset-and-builder)
+- [Loss, training, and checkpoints](#loss-training-and-checkpoints)
+- [Metrics and benchmark artifacts](#metrics-and-benchmark-artifacts)
+- [Image inference](#image-inference)
+- [Known limitations and deliberate differences](#known-limitations-and-deliberate-differences)
+
 Mode: `saliency_mapping` (alias: `saliency-mapping`)
 
 Package: `mlx.modes.saliency_mapping`
+
+## Module quick reference
+
+| Item | Contract |
+| --- | --- |
+| CLI mode / default action | `saliency-mapping` / `test`; use an explicit action in scripts |
+| Installation | Base package; see the [installation guide](../../README.md#installation) |
+| Inputs | Paired images and continuous grayscale saliency masks |
+| Outputs | Single-channel saliency checkpoints, probability maps, and evaluation artifacts |
+
+Saliency owns its model registry. Built-in U-Net implementations share segmentation components through the compatibility boundary.
+
+Discover available components before starting a workload:
+
+```bash
+python -m mlx --mode saliency-mapping --action ls-models
+```
+
+This listing constructs models to calculate parameter counts.
+
+See [Segmentation and saliency extension tutorial](../tutorials/adding-a-segmentation-model.md), [all module guides](../README.md), and the
+[canonical architecture](../../ARCHITECTURE.md) for related workflows and extension contracts.
 
 ## Task definition
 

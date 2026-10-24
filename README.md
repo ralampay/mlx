@@ -5,8 +5,9 @@ CLI and project conventions while keeping object detection, image classification
 one-class image recognition, video anomaly detection, segmentation, saliency mapping,
 text embedding, vector autoencoders, and tracking logic in focused modules.
 
-## Contents
+## Table of contents
 
+- [Module documentation](#module-documentation)
 - [Architecture](./ARCHITECTURE.md)
 - [Installation](#installation)
 - [Command-line interface](#command-line-interface)
@@ -16,11 +17,32 @@ text embedding, vector autoencoders, and tracking logic in focused modules.
 - [One-class image recognition](#one-class-image-recognition)
 - [Video anomaly detection](#video-anomaly-detection)
 - [Segmentation](#segmentation)
+- [Saliency mapping](#saliency-mapping)
 - [Text embeddings](#text-embeddings)
 - [Vector autoencoders](#vector-autoencoders)
-- [Saliency mapping](#saliency-mapping)
 - [Documentation](#documentation)
 - [Development and extensions](#extending-mlx)
+
+## Module documentation
+
+Each guide covers the module's purpose, inputs, outputs, entrypoints, and related workflows.
+The [documentation index](docs/README.md) also links setup, development, AWS, and research guides.
+
+| Main module | Guide |
+| --- | --- |
+| `mlx.cli`, `mlx.cli_config`, `mlx.cli_options`, `mlx.cli_routing` | [CLI and routing](docs/cli.md) |
+| `mlx.core` | [Shared core infrastructure](docs/core.md) |
+| `mlx.modes` | [Workflow modes and task selection](docs/modes.md) |
+| `mlx.modes.object_detection` | [Object detection](docs/object_detection/README.md) |
+| `mlx.modes.object_detection.tracking` | [Tracking by detection](TRACKING.md) |
+| `mlx.modes.image_classification` | [Image classification](docs/image_classification/README.md) |
+| `mlx.modes.image_recognition_oc` | [One-class image recognition](docs/image_recognition_oc/README.md) |
+| `mlx.modes.video_anomaly_detection` | [Video anomaly detection](docs/video_anomaly_detection/README.md) |
+| `mlx.modes.segmentation` | [Semantic segmentation](docs/segmentation/README.md) |
+| `mlx.modes.saliency_mapping` | [Saliency mapping](docs/saliency-mapping/README.md) |
+| `mlx.modes.text_embedding` | [Text embedding and retrieval](docs/text-embedding.md) |
+| `mlx.modes.autoencoder` | [Vector autoencoders](docs/autoencoder.md) |
+| `mlx.modes.nlp` | [Legacy NLP CSV embedding](docs/nlp.md) |
 
 ## Architecture
 

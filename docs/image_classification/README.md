@@ -15,19 +15,10 @@ python -m mlx --mode image_classification
 For asynchronous Managed Spot training, recovery, status, stop, and resume operations, see the
 [AWS SageMaker guide](./aws-sagemaker-training.md).
 
-The source is organized by responsibility:
-
-- `runner.py`: default config and action dispatch.
-- `train.py`: training loops and smoke tests for one-shot and standard classifiers.
-- `evaluation.py`: benchmark flows for both model families.
-- `inference.py`: image inference for both model families.
-- `ood/`: Deep SVDD center initialization, scoring, loss, and threshold calibration.
-- `cam.py`: Grad-CAM, AblationCAM, and ScoreCAM rendering for trained checkpoints.
-- `data.py`: dataset loading, dataset building, and shared image preprocessing.
-- `models/`: Siamese and standard classification model builders.
-- `utils.py`: model resolution and checkpoint metadata helpers.
-- `presentation.py`: rich tables and one-shot match rendering.
-- `data.py` exposes `ImageClassificationDataset`, which expects a dataset root containing `train/` and `val/`.
+For package ownership, training/data/artifact collaborators, and Python command contracts,
+see [Classification Workflow Boundaries](../../ARCHITECTURE.md#classification-workflow-boundaries).
+The [development guide](../development.md#call-a-workflow-from-python) includes a typed-request
+example. This guide focuses on datasets, CLI usage, and produced artifacts.
 
 ## Supported Models
 
@@ -36,7 +27,10 @@ This mode supports two training setups:
 - One-shot similarity models: `siamese-le-net` plus `siamese-` variants of every standard model listed below, such as `siamese-resnet18` and `siamese-draxnet`
 - Standard classification models: `resnet18`, `resnet50`, `densenet121`, `mobilenet_v3_large`, `efficientnet_b0`, `convnext_tiny`, `convnext_small`, `convnext_base`, `convnext_large`, `draxnet`, `drax_mobilenet_v3_large`
 
-The selected `--model` determines which training, benchmarking, and inference path is used. Torchvision-backed standard models are loaded by name and their classifier heads are adapted to the dataset class count. Additional custom standard classifiers can be plugged in later through the model registry.
+The selected `--model` determines the training, benchmarking, and inference path.
+Torchvision-backed classifier heads are adapted to the dataset class count. Custom standard
+classifiers can be added through the existing model registry; see the
+[classifier tutorial](../tutorials/adding-a-classification-model.md).
 
 List every registered model and its total parameter count without downloading pretrained weights:
 
@@ -45,6 +39,21 @@ python -m mlx --mode image_classification --action ls-models
 ```
 
 The counts use `--num-classes` for standard classifier heads and `--embedding-size` for one-shot models.
+
+For names only, without constructing models or importing training/inference/plotting code:
+
+```bash
+python -m mlx --mode image-classification --action ls-models --names-only --format json
+```
+
+### Input size and loading
+
+When no model or dimensions are supplied, the default classifier uses 224 × 224 inputs.
+An explicitly selected model retains the historical 256 × 256 CLI default unless dimensions
+are supplied. Explicit values, including `--width 256 --height 256`, are honored. Set both
+`--width` and `--height` for reproducible runs; Python typed requests have their own defaults.
+Training and benchmarking use two data-loader workers when `--workers` is omitted. Use
+`--workers 0` for in-process loading, including small synthetic tests.
 
 All standard classifiers share the same preprocessing family:
 

@@ -1,12 +1,8 @@
 from __future__ import annotations
 
-import csv
-import random
-from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
-import matplotlib.pyplot as plt
 import numpy as np
 import torch
 from sklearn.metrics import (
@@ -15,7 +11,6 @@ from sklearn.metrics import (
     auc,
     confusion_matrix,
     f1_score,
-    precision_recall_curve,
     precision_score,
     recall_score,
     roc_auc_score,
@@ -27,34 +22,27 @@ from torch.utils.data import DataLoader
 from mlx.core.commands import NullWorkflowReporter, WorkflowReporter, emit
 from mlx.core.exceptions import MLXUserError
 from mlx.core.configuration import resolve_data_loader_workers
-from mlx.modes.image_classification.data import (
-    load_image_tensor,
-    load_standard_classification_directory,
-    resolve_evaluation_dir,
-)
+
 from mlx.modes.image_classification.utils import load_checkpoint_bundle
 from mlx.modes.image_classification.models.joint_svdd import JointDeepSVDDClassifier
 from mlx.modes.image_classification.requests import ImageClassificationRequest
-
-
-@dataclass(frozen=True)
-class OneShotPairRecord:
-    image_one: Path
-    label_one: str
-    image_two: Path
-    label_two: str
-    target: int
-
-
-@dataclass(frozen=True)
-class OneShotPredictionRecord:
-    image_one: Path
-    label_one: str
-    image_two: Path
-    label_two: str
-    target: int
-    predicted: int
-    same_probability: float
+from mlx.modes.image_classification.evaluation_data import (
+    ClassificationEvaluationData, build_one_shot_benchmark_pairs, _index_one_shot_images,
+)
+from mlx.modes.image_classification.evaluation_records import OneShotPairRecord, OneShotPredictionRecord
+from mlx.modes.image_classification.benchmark_artifacts import (
+    ClassificationBenchmarkArtifacts,
+    _write_benchmark_artifacts,
+    _write_metrics_csv,
+    _write_confusion_matrix_artifacts,
+    _write_roc_curve_artifact,
+    _write_one_shot_research_artifacts,
+    _write_one_shot_pair_predictions,
+    _write_one_shot_threshold_metrics,
+    _write_n_way_predictions,
+    _write_precision_recall_curve_artifact,
+    _write_score_distribution_artifact,
+)
 
 
 class BenchmarkImageClassification:
@@ -64,13 +52,23 @@ class BenchmarkImageClassification:
         *,
         reporter: WorkflowReporter | None = None,
         model_registry=None,
+        checkpoint_loader=None,
+        dataset_loader=None,
+        artifact_writer=None,
     ) -> None:
         self.model_registry = model_registry
+        self.checkpoint_loader = checkpoint_loader
+        self.dataset_loader = dataset_loader
+        self.artifact_writer = artifact_writer
         self.request = request
         self.reporter = reporter or NullWorkflowReporter()
 
     def execute(self) -> dict[str, float]:
-        return _run_benchmark(self.request.to_config(), reporter=self.reporter, model_registry=self.model_registry)
+        return _run_benchmark(
+            self.request.to_config(), reporter=self.reporter, model_registry=self.model_registry,
+            checkpoint_loader=self.checkpoint_loader, dataset_loader=self.dataset_loader,
+            artifact_writer=self.artifact_writer,
+        )
 
 
 def benchmark_image_classification(config: dict[str, Any]) -> dict[str, float]:
@@ -87,18 +85,30 @@ def _run_benchmark(
     *,
     reporter: WorkflowReporter | None = None,
     model_registry=None,
+    checkpoint_loader=None,
+    dataset_loader=None,
+    artifact_writer=None,
 ) -> dict[str, float]:
     reporter = reporter or NullWorkflowReporter()
     resolve_data_loader_workers(config)
-    model, metadata = load_checkpoint_bundle(config, **({"model_registry": model_registry} if model_registry is not None else {}))
+    dataset_loader = dataset_loader if dataset_loader is not None else ClassificationEvaluationData()
+    artifact_writer = artifact_writer if artifact_writer is not None else ClassificationBenchmarkArtifacts()
+    checkpoint_loader = checkpoint_loader or load_checkpoint_bundle
+    model, metadata = checkpoint_loader(config, **({"model_registry": model_registry} if model_registry is not None else {}))
     family = metadata["family"]
     device = config.get("device", "cpu")
     model = model.to(device)
     model.eval()
 
     if family == "one-shot":
-        return _benchmark_one_shot(model, metadata, config, device, reporter=reporter)
-    return _benchmark_standard(model, metadata, config, device, reporter=reporter)
+        return _benchmark_one_shot(
+            model, metadata, config, device, reporter=reporter,
+            dataset_loader=dataset_loader, artifact_writer=artifact_writer,
+        )
+    return _benchmark_standard(
+        model, metadata, config, device, reporter=reporter,
+        dataset_loader=dataset_loader, artifact_writer=artifact_writer,
+    )
 
 
 def _benchmark_one_shot(
@@ -108,10 +118,14 @@ def _benchmark_one_shot(
     device: str,
     *,
     reporter: WorkflowReporter,
+    dataset_loader=None,
+    artifact_writer=None,
 ) -> dict[str, float]:
-    test_path = resolve_evaluation_dir(config["dataset_path"])
+    dataset_loader = dataset_loader if dataset_loader is not None else ClassificationEvaluationData()
+    artifact_writer = artifact_writer if artifact_writer is not None else ClassificationBenchmarkArtifacts()
+    test_path = dataset_loader.resolve_root(config["dataset_path"])
     pairs_per_class = config.get("num_pairs", 100)
-    pairs = build_one_shot_benchmark_pairs(
+    pairs = dataset_loader.build_pairs(
         test_path,
         pairs_per_class=pairs_per_class,
         random_seed=config.get("random_seed"),
@@ -130,7 +144,7 @@ def _benchmark_one_shot(
         for batch_index, pair_batch in enumerate(_batched(pairs, batch_size), start=1):
             images_one = torch.stack(
                 [
-                    load_image_tensor(
+                    dataset_loader.load_image(
                         pair.image_one,
                         input_size=metadata["input_size"],
                         colored=metadata["colored"],
@@ -140,7 +154,7 @@ def _benchmark_one_shot(
             ).to(device)
             images_two = torch.stack(
                 [
-                    load_image_tensor(
+                    dataset_loader.load_image(
                         pair.image_two,
                         input_size=metadata["input_size"],
                         colored=metadata["colored"],
@@ -181,6 +195,8 @@ def _benchmark_one_shot(
         config,
         device,
         output_dir=output_dir,
+        dataset_loader=dataset_loader,
+        artifact_writer=artifact_writer,
         reporter=reporter,
     )
     threshold_metrics.update(n_way_summary)
@@ -193,10 +209,11 @@ def _benchmark_one_shot(
         class_names=["different", "same"],
         extra_metrics=threshold_metrics,
         title="One-Shot Pair Verification Results",
+        artifact_writer=artifact_writer,
         reporter=reporter,
     )
     if output_dir is not None:
-        _write_one_shot_research_artifacts(
+        artifact_writer.write_one_shot(
             output_dir,
             prediction_records=prediction_records,
             threshold_rows=threshold_rows,
@@ -214,11 +231,15 @@ def _benchmark_standard(
     device: str,
     *,
     reporter: WorkflowReporter,
+    dataset_loader=None,
+    artifact_writer=None,
 ) -> dict[str, float]:
+    dataset_loader = dataset_loader if dataset_loader is not None else ClassificationEvaluationData()
+    artifact_writer = artifact_writer if artifact_writer is not None else ClassificationBenchmarkArtifacts()
     if not metadata["classes"]:
         raise MLXUserError("The checkpoint does not contain class labels for standard evaluation.")
-    eval_dir = resolve_evaluation_dir(config["dataset_path"])
-    dataset = load_standard_classification_directory(
+    eval_dir = dataset_loader.resolve_root(config["dataset_path"])
+    dataset = dataset_loader.load_standard(
         eval_dir,
         label_names=metadata["classes"],
         input_size=metadata["input_size"],
@@ -254,90 +275,13 @@ def _benchmark_standard(
         output_dir=_resolve_benchmark_output_dir(config),
         probabilities=np.asarray(probabilities, dtype=np.float64),
         class_names=metadata["classes"],
+        artifact_writer=artifact_writer,
         reporter=reporter,
     )
 
 
-def build_one_shot_benchmark_pairs(
-    dataset_path: Path,
-    *,
-    pairs_per_class: int,
-    random_seed: int | None,
-    reporter: WorkflowReporter | None = None,
-) -> list[OneShotPairRecord]:
-    if pairs_per_class <= 0:
-        raise MLXUserError("--num-pairs must be greater than zero for one-shot benchmarking.")
-
-    label_to_images = _index_one_shot_images(dataset_path, reporter=reporter)
-    if len(label_to_images) < 2:
-        raise MLXUserError(
-            "One-shot benchmarking requires at least two label directories with at least two images each."
-        )
-
-    rng = random.Random(random_seed)
-    labels = sorted(label_to_images)
-    positive_count = (pairs_per_class + 1) // 2
-    negative_count = pairs_per_class // 2
-    pairs: list[OneShotPairRecord] = []
-
-    for label in labels:
-        images = label_to_images[label]
-        for _ in range(positive_count):
-            image_one, image_two = rng.sample(images, 2)
-            pairs.append(
-                OneShotPairRecord(
-                    image_one=image_one,
-                    label_one=label,
-                    image_two=image_two,
-                    label_two=label,
-                    target=1,
-                )
-            )
-
-        negative_labels = [candidate for candidate in labels if candidate != label]
-        for _ in range(negative_count):
-            negative_label = rng.choice(negative_labels)
-            pairs.append(
-                OneShotPairRecord(
-                    image_one=rng.choice(images),
-                    label_one=label,
-                    image_two=rng.choice(label_to_images[negative_label]),
-                    label_two=negative_label,
-                    target=0,
-                )
-            )
-
-    rng.shuffle(pairs)
-    return pairs
-
-
 # Compatibility alias for callers that imported the former private helper.
 _build_one_shot_benchmark_pairs = build_one_shot_benchmark_pairs
-
-
-def _index_one_shot_images(
-    dataset_path: Path,
-    *,
-    reporter: WorkflowReporter | None = None,
-) -> dict[str, list[Path]]:
-    reporter = reporter or NullWorkflowReporter()
-    label_to_images: dict[str, list[Path]] = {}
-    image_extensions = {".png", ".jpg", ".jpeg", ".bmp"}
-    for label_dir in sorted(path for path in dataset_path.iterdir() if path.is_dir()):
-        images = sorted(
-            path
-            for path in label_dir.iterdir()
-            if path.is_file() and path.suffix.lower() in image_extensions
-        )
-        if len(images) >= 2:
-            label_to_images[label_dir.name] = images
-        else:
-            emit(
-                reporter,
-                "warning",
-                f"Skipping label '{label_dir.name}' for one-shot benchmark because it has fewer than two images."
-            )
-    return label_to_images
 
 
 def _batched(items: list[OneShotPairRecord], batch_size: int):
@@ -354,8 +298,12 @@ def _benchmark_one_shot_n_way(
     *,
     output_dir: Path | None,
     reporter: WorkflowReporter,
+    dataset_loader=None,
+    artifact_writer=None,
 ) -> dict[str, float]:
-    label_to_images = _index_one_shot_images(dataset_path, reporter=reporter)
+    dataset_loader = dataset_loader if dataset_loader is not None else ClassificationEvaluationData()
+    artifact_writer = artifact_writer if artifact_writer is not None else ClassificationBenchmarkArtifacts()
+    label_to_images = dataset_loader.index_images(dataset_path, reporter=reporter)
     labels = sorted(label_to_images)
     if len(labels) < 2:
         return {}
@@ -384,7 +332,7 @@ def _benchmark_one_shot_n_way(
             best_label = None
             best_path = None
             best_score = -1.0
-            query_tensor = load_image_tensor(
+            query_tensor = dataset_loader.load_image(
                 query_path,
                 input_size=metadata["input_size"],
                 colored=metadata["colored"],
@@ -394,7 +342,7 @@ def _benchmark_one_shot_n_way(
                 query_batch = torch.stack([query_tensor for _ in reference_batch]).to(device)
                 reference_batch_tensor = torch.stack(
                     [
-                        load_image_tensor(
+                        dataset_loader.load_image(
                             reference_path,
                             input_size=metadata["input_size"],
                             colored=metadata["colored"],
@@ -438,8 +386,6 @@ def _benchmark_one_shot_n_way(
             )
 
     n_way_output_dir = output_dir / "n_way_classification" if output_dir is not None else None
-    if n_way_output_dir is not None:
-        n_way_output_dir.mkdir(parents=True, exist_ok=True)
     n_way_results = _compute_metrics(
         targets,
         preds,
@@ -447,10 +393,11 @@ def _benchmark_one_shot_n_way(
         probabilities=np.asarray(probabilities, dtype=np.float64),
         class_names=labels,
         title="One-Shot N-Way Classification Results",
+        artifact_writer=artifact_writer,
         reporter=reporter,
     )
     if n_way_output_dir is not None:
-        _write_n_way_predictions(n_way_output_dir / "predictions.csv", prediction_rows)
+        artifact_writer.write_n_way(n_way_output_dir / "predictions.csv", prediction_rows)
 
     return {
         "n_way_accuracy": n_way_results["accuracy"],
@@ -479,7 +426,6 @@ def _resolve_benchmark_output_dir(config: dict[str, Any]) -> Path | None:
     if not output_path:
         return None
     output_dir = Path(output_path).expanduser()
-    output_dir.mkdir(parents=True, exist_ok=True)
     return output_dir
 
 
@@ -493,6 +439,7 @@ def _compute_metrics(
     extra_metrics: dict[str, float] | None = None,
     title: str = "Benchmark Results",
     reporter: WorkflowReporter | None = None,
+    artifact_writer=None,
 ) -> dict[str, float]:
     reporter = reporter or NullWorkflowReporter()
     results = {
@@ -526,7 +473,8 @@ def _compute_metrics(
         },
     )
     if output_dir is not None:
-        _write_benchmark_artifacts(
+        writer = artifact_writer if artifact_writer is not None else ClassificationBenchmarkArtifacts()
+        writer.write_metrics(
             output_dir,
             results=results,
             targets=targets,
@@ -664,149 +612,6 @@ def _metric_slug(value: str) -> str:
     return "".join(character.lower() if character.isalnum() else "_" for character in value).strip("_")
 
 
-def _write_benchmark_artifacts(
-    output_dir: Path,
-    *,
-    results: dict[str, float],
-    targets: list[int],
-    preds: list[int],
-    probabilities: np.ndarray | None,
-    class_names: list[str] | None,
-    reporter: WorkflowReporter | None = None,
-) -> None:
-    reporter = reporter or NullWorkflowReporter()
-    _write_metrics_csv(output_dir / "metrics.csv", results)
-    _write_confusion_matrix_artifacts(
-        output_dir,
-        targets=targets,
-        preds=preds,
-        class_names=class_names,
-    )
-    _write_roc_curve_artifact(
-        output_dir / "roc_curve.png",
-        targets=targets,
-        probabilities=probabilities,
-        class_names=class_names,
-        reporter=reporter,
-    )
-    emit(reporter, "success", f"Benchmark artifacts written to {output_dir}")
-
-
-def _write_metrics_csv(csv_path: Path, results: dict[str, float]) -> None:
-    with csv_path.open("w", newline="", encoding="utf-8") as csv_file:
-        writer = csv.writer(csv_file)
-        writer.writerow(["metric", "value"])
-        for metric_name, metric_value in sorted(results.items()):
-            writer.writerow([metric_name, f"{metric_value:.6f}"])
-
-
-def _write_confusion_matrix_artifacts(
-    output_dir: Path,
-    *,
-    targets: list[int],
-    preds: list[int],
-    class_names: list[str] | None,
-) -> None:
-    labels = list(range(len(class_names))) if class_names else sorted(set(targets) | set(preds))
-    matrix = confusion_matrix(targets, preds, labels=labels)
-    resolved_names = class_names or [str(label) for label in labels]
-
-    csv_path = output_dir / "confusion_matrix.csv"
-    with csv_path.open("w", newline="", encoding="utf-8") as csv_file:
-        writer = csv.writer(csv_file)
-        writer.writerow(["actual/predicted", *resolved_names])
-        for class_name, row in zip(resolved_names, matrix):
-            writer.writerow([class_name, *row.tolist()])
-
-    figure_width = max(6, min(16, len(resolved_names) * 1.2))
-    figure_height = max(5, min(14, len(resolved_names) * 1.0))
-    fig, ax = plt.subplots(figsize=(figure_width, figure_height))
-    image = ax.imshow(matrix, interpolation="nearest", cmap="Blues")
-    ax.figure.colorbar(image, ax=ax)
-    ax.set(
-        title="Confusion Matrix",
-        xlabel="Predicted label",
-        ylabel="True label",
-        xticks=np.arange(len(resolved_names)),
-        yticks=np.arange(len(resolved_names)),
-        xticklabels=resolved_names,
-        yticklabels=resolved_names,
-    )
-    plt.setp(ax.get_xticklabels(), rotation=45, ha="right", rotation_mode="anchor")
-
-    threshold = matrix.max() / 2.0 if matrix.size else 0.0
-    for row_index in range(matrix.shape[0]):
-        for col_index in range(matrix.shape[1]):
-            value = matrix[row_index, col_index]
-            ax.text(
-                col_index,
-                row_index,
-                str(value),
-                ha="center",
-                va="center",
-                color="white" if value > threshold else "black",
-            )
-
-    fig.tight_layout()
-    fig.savefig(output_dir / "confusion_matrix.png", dpi=200, bbox_inches="tight")
-    plt.close(fig)
-
-
-def _write_roc_curve_artifact(
-    image_path: Path,
-    *,
-    targets: list[int],
-    probabilities: np.ndarray | None,
-    class_names: list[str] | None,
-    reporter: WorkflowReporter | None = None,
-) -> None:
-    reporter = reporter or NullWorkflowReporter()
-    if probabilities is None or len(targets) == 0:
-        return
-
-    target_array = np.asarray(targets, dtype=np.int64)
-    unique_targets = np.unique(target_array)
-    if unique_targets.size < 2:
-        return
-
-    try:
-        fig, ax = plt.subplots(figsize=(8, 6))
-        if probabilities.ndim == 1 or (probabilities.ndim == 2 and probabilities.shape[1] == 1):
-            positive_scores = probabilities.reshape(-1)
-            fpr, tpr, _ = roc_curve(target_array, positive_scores)
-            ax.plot(fpr, tpr, label=f"AUC = {auc(fpr, tpr):.4f}", linewidth=2)
-        elif probabilities.ndim == 2 and probabilities.shape[1] == 2:
-            positive_scores = probabilities[:, 1]
-            fpr, tpr, _ = roc_curve(target_array, positive_scores)
-            positive_label = class_names[1] if class_names and len(class_names) > 1 else "positive"
-            ax.plot(fpr, tpr, label=f"{positive_label} (AUC={auc(fpr, tpr):.4f})", linewidth=2)
-        else:
-            class_count = probabilities.shape[1]
-            classes = np.arange(class_count)
-            binarized_targets = label_binarize(target_array, classes=classes)
-            for class_index in range(class_count):
-                if binarized_targets[:, class_index].max() == 0:
-                    continue
-                fpr, tpr, _ = roc_curve(binarized_targets[:, class_index], probabilities[:, class_index])
-                label = class_names[class_index] if class_names and class_index < len(class_names) else f"class_{class_index}"
-                ax.plot(fpr, tpr, label=f"{label} (AUC={auc(fpr, tpr):.4f})", linewidth=2)
-
-        ax.plot([0, 1], [0, 1], linestyle="--", color="gray", linewidth=1)
-        ax.set(
-            title="ROC Curve",
-            xlabel="False Positive Rate",
-            ylabel="True Positive Rate",
-            xlim=(0.0, 1.0),
-            ylim=(0.0, 1.05),
-        )
-        ax.legend(loc="lower right", fontsize="small")
-        fig.tight_layout()
-        fig.savefig(image_path, dpi=200, bbox_inches="tight")
-        plt.close(fig)
-    except ValueError as exc:
-        emit(reporter, "warning", f"ROC curve export skipped: {exc}")
-
-
 def _compute_one_shot_threshold_metrics(
     targets: list[int],
     probabilities: np.ndarray,
@@ -882,170 +687,3 @@ def _compute_one_shot_threshold_metrics(
         )
 
     return rows, metrics
-
-
-def _write_one_shot_research_artifacts(
-    output_dir: Path,
-    *,
-    prediction_records: list[OneShotPredictionRecord],
-    threshold_rows: list[dict[str, float]],
-    targets: list[int],
-    probabilities: np.ndarray,
-    reporter: WorkflowReporter | None = None,
-) -> None:
-    reporter = reporter or NullWorkflowReporter()
-    _write_one_shot_pair_predictions(output_dir / "pair_predictions.csv", prediction_records)
-    _write_one_shot_threshold_metrics(output_dir / "threshold_metrics.csv", threshold_rows)
-    _write_precision_recall_curve_artifact(
-        output_dir / "precision_recall_curve.png",
-        targets=targets,
-        probabilities=probabilities,
-    )
-    _write_score_distribution_artifact(
-        output_dir / "score_distribution.png",
-        targets=targets,
-        probabilities=probabilities,
-    )
-    emit(reporter, "success", f"One-shot research artifacts written to {output_dir}")
-
-
-def _write_one_shot_pair_predictions(
-    csv_path: Path,
-    prediction_records: list[OneShotPredictionRecord],
-) -> None:
-    with csv_path.open("w", newline="", encoding="utf-8") as csv_file:
-        writer = csv.writer(csv_file)
-        writer.writerow(
-            [
-                "pair_id",
-                "image_1",
-                "label_1",
-                "image_2",
-                "label_2",
-                "target",
-                "predicted",
-                "same_probability",
-            ]
-        )
-        for index, record in enumerate(prediction_records, start=1):
-            writer.writerow(
-                [
-                    index,
-                    str(record.image_one),
-                    record.label_one,
-                    str(record.image_two),
-                    record.label_two,
-                    record.target,
-                    record.predicted,
-                    f"{record.same_probability:.8f}",
-                ]
-            )
-
-
-def _write_one_shot_threshold_metrics(
-    csv_path: Path,
-    threshold_rows: list[dict[str, float]],
-) -> None:
-    fieldnames = [
-        "threshold",
-        "accuracy",
-        "precision",
-        "recall",
-        "specificity",
-        "f1",
-        "false_positive_rate",
-        "false_negative_rate",
-        "true_positive",
-        "false_positive",
-        "true_negative",
-        "false_negative",
-    ]
-    with csv_path.open("w", newline="", encoding="utf-8") as csv_file:
-        writer = csv.DictWriter(csv_file, fieldnames=fieldnames)
-        writer.writeheader()
-        for row in threshold_rows:
-            writer.writerow(
-                {
-                    key: f"{row[key]:.8f}" if key in row else ""
-                    for key in fieldnames
-                }
-            )
-
-
-def _write_n_way_predictions(csv_path: Path, prediction_rows: list[dict[str, Any]]) -> None:
-    fieldnames = [
-        "query_image",
-        "query_label",
-        "predicted_label",
-        "best_reference_image",
-        "best_same_probability",
-        "correct",
-    ]
-    with csv_path.open("w", newline="", encoding="utf-8") as csv_file:
-        writer = csv.DictWriter(csv_file, fieldnames=fieldnames)
-        writer.writeheader()
-        for row in prediction_rows:
-            writer.writerow(
-                {
-                    **row,
-                    "best_same_probability": f"{row['best_same_probability']:.8f}",
-                }
-            )
-
-
-def _write_precision_recall_curve_artifact(
-    image_path: Path,
-    *,
-    targets: list[int],
-    probabilities: np.ndarray,
-) -> None:
-    if len(targets) == 0 or np.unique(np.asarray(targets, dtype=np.int64)).size < 2:
-        return
-
-    precision, recall, _ = precision_recall_curve(targets, probabilities)
-    average_precision = average_precision_score(targets, probabilities)
-    fig, ax = plt.subplots(figsize=(8, 6))
-    ax.plot(recall, precision, label=f"AP={average_precision:.4f}", linewidth=2)
-    ax.set(
-        title="Precision-Recall Curve",
-        xlabel="Recall",
-        ylabel="Precision",
-        xlim=(0.0, 1.0),
-        ylim=(0.0, 1.05),
-    )
-    ax.legend(loc="lower left")
-    fig.tight_layout()
-    fig.savefig(image_path, dpi=200, bbox_inches="tight")
-    plt.close(fig)
-
-
-def _write_score_distribution_artifact(
-    image_path: Path,
-    *,
-    targets: list[int],
-    probabilities: np.ndarray,
-) -> None:
-    if len(targets) == 0:
-        return
-
-    target_array = np.asarray(targets, dtype=np.int64)
-    same_scores = probabilities[target_array == 1]
-    different_scores = probabilities[target_array == 0]
-
-    fig, ax = plt.subplots(figsize=(8, 6))
-    bins = np.linspace(0.0, 1.0, 41)
-    if different_scores.size:
-        ax.hist(different_scores, bins=bins, alpha=0.65, label="different", density=True)
-    if same_scores.size:
-        ax.hist(same_scores, bins=bins, alpha=0.65, label="same", density=True)
-    ax.axvline(0.5, color="black", linestyle="--", linewidth=1, label="threshold=0.5")
-    ax.set(
-        title="One-Shot Similarity Score Distribution",
-        xlabel="Predicted same-class probability",
-        ylabel="Density",
-        xlim=(0.0, 1.0),
-    )
-    ax.legend(loc="best")
-    fig.tight_layout()
-    fig.savefig(image_path, dpi=200, bbox_inches="tight")
-    plt.close(fig)

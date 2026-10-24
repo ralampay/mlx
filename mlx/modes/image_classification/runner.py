@@ -9,22 +9,10 @@ from mlx.core.datasets import (
 )
 from mlx.core.commands import NullWorkflowReporter
 from mlx.core.exceptions import MLXUserError
-from mlx.core.configuration import with_explicit_options
+from mlx.core.configuration import with_explicit_options, normalize_image_dimensions
+from mlx.core.extensions import deferred_callable
 from mlx.core.ui import print_model_parameter_table
-from mlx.modes.image_classification.cam import GenerateImageClassificationCams
-from mlx.modes.image_classification.data import BuildImageClassificationDataset, classification_dataset_root
-from mlx.modes.image_classification.evaluation import BenchmarkImageClassification
-from mlx.modes.image_classification.inference import InferImageClassification
-from mlx.modes.image_classification.list_models import ListImageClassificationModels
 from mlx.modes.image_classification.models import DEFAULT_MODEL, model_family_for
-from mlx.modes.image_classification.presentation import (
-    display_cam_results,
-    display_classification_predictions,
-    display_similarity_matches,
-    print_config_summary,
-    RichImageClassificationReporter,
-    resolve_image_dataset_build_request,
-)
 from mlx.modes.image_classification.requests import (
     BuildImageClassificationDatasetRequest,
     BenchmarkImageClassificationRequest,
@@ -34,9 +22,49 @@ from mlx.modes.image_classification.requests import (
     SmokeTestImageClassificationRequest,
     TrainImageClassificationRequest,
 )
-from mlx.modes.image_classification.train import (
-    SmokeTestImageClassificationModel,
-    TrainImageClassificationModel,
+
+
+GenerateImageClassificationCams = deferred_callable(
+    "mlx.modes.image_classification.cam:GenerateImageClassificationCams"
+)
+BuildImageClassificationDataset = deferred_callable(
+    "mlx.modes.image_classification.data:BuildImageClassificationDataset"
+)
+classification_dataset_root = deferred_callable(
+    "mlx.modes.image_classification.data:classification_dataset_root"
+)
+BenchmarkImageClassification = deferred_callable(
+    "mlx.modes.image_classification.evaluation:BenchmarkImageClassification"
+)
+InferImageClassification = deferred_callable(
+    "mlx.modes.image_classification.inference:InferImageClassification"
+)
+ListImageClassificationModels = deferred_callable(
+    "mlx.modes.image_classification.list_models:ListImageClassificationModels"
+)
+display_cam_results = deferred_callable(
+    "mlx.modes.image_classification.presentation:display_cam_results"
+)
+display_classification_predictions = deferred_callable(
+    "mlx.modes.image_classification.presentation:display_classification_predictions"
+)
+display_similarity_matches = deferred_callable(
+    "mlx.modes.image_classification.presentation:display_similarity_matches"
+)
+print_config_summary = deferred_callable(
+    "mlx.modes.image_classification.presentation:print_config_summary"
+)
+RichImageClassificationReporter = deferred_callable(
+    "mlx.modes.image_classification.presentation:RichImageClassificationReporter"
+)
+resolve_image_dataset_build_request = deferred_callable(
+    "mlx.modes.image_classification.presentation:resolve_image_dataset_build_request"
+)
+SmokeTestImageClassificationModel = deferred_callable(
+    "mlx.modes.image_classification.train:SmokeTestImageClassificationModel"
+)
+TrainImageClassificationModel = deferred_callable(
+    "mlx.modes.image_classification.train:TrainImageClassificationModel"
 )
 
 DEFAULT_CONFIG = {
@@ -186,17 +214,12 @@ def run_image_classification(mode_config: dict[str, Any]) -> Any:
 
     model_name = mode_config.get("model") or DEFAULT_MODEL
     family = model_family_for(model_name)
-    if mode_config.get("model") is None and mode_config.get("width") == 256 and mode_config.get("height") == 256:
-        if family == "one-shot":
-            config["input_size"] = (105, 105)
-            config["width"] = 105
-            config["height"] = 105
-        else:
-            config["input_size"] = (224, 224)
-            config["width"] = 224
-            config["height"] = 224
-    else:
-        config["input_size"] = tuple(config.get("input_size", (config["width"], config["height"])))
+    config["_explicit_options"] = explicit
+    default_size = (105, 105) if family == "one-shot" and mode_config.get("model") is None else (224, 224)
+    # Explicit model selection historically uses the shared 256-pixel CLI default.
+    if mode_config.get("model") is not None:
+        default_size = (256, 256)
+    config = normalize_image_dimensions(config, default=default_size)
     config["model"] = model_name
 
     if config.get("output_format") != "json":

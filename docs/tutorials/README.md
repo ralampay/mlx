@@ -1,5 +1,6 @@
 # Extending MLX
 
+For environment setup and CLI changes, see the [development guide](../development.md).
 Start with [the extension inventory](../extensions.md) and [the architecture](../../ARCHITECTURE.md).
 Use explicit, local registries in Python. Registering an alias in one Python process does not
 install it into future CLI processes. For a permanent built-in alias, change the owning catalog;

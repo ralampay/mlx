@@ -678,8 +678,8 @@ python -m mlx \
 
 - `object-detection-ultralytics` installs `ultralytics` from the
   `ralampay/ultralytics` fork plus ONNX Runtime.
-- `object-detection-libreyolo` installs `libreyolo[onnx]` from the pinned
-  CSP-capable commit of `ralampay/libreyolo`.
+- `object-detection-libreyolo` installs `libreyolo[onnx]` from the moving
+  `release` branch of `ralampay/libreyolo`; record the resolved commit for reproducibility.
 - `object-detection` installs both providers.
 - `opencv-python` supplies webcam/video input and display for either provider.
 

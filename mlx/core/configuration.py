@@ -43,3 +43,22 @@ def resolve_data_loader_workers(config: Mapping[str, Any], *, default: int = 2) 
     if isinstance(value, bool) or workers < 0 or (isinstance(value, float) and workers != value):
         raise MLXUserError("--workers must be a nonnegative integer.")
     return workers
+
+
+def normalize_image_dimensions(config: Mapping[str, Any], *, default: tuple[int, int]) -> dict[str, Any]:
+    """Resolve width/height once, preserving explicitly supplied dimensions or size."""
+    values = with_explicit_options(config)
+    explicit = values["_explicit_options"]
+    size = values.get("input_size") if "input_size" in explicit else default
+    if size is None:
+        size = default
+    try:
+        width, height = size
+        width = values["width"] if "width" in explicit else width
+        height = values["height"] if "height" in explicit else height
+        if any(isinstance(value, bool) or int(value) != value or value < 1 for value in (width, height)):
+            raise ValueError("dimensions must be positive integers")
+    except (TypeError, ValueError, KeyError, OverflowError) as exc:
+        raise MLXUserError("Input size must contain a positive integer width and height.") from exc
+    values.update(width=int(width), height=int(height), input_size=(int(width), int(height)))
+    return values

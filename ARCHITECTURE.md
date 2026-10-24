@@ -133,7 +133,26 @@ dataclasses and legacy configuration dictionaries. New application APIs should a
 request; dictionary entry points exist only for CLI and compatibility use.
 
 `ModeDescriptor` is the source of canonical names, aliases, default actions, action inventories,
-purposes, and lazy runner paths. The CLI applies the selected default before dispatch. Local
+purposes, lazy runner paths, option inventory references, and opt-in validation hooks.
+`core.cli_options.CliOption` holds lightweight immutable argument metadata. Shared flags live in
+`mlx.cli_options`; feature-specific flags live in the owning mode's `cli_options` module.
+`build_parser()` composes those inventories without importing workflows or frameworks. Rich help
+renders the resulting argparse metadata, so flags, defaults and descriptions are declared once.
+The existing flat CLI syntax and parser defaults remain compatible. A descriptor's
+`validation_options` triggers its lazy `option_validator` only when relevant values are supplied;
+this also rejects feature flags used from an unsupported mode without feature-specific imports
+in the top-level CLI. Detection and tracking package exports resolve lazily to their original
+objects so option imports do not initialize workflow modules.
+
+Classification and segmentation runners use `core.configuration.normalize_image_dimensions`
+to resolve image size from explicit inputs and mode-owned defaults. Python callers need not supply
+parser-populated width/height keys. Explicit dimensions override the corresponding input-size
+component; omitted CLI defaults do not override explicit caller intent. Classification preserves
+its historical default-model size and explicit-model defaults, while explicit 256-pixel inputs
+are now honored. Their composition factories use `core.extensions.deferred_callable` so metadata
+listing never imports training, inference, OpenCV, or plotting code.
+
+The CLI applies the selected default action before dispatch. Local
 `--format json` attaches null reporters and suppresses Rich/display presenters; the top-level
 boundary serializes the returned structured result once.
 
@@ -275,6 +294,34 @@ resume validation continues to enforce the original run-spec URI.
 User-facing archive contracts and operational guidance live in
 [`docs/s3-dataset-training.md`](docs/s3-dataset-training.md).
 
+## Classification Workflow Boundaries
+
+`TrainImageClassificationModel` accepts optional `standard_dataset_loader`,
+`one_shot_dataset_loader`, `optimizer_factory`, and `artifacts` collaborators in addition to its
+existing model registry, loss factory and reporter. Dataset callables retain the mode's loader
+signatures: standard loading returns train/validation datasets and class names; one-shot loading
+returns the dataset pair. The optimizer factory follows the existing parameter/lr interface.
+`training_artifacts.ClassificationTrainingArtifacts` owns CSV history, resume-state restoration,
+model/training checkpoint writes, and model reload/update for SVDD calibration. A replacement
+implements `restore`, `write_history`, `save_model`, and `save_training`; SVDD additionally uses
+`load_model` and `update_model`. The same backend is propagated through calibration.
+The public command owns workflow ordering in private methods;
+`training.TrainClassificationEpoch` and `TrainOneShotEpoch` isolate gradient-update loops and return
+loss components, without managing datasets, checkpoints or presentation. Historical training
+functions remain thin compatibility wrappers, with checkpoint formats unchanged.
+
+`BenchmarkImageClassification` accepts `checkpoint_loader`, `dataset_loader`, and `artifact_writer`.
+The checkpoint callable returns `(model, metadata)` and accepts `model_registry` when supplied.
+`evaluation_data.ClassificationEvaluationData` owns directory resolution, standard dataset loading,
+pair construction, image indexing and image tensor loading. Pair/prediction values live in
+`evaluation_records`; historical evaluation-module imports remain available.
+`benchmark_artifacts.ClassificationBenchmarkArtifacts` owns `write_metrics`, `write_one_shot`, and
+`write_n_way`, including directory creation and lazy plotting. Both standard and one-shot/N-way
+paths use the injected collaborators; metric computation does not create output directories.
+Historical helper imports, CSV/plot names, checkpoint layouts and command return values are retained.
+Tests can run through `execute()` with synthetic datasets and in-memory writers without accessing
+real image directories, model checkpoints or plots.
+
 ## Object-Detection Providers
 
 Object detection is selected with `--provider`; `ultralytics` is the default and `libreyolo` is
@@ -282,6 +329,15 @@ the alternative. The CLI routes to
 `mlx.modes.object_detection.runner`, which resolves providers through a string registry only when
 the selected action executes. Importing the CLI or another mode therefore does not require either
 provider to be installed.
+
+`BUILTIN_PROVIDER_REGISTRY` is an immutable starting point unaffected by legacy registration.
+New integrations extend that snapshot (or an explicitly constructed `ProviderRegistry`) and pass
+it as `run_object_detection(..., provider_registry=...)` for ordinary local actions, including
+metadata listing. Commands continue to accept a provider instance directly. Research and AWS
+workflows use their own composition boundaries and reject this ordinary-provider override.
+`register_provider()` without a registry retains process-global compatibility behavior; explicit
+registries and built-in snapshots remain isolated from those mutations.
+
 
 The object-detection runner resolves omitted CLI height/width to the typed request's
 640 × 640 defaults for local and AWS actions and refreshes the derived `input_size`.
@@ -428,8 +484,8 @@ To add another provider:
 
 Provider dependencies are named optional extras so users can install only the integration they
 need. `object-detection-ultralytics` installs the Ralampay Ultralytics fork,
-`object-detection-libreyolo` pins the CSP-capable Ralampay LibreYOLO fork commit with its
-ONNX dependencies, and `object-detection` installs both. Provider packages must stay lazy so these
+`object-detection-libreyolo` follows the Ralampay LibreYOLO fork
+`release` branch with its ONNX dependencies, and `object-detection` installs both. Provider packages must stay lazy so these
 extras remain independent.
 
 The Ultralytics provider lists `yolo26`, `draxnet-ave-yolo26`, and

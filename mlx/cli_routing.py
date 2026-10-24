@@ -22,11 +22,15 @@ class ModeDescriptor:
     default_action: str
     actions: tuple[str, ...]
     purpose: str
+    options: str | None = None
+    option_validator: str | None = None
+    validation_options: tuple[str, ...] = ()
 
 
 MODE_DESCRIPTORS: tuple[ModeDescriptor, ...] = (
     ModeDescriptor(
         name="autoencoder",
+        options="mlx.modes.autoencoder.cli_options:OPTIONS",
         aliases=(),
         runner="mlx.modes.autoencoder.runner:run_autoencoder",
         default_action="ls-models",
@@ -35,6 +39,9 @@ MODE_DESCRIPTORS: tuple[ModeDescriptor, ...] = (
     ),
     ModeDescriptor(
         name="object_detection",
+        option_validator="mlx.modes.object_detection.distillation:validate_distillation_options",
+        validation_options=("distiller", "distill_loss", "distill_weight", "distill_temperature", "distill_mask_ratio"),
+        options="mlx.modes.object_detection.cli_options:OPTIONS",
         aliases=("object-detection",),
         runner="mlx.modes.object_detection.runner:run_object_detection",
         default_action="train",
@@ -43,6 +50,7 @@ MODE_DESCRIPTORS: tuple[ModeDescriptor, ...] = (
     ),
     ModeDescriptor(
         name="track",
+        options="mlx.modes.object_detection.tracking.cli_options:OPTIONS",
         aliases=("tracking",),
         runner="mlx.modes.object_detection.tracking.runner:run_tracking",
         default_action="run",
@@ -51,6 +59,7 @@ MODE_DESCRIPTORS: tuple[ModeDescriptor, ...] = (
     ),
     ModeDescriptor(
         name="image_classification",
+        options="mlx.modes.image_classification.cli_options:OPTIONS",
         aliases=("image-classification",),
         runner="mlx.modes.image_classification.runner:run_image_classification",
         default_action="test",
@@ -75,6 +84,7 @@ MODE_DESCRIPTORS: tuple[ModeDescriptor, ...] = (
     ),
     ModeDescriptor(
         name="saliency_mapping",
+        options="mlx.modes.saliency_mapping.cli_options:OPTIONS",
         aliases=("saliency-mapping",),
         runner="mlx.modes.saliency_mapping.runner:run_saliency_mapping",
         default_action="test",
@@ -83,6 +93,7 @@ MODE_DESCRIPTORS: tuple[ModeDescriptor, ...] = (
     ),
     ModeDescriptor(
         name="video_anomaly_detection",
+        options="mlx.modes.video_anomaly_detection.cli_options:OPTIONS",
         aliases=("video-anomaly-detection",),
         runner="mlx.modes.video_anomaly_detection.runner:run_video_anomaly_detection",
         default_action="ls-models",
@@ -91,6 +102,7 @@ MODE_DESCRIPTORS: tuple[ModeDescriptor, ...] = (
     ),
     ModeDescriptor(
         name="text_embedding",
+        options="mlx.modes.text_embedding.cli_options:OPTIONS",
         aliases=("text-embedding", "nlp"),
         runner="mlx.modes.text_embedding.runner:run_text_embedding",
         default_action="embed",
@@ -133,4 +145,14 @@ __all__ = [
     "UnknownModeError",
     "resolve_mode_descriptor",
     "resolve_mode_runner",
+    "validate_mode_options",
 ]
+
+
+def validate_mode_options(config: Mapping[str, Any]) -> None:
+    """Validate opt-in feature flags, including use from an unsupported mode."""
+    from mlx.core.extensions import load_reference
+
+    for descriptor in MODE_DESCRIPTORS:
+        if descriptor.option_validator and any(config.get(key) is not None for key in descriptor.validation_options):
+            load_reference(descriptor.option_validator, kind="CLI validation")(config)

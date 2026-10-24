@@ -2,8 +2,8 @@
 
 MLX is a command-line toolkit for machine-learning workflows. It provides a shared
 CLI and project conventions while keeping object detection, image classification,
-one-class image recognition, video anomaly detection, segmentation, saliency mapping, NLP, and tracking logic in
-focused modules.
+one-class image recognition, video anomaly detection, segmentation, saliency mapping,
+text embedding, vector autoencoders, and tracking logic in focused modules.
 
 ## Contents
 
@@ -20,6 +20,7 @@ focused modules.
 - [Vector autoencoders](#vector-autoencoders)
 - [Saliency mapping](#saliency-mapping)
 - [Documentation](#documentation)
+- [Development and extensions](#extending-mlx)
 
 ## Architecture
 
@@ -39,7 +40,7 @@ python3 --version
 python3 -m venv .venv
 source .venv/bin/activate
 python -m pip install --upgrade pip setuptools wheel
-python -m pip install -r requirements.txt
+python -m pip install -e .
 ```
 
 ### Windows PowerShell
@@ -49,48 +50,69 @@ py -3 --version
 py -3 -m venv .venv
 .\.venv\Scripts\Activate.ps1
 python -m pip install --upgrade pip setuptools wheel
-python -m pip install -r requirements.txt
+python -m pip install -e .
 ```
 
 If `python3` or `py -3` reports a version older than 3.10, install a supported Python
 release and use that interpreter to create `.venv`. Activate the environment again in
 each new terminal before running MLX commands.
 
-The requirements file installs the project dependencies used for development,
-notebooks, tests, and both object-detection providers. Confirm the environment after
-installation:
+The editable install makes both `mlx` and `python -m mlx` available and reflects local
+source changes. For a non-editable installation, use `python -m pip install .` instead.
+Install from this checkout; the examples below use the local project's extras.
+
+Verify the base install without a dataset, pretrained weights, or detector provider:
 
 ```bash
 python -m mlx --help
+python -m mlx --mode image-classification --action ls-models --names-only --format json
+python -m mlx --mode segmentation --action ls-models --names-only --format json
+```
+
+### Optional workflows
+
+Choose the extra needed for your workflow; these are alternatives, not a sequence of
+required installations. The base package already includes PyTorch, torchvision, NumPy,
+OpenCV, matplotlib, scikit-learn, Rich, and tqdm.
+
+| Workflow | Install from the repository root |
+| --- | --- |
+| Ultralytics detection | `python -m pip install -e ".[object-detection-ultralytics]"` |
+| LibreYOLO detection | `python -m pip install -e ".[object-detection-libreyolo]"` |
+| Both detection providers | `python -m pip install -e ".[object-detection]"` |
+| Detection and MOT tracking/evaluation | `python -m pip install -e ".[object-detection,tracking]"` |
+| S3 dataset staging or SageMaker lifecycle | `python -m pip install -e ".[aws]"` |
+| SageMaker detection lifecycle | `python -m pip install -e ".[aws,object-detection]"` |
+| Legacy GGUF CSV embedding | `python -m pip install -e ".[nlp]"` |
+| GGUF embedding with Chroma retrieval | `python -m pip install -e ".[text-embedding]"` |
+| Retrieval experiments and dataset acquisition | `python -m pip install -e ".[retrieval-benchmark]"` |
+| Class-activation maps | `python -m pip install -e ".[image-explainability]"` |
+
+The retrieval-benchmark extra does not include Chroma; add `text-embedding` when using
+`--vector-store chroma`. Provider extras that install Git URLs require Git. Native
+provider builds such as llama-cpp-python may require additional build tools; a base
+installation does not require those optional providers.
+
+LibreYOLO follows the `release` branch of the Ralampay fork; this is a moving branch,
+not a pinned commit. Record resolved dependency versions for reproducible experiments.
+
+### Development dependencies
+
+For the broad development/notebook environment, install the requirements file in
+addition to the editable package:
+
+```bash
+python -m pip install -e .
+python -m pip install -r requirements.txt
 python -m pytest -q
 ```
 
-Leave the environment when finished with:
+`requirements.txt` includes tests, notebooks, and both detector providers, but does not
+install the MLX package itself or include every optional extra. For example, add
+`.[retrieval-benchmark]` for the Hub-backed dataset acquisition workflows. See the
+[development guide](docs/development.md) for focused validation and contribution steps.
 
-```bash
-deactivate
-```
-
-The development dependency set includes NumPy, pandas, SciPy, motmetrics, ChromaDB, PyTorch,
-torchvision, OpenCV, Rich, scikit-learn, ONNX Runtime, llama-cpp-python, the Ralampay
-Ultralytics fork, and the `release` branch of the Ralampay LibreYOLO fork.
-
-Package consumers who do not use `requirements.txt` can install the project with only
-the object-detection provider they need:
-
-```bash
-python -m pip install ".[object-detection-ultralytics]"
-python -m pip install ".[object-detection-libreyolo]"
-python -m pip install ".[object-detection]"  # both providers
-python -m pip install ".[aws,object-detection]"  # SageMaker detection lifecycle
-python -m pip install ".[aws]"                   # SageMaker classification/video-anomaly lifecycle
-python -m pip install ".[nlp]"                   # GGUF CSV embedding
-python -m pip install ".[text-embedding]"        # BEIR embedding + Chroma retrieval
-python -m pip install ".[image-explainability]"  # Grad-CAM actions
-```
-
-The base installation keeps NLP and image-explanation providers optional so importing the CLI
-does not require llama.cpp, pandas, or Grad-CAM.
+Leave the virtual environment with `deactivate`.
 
 For local AWS credentials, least-privilege IAM policies, S3 preparation, and SageMaker lifecycle
 commands, see the [AWS object-detection training guide](docs/object_detection/aws-sagemaker-training.md).
@@ -107,19 +129,21 @@ All CLI modules share one command shape:
 python -m mlx --mode <mode> --action <action> [options]
 ```
 
-Available CLI modes are:
+The table shows default actions and common workflows. Run `python -m mlx --help`
+for the complete registered action inventory; action availability can depend on
+`--platform` and provider. Pass `--action` explicitly in scripts.
 
-| Mode | Actions |
-| --- | --- |
-| `object_detection` | `train`, `benchmark`, AWS `best-model`/`resume`/`status`/`stop`, `infer-camera`, `infer-video`, `convert`, `ls-models` |
-| `track` | `run`, `export-mot`, `ls-trackers` |
-| `image_classification` | `train`, `test`, `benchmark`, AWS `resume`/`status`/`stop`, `infer-image`, `cam`, `build-dataset`, `ls-models` |
-| `image_recognition_oc` | `train`, AWS `train-all`/`benchmark`/`resume`/`status`/`stop`, `infer-image`, `benchmark`, `ls-models` |
-| `video_anomaly_detection` | `train`, AWS `train-all`/`status`/`resume`, `benchmark`, `infer-video`, `ls-models` |
-| `segmentation` | `train`, `test`, `benchmark`, `infer-image`, `infer-camera`, `infer-video`, `build-dataset`, `ls-models` |
-| `text_embedding` (`text-embedding`, `nlp`) | `embed`, `benchmark` |
-| `autoencoder` | `train`, `embed`, `ls-models`, `ls-loss-functions` |
-| `saliency_mapping` (`saliency-mapping`) | `train`, `test`, `benchmark`, `infer-image`, `build-dataset`, `ls-models` |
+| Mode | Default action | Common actions |
+| --- | --- | --- |
+| `object_detection` | `train` | `train`, `fine-tune`, `benchmark`, `convert`, `infer-video`, `ls-models`; adapter research and AWS lifecycle actions |
+| `track` | `run` | `run`, `benchmark`, `build-dataset`, `export-mot`, `ls-trackers` |
+| `image_classification` | `test` | `train`, `benchmark`, `infer-image`, `cam`, `build-dataset`, `ls-models`, `ls-losses`, `ls-cam-methods`; AWS lifecycle actions |
+| `image_recognition_oc` | `ls-models` | `train`, `infer-image`, `benchmark`, `ls-models`; AWS `train-all` and lifecycle actions |
+| `video_anomaly_detection` | `ls-models` | `train`, `benchmark`, `infer-video`, `ls-models`; AWS `train-all`, `status`, `resume` |
+| `segmentation` | `test` | `train`, `benchmark`, `infer-image`, `infer-camera`, `infer-video`, `build-dataset`, `ls-models`, `ls-losses` |
+| `text_embedding` (`text-embedding`, `nlp`) | `embed` | `embed`, `benchmark`, `ls-metrics`, `ls-vector-stores`, `ls-embedding-backends`, `prepare-datasets`, `benchmark-autoencoders`, `select-autoencoder-settings` |
+| `autoencoder` | `ls-models` | `train`, `embed`, `ls-models`, `ls-loss-functions` (`ls-losses`) |
+| `saliency_mapping` (`saliency-mapping`) | `test` | `train`, `benchmark`, `infer-image`, `build-dataset`, `ls-models` |
 
 Hyphenated mode names such as `object-detection`, `image-classification`,
 `image-recognition-oc`, and `video-anomaly-detection` are also accepted. Run the following command
@@ -131,18 +155,32 @@ python -m mlx --help
 
 Mode aliases, default actions, and action inventories come from one routing registry. Use
 `--format json` for a single machine-readable local result with progress and Rich presentation
-suppressed; errors are emitted as JSON on standard error.
+suppressed. Recoverable workflow errors are emitted as JSON on standard error;
+argument-parsing errors still use the CLI usage display. AWS watch commands have
+streaming status output rather than the local single-result contract.
+
+`--help` displays parser defaults. Modes may resolve omitted options differently;
+consult the mode guide for effective defaults. For example, detection uses 640 × 640
+inputs when dimensions are omitted, and autoencoder training uses a batch size of 64.
+Use `--width`, `--height`, `--batch-size`, and `--workers` explicitly when reproducing a run.
+
+For model-name discovery, use `ls-models --names-only`; detailed `ls-models` may construct
+models to count parameters. Classification and segmentation name listing does not load
+training, inference, OpenCV, or plotting modules.
 
 ### Training from an S3 dataset ZIP
 
-All train-capable modes—including one-class image recognition—can stage a dataset ZIP directly
-from S3 for local training:
+Object detection, image classification, one-class image recognition, segmentation,
+saliency mapping, and video anomaly detection can stage a dataset ZIP from S3 for local
+training. For example:
 
 ```bash
 python -m mlx --mode video_anomaly_detection --action train \
   --dataset-s3-uri s3://my-datasets/avenue-prepared.zip \
   --output ./artifacts/avenue --model resnet18 --profile mlx-training
 ```
+
+Vector autoencoders use CSV input through `--input` rather than this ZIP-staging workflow.
 
 Install the integration with `python -m pip install ".[aws]"`. The ZIP may contain the dataset
 at its root or inside one wrapper directory, but its extracted contents must follow the selected
@@ -467,8 +505,9 @@ models, metrics, artifacts, and inference workflows.
 
 Package: `mlx.modes.saliency_mapping`
 
-This still-image salient-object-detection mode reuses every registered segmentation
-U-Net encoder and decoder with a one-channel logits head. Sigmoid probabilities and
+This still-image salient-object-detection mode has its own model registry. Its built-in
+U-Net models reuse segmentation encoders and decoders with a one-channel logits head;
+custom saliency models register directly with the saliency mode. Sigmoid probabilities and
 grayscale targets remain continuous in `[0, 1]` rather than becoming class IDs.
 
 ```bash
@@ -482,9 +521,8 @@ python -m mlx --mode saliency-mapping --action train \
 Training uses weighted BCE-with-logits + SSIM + IoU and selects the best checkpoint
 by lowest validation MAE. Benchmarks export per-image and aggregate MAE, max/mean
 F-beta (`beta²=0.3`), threshold and precision-recall data, runtime measurements,
-continuous predictions, heatmaps, overlays, and sample panels. `all-small` has
-exactly the same members as segmentation, while `all` selects every registered
-saliency architecture. See the [saliency-mapping guide](./docs/saliency-mapping/README.md).
+continuous predictions, heatmaps, overlays, and sample panels. The built-in `all-small` group matches segmentation; custom saliency registrations
+can extend its membership independently. `all` selects every registered saliency architecture. See the [saliency-mapping guide](./docs/saliency-mapping/README.md).
 
 ## Text embeddings
 
@@ -552,3 +590,5 @@ loss contracts, and the built-in MSE, MAE, and Smooth L1 losses.
 
 See the [extension inventory](docs/extensions.md), [executable tutorials](docs/tutorials/README.md),
 and canonical [architecture](ARCHITECTURE.md) for adding models, trackers, losses, metrics, and adapters.
+The [development guide](docs/development.md) covers setup, new CLI options/actions, Python
+workflow composition, and the inspect/validate/review cycle.

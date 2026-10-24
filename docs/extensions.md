@@ -1,10 +1,10 @@
-# Extension inventory and second-pass review
+# Extension inventory
 
 The governing rules are in [ARCHITECTURE.md](../ARCHITECTURE.md).
 [Executable tutorials](tutorials/README.md) demonstrate small implementations.
 Paths below are relative to `mlx/modes/` unless stated otherwise.
 
-## Zero-scatter inventory
+## Extension points
 
 GOOD means normal implementations stay local. ACCEPTABLE means the listed deliberate constraints
 remain. These are extension-locality judgments, not a score of model quality. Registry injection
@@ -13,7 +13,7 @@ is a Python API; a local alias is not automatically installed into a separate CL
 | Category / status | Contract and implementation | Registration / construction | Configuration and discovery | Tests / unrelated edits |
 | --- | --- | --- | --- | --- |
 | Tracker — GOOD | `object_detection/tracking/protocols.py`: tracking lifecycle and neutral frame values; `algorithms/` | Immutable `TrackerRegistry`, `CreateTrackingAlgorithm`; explicit class references | `--tracker`, JSON options, `ls-trackers` | Tracking contract tests and tutorial reset/update exercise; no CLI/command edits |
-| Detection provider — GOOD | `object_detection/providers.py`: provider capabilities; provider-owned adapters return neutral detections | `ProviderRegistry.register`, lazy factory references | `--provider`; metadata `ls-models --names-only` | Fake provider tests and integration tests; default alias registration only |
+| Detection provider — GOOD | `object_detection/providers.py`: provider capabilities; provider-owned adapters return neutral detections | `BUILTIN_PROVIDER_REGISTRY.register`, lazy factory references; explicit per-run registry | `--provider`; metadata `ls-models --names-only` | Fake provider tests and integration tests; pass `provider_registry` to the local runner or a provider instance to a command |
 | Detection inference adapter — GOOD | `DetectionAdapter.predict` in `object_detection/models.py`; provider adapter modules | Provider creates detector, or stream command receives it directly | Provider/model request; no separate adapter catalog | Empty-detector tutorial runs stream with fake source/sink; no tracking/stream edits |
 | Legacy incremental detector adapter — ACCEPTABLE | Provider-specific feature-module attachment, shape/freeze/checkpoint policy | LibreYOLO provider owns selection; MLX validates capability before forwarding flags | Incremental-adapter flags; no MLX neural registry/discovery | Provider signature/config fakes; real attachment tests belong to supporting provider; unsupported versions reject |
 | Research feature adapter — GOOD | MLX `object_detection/feature_adapters`: definition, construction, injection and tensor state | Immutable `FeatureAdapterRegistry`; injected through training and reconstruction | Metadata supplies attachment policy and supported parameters; built-in CLI names unchanged | Synthetic custom-adapter round trip; no method-name branching for new adapters using supported placement policies |
@@ -30,11 +30,13 @@ is a Python API; a local alias is not automatically installed into a separate CL
 | Vector store — GOOD | `text_embedding/vector_store/protocol.py`: add/query/close, best-first scores | Immutable `VectorStoreRegistry`, lazy factory | `--vector-store`, `ls-vector-stores`, persisted provider manifest | Chroma fake and optional persistence tests; future pgvector adds adapter + registration, not command/metrics changes |
 | Autoencoder — GOOD | `autoencoder/architectures/`: encode/decode/forward and dimensions | `model_registry.py:AutoencoderRegistry`; definition constructs module | `--model`, dimension/JSON options, `ls-models` | Tiny-model shape test, loss train/reload test; custom checkpoint reference needs caller registry or explicit trust |
 | Dataset — ACCEPTABLE | Mode-owned loaders and immutable values; `core.datasets` stages local/S3 input | Inject loaders/services where supported; format selection remains mode-specific | Dataset flags and typed requests | Loader validation tests; new format may require mode-owned loader changes, not a speculative universal dataset registry |
-| Representation transform — GOOD | `core.vector_transforms` numeric protocol, AE adapter | Inject transformer; text runner binds optional AE adapter | `--adapter`, normalization and representation provenance | Vector contract and AE integration tests; future PCA needs no metrics/store changes |
+| Representation transform — GOOD | `core.vector_transforms` numeric protocol, AE adapter | Inject transformer; text runner binds optional AE adapter | `--adapter`, normalization and representation provenance | Vector contract and AE integration tests; PCA, SVD, and truncation reuse the same transform boundary |
 | Spatial transforms — ACCEPTABLE | Mode-owned augmentation policies | Small fixed mode-local selection | Transform option | Existing data tests; not promoted to a global registry for three fixed policies |
 | Export/inference backend — ACCEPTABLE | Detection provider convert/create-detector capabilities; ONNX/OpenCV boundary modules | Provider factories, injected detector and frame ports | Provider, format and input flags | Provider conversion/stream tests; backend-specific capabilities stay provider-owned |
 
-## Findings and chosen resolutions
+## Previously addressed review findings
+
+These are resolved issues and the contracts that now prevent regressions, not an outstanding backlog.
 
 | Location | Concrete issue | Principle / severity | Resolution |
 | --- | --- | --- | --- |
@@ -48,6 +50,18 @@ is a Python API; a local alias is not automatically installed into a separate CL
 | Classification feature heads | Duplicate model-name selection beside catalog | Locality / medium | Head-removal paths become catalog metadata |
 | Native loss factories/training | Selectable losses could return vectors, nonfinite values or detached tensors | Testability / medium | Shared scalar contract checks; target semantics remain mode-owned |
 | Tutorials | Extension mechanics lacked executable end-to-end evidence | Discoverability / medium | Seven executable tutorials and deliberately tiny reference components |
+
+## Workflow composition
+
+Classification commands accept replaceable data and artifact collaborators. Training injects
+standard/one-shot dataset loaders, optimizer construction, and checkpoint/history storage;
+benchmarking injects checkpoint loading, evaluation data, and all report writing. Use these
+ports for alternate storage or synthetic tests instead of patching CLI globals. See
+[classification workflow boundaries](../ARCHITECTURE.md#classification-workflow-boundaries).
+
+For CLI additions, mode-owned option inventories feed both parsing and help. Metadata-only
+classification/segmentation listing defers execution dependencies, and detection/tracking
+package exports load on demand. Keep those import boundaries intact when adding extensions.
 
 ## Core and abstraction decisions
 
@@ -94,7 +108,9 @@ models. Existing training engines remain mode-owned where objectives/checkpoints
   explicit configuration design if introduced.
 - Spatial augmentation selection and mode-specific training engines remain intentionally separate.
 
-No new runtime dependency or checkpoint schema migration is introduced by this refinement.
+For changes to CLI options, new actions, and Python workflow composition, use the
+[development guide](development.md). Canonical contracts remain in
+[ARCHITECTURE.md](../ARCHITECTURE.md).
 
 ## Extending research adapters
 

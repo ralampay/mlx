@@ -26,3 +26,13 @@ def load_reference(reference: str, *, kind: str) -> Any:
         return getattr(import_module(module), attribute)
     except (ImportError, AttributeError, ValueError) as exc:
         raise MLXUserError(f"Unable to load {kind} '{reference}': {exc}") from exc
+
+
+def deferred_callable(reference: str):
+    """Defer a composition dependency until its factory or function is called."""
+    validate_reference(reference)
+
+    def invoke(*args, **kwargs):
+        return load_reference(reference, kind="workflow dependency")(*args, **kwargs)
+
+    return invoke

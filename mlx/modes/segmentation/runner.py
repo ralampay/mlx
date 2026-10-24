@@ -10,26 +10,10 @@ from mlx.core.datasets import (
 from mlx.core.commands import NullWorkflowReporter
 from mlx.core.streaming import NullFrameSink
 from mlx.core.exceptions import MLXUserError
-from mlx.core.configuration import with_explicit_options
+from mlx.core.configuration import with_explicit_options, normalize_image_dimensions
+from mlx.core.extensions import deferred_callable
 from mlx.core.ui import print_model_parameter_table
-from mlx.modes.segmentation.data import (
-    BuildSegmentationDataset,
-    normalize_segmentation_transform,
-    segmentation_dataset_root,
-)
-from mlx.modes.segmentation.evaluation import BenchmarkSegmentation
-from mlx.modes.segmentation.inference import (
-    InferSegmentationImage,
-    RunSegmentationStreamInference,
-)
-from mlx.modes.segmentation.list_models import ListSegmentationModels
 from mlx.modes.segmentation.models import DEFAULT_MODEL, MODEL_GROUP_NAMES
-from mlx.modes.segmentation.presentation import (
-    display_segmentation_result,
-    print_segmentation_config_summary,
-    RichSegmentationReporter,
-    resolve_segmentation_dataset_build_request,
-)
 from mlx.modes.segmentation.requests import (
     BuildSegmentationDatasetRequest,
     BenchmarkSegmentationRequest,
@@ -38,18 +22,64 @@ from mlx.modes.segmentation.requests import (
     SmokeTestSegmentationRequest,
     TrainSegmentationRequest,
 )
-from mlx.modes.segmentation.train import (
-    SmokeTestSegmentationModel,
-    TrainSegmentationModel,
+
+
+BuildSegmentationDataset = deferred_callable(
+    "mlx.modes.segmentation.data:BuildSegmentationDataset"
 )
-from mlx.modes.segmentation.train_all import (
-    TrainAllSegmentationModels,
-    validate_all_models_request,
+normalize_segmentation_transform = deferred_callable(
+    "mlx.modes.segmentation.data:normalize_segmentation_transform"
 )
-from mlx.modes.segmentation.utils import resolve_model_name, resolve_train_output_paths
-from mlx.modes.segmentation.streaming import (
-    OpenCVSegmentationFrameSink,
-    OpenCVSegmentationFrameSource,
+segmentation_dataset_root = deferred_callable(
+    "mlx.modes.segmentation.data:segmentation_dataset_root"
+)
+BenchmarkSegmentation = deferred_callable(
+    "mlx.modes.segmentation.evaluation:BenchmarkSegmentation"
+)
+InferSegmentationImage = deferred_callable(
+    "mlx.modes.segmentation.inference:InferSegmentationImage"
+)
+RunSegmentationStreamInference = deferred_callable(
+    "mlx.modes.segmentation.inference:RunSegmentationStreamInference"
+)
+ListSegmentationModels = deferred_callable(
+    "mlx.modes.segmentation.list_models:ListSegmentationModels"
+)
+display_segmentation_result = deferred_callable(
+    "mlx.modes.segmentation.presentation:display_segmentation_result"
+)
+print_segmentation_config_summary = deferred_callable(
+    "mlx.modes.segmentation.presentation:print_segmentation_config_summary"
+)
+RichSegmentationReporter = deferred_callable(
+    "mlx.modes.segmentation.presentation:RichSegmentationReporter"
+)
+resolve_segmentation_dataset_build_request = deferred_callable(
+    "mlx.modes.segmentation.presentation:resolve_segmentation_dataset_build_request"
+)
+SmokeTestSegmentationModel = deferred_callable(
+    "mlx.modes.segmentation.train:SmokeTestSegmentationModel"
+)
+TrainSegmentationModel = deferred_callable(
+    "mlx.modes.segmentation.train:TrainSegmentationModel"
+)
+TrainAllSegmentationModels = deferred_callable(
+    "mlx.modes.segmentation.train_all:TrainAllSegmentationModels"
+)
+validate_all_models_request = deferred_callable(
+    "mlx.modes.segmentation.train_all:validate_all_models_request"
+)
+resolve_model_name = deferred_callable(
+    "mlx.modes.segmentation.utils:resolve_model_name"
+)
+resolve_train_output_paths = deferred_callable(
+    "mlx.modes.segmentation.utils:resolve_train_output_paths"
+)
+OpenCVSegmentationFrameSink = deferred_callable(
+    "mlx.modes.segmentation.streaming:OpenCVSegmentationFrameSink"
+)
+OpenCVSegmentationFrameSource = deferred_callable(
+    "mlx.modes.segmentation.streaming:OpenCVSegmentationFrameSource"
 )
 
 DEFAULT_CONFIG = {
@@ -213,7 +243,7 @@ def run_segmentation(mode_config: dict[str, Any]) -> Any:
         raise MLXUserError(
             f"Segmentation --model {config['model']} is supported only with --action train."
         )
-    config["input_size"] = tuple(config.get("input_size", (config["width"], config["height"])))
+    config = normalize_image_dimensions(config, default=(256, 256))
     config["transform"] = normalize_segmentation_transform(config.get("transform"))
 
     if config.get("output_format") != "json":

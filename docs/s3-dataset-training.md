@@ -1,16 +1,18 @@
 # Training from an S3 Dataset ZIP
 
-MLX can train every train-capable mode from a dataset ZIP stored in Amazon S3. This applies to:
+MLX supports dataset ZIP staging from Amazon S3 for these training modes:
 
 - object detection;
 - image classification, including standard and one-shot models;
 - one-class image recognition;
 - semantic segmentation;
+- saliency mapping;
 - video anomaly detection.
 
 The option is a portable dataset source, not a new dataset format. MLX stages the archive and
 then passes a resolved local directory to the same loader used by `--dataset`. Benchmarking,
 inference, dataset building, tracking, and NLP actions do not accept `--dataset-s3-uri`.
+Vector autoencoders read embedding CSVs through `--input`; they do not use this ZIP-staging workflow.
 
 ## Installation and AWS credentials
 
@@ -210,6 +212,14 @@ segmentation-dataset/
 ```
 
 Image/mask naming and class-index requirements are unchanged from local training.
+
+### Saliency mapping
+
+Use the same paired `train/images`, `train/masks`, `val/images`, and `val/masks`
+layout as segmentation. Saliency masks represent continuous foreground targets rather than
+semantic class IDs; follow the [saliency dataset contract](saliency-mapping/README.md#dataset-and-builder)
+for mask encoding and pairing. Select `--mode saliency-mapping --action train` with
+`--dataset-s3-uri` and `--output`.
 
 ### Video anomaly detection
 

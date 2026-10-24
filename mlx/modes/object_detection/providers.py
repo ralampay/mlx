@@ -68,7 +68,8 @@ _COMPAT_PROVIDER_ENTRIES = {
     "ultralytics": "mlx.modes.object_detection.ultralytics.provider:get_provider",
 }
 PROVIDER_REGISTRY = MappingProxyType(_COMPAT_PROVIDER_ENTRIES)
-DEFAULT_PROVIDER_REGISTRY = ProviderRegistry(_COMPAT_PROVIDER_ENTRIES)
+BUILTIN_PROVIDER_REGISTRY = ProviderRegistry(_COMPAT_PROVIDER_ENTRIES)
+DEFAULT_PROVIDER_REGISTRY = BUILTIN_PROVIDER_REGISTRY
 
 
 def register_provider(
@@ -77,7 +78,12 @@ def register_provider(
     *,
     registry: ProviderRegistry | None = None,
 ) -> ProviderRegistry:
-    """Extend an injected registry; omitted registry retains legacy global registration."""
+    """Extend an explicit registry without changing other callers.
+
+    New integrations should pass a registry (or use ``ProviderRegistry.register``).
+    Omitting it retains process-global registration for legacy callers only.
+    ``BUILTIN_PROVIDER_REGISTRY`` is always an isolated starting point.
+    """
 
     global DEFAULT_PROVIDER_REGISTRY
     updated = (registry or DEFAULT_PROVIDER_REGISTRY).register(name, factory_path)

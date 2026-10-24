@@ -39,9 +39,25 @@ from mlx.modes.object_detection.requests import (
 from mlx.modes.object_detection.streaming import OpenCVFrameSink, OpenCVFrameSource
 from mlx.modes.object_detection.data import object_detection_dataset_root
 from mlx.modes.object_detection.adapter_composition import ADAPTER_ACTIONS, run_adapter_action
+from mlx.modes.object_detection.providers import ProviderRegistry, get_provider
 
 
-def run_object_detection(config: dict[str, Any]) -> Any:
+def run_object_detection(
+    config: dict[str, Any], *, provider_registry: ProviderRegistry | None = None,
+) -> Any:
+    def provider_options():
+        if provider_registry is None:
+            return {}
+        return {"provider": get_provider(config.get("provider", "ultralytics"), registry=provider_registry)}
+
+    if provider_registry is not None and (
+        config.get("platform", "local") != "local"
+        or str(config.get("action") or "train").startswith("adapter-")
+    ):
+        raise MLXUserError(
+            "An injected provider registry supports ordinary local detection actions only. "
+            "Use the research or AWS workflow's own integration configuration."
+        )
     config = with_explicit_options(config)
     defaults = ObjectDetectionRequest()
     for dimension in ("height", "width"):
@@ -76,10 +92,9 @@ def run_object_detection(config: dict[str, Any]) -> Any:
     if action in ADAPTER_ACTIONS:
         return run_adapter_action(config)
     if action == "ls-models" and config.get("names_only"):
-        from mlx.modes.object_detection.providers import get_provider
         from mlx.core.model_listing import ListComponentNames
         from mlx.core.presentation import display_component_inventory
-        provider = get_provider(config.get("provider", "ultralytics"))
+        provider = get_provider(config.get("provider", "ultralytics"), registry=provider_registry)
         names = getattr(provider, "model_names", None)
         if names is None:
             raise MLXUserError(f"Provider {provider.name} does not supply model-name metadata.")
@@ -106,7 +121,7 @@ def run_object_detection(config: dict[str, Any]) -> Any:
         result = TrainWithDatasetSource(
             request,
             trainer_factory=lambda resolved: command_type(
-                resolved, reporter=reporter
+                resolved, reporter=reporter, **provider_options()
             ),
             root_resolver=object_detection_dataset_root,
             artifact_dir_resolver=lambda resolved: Path(str(resolved.output_path)),
@@ -130,6 +145,7 @@ def run_object_detection(config: dict[str, Any]) -> Any:
         result = BenchmarkObjectDetectionModel(
             BenchmarkObjectDetectionRequest.from_config(benchmark_config),
             reporter=reporter,
+            **provider_options(),
         ).execute()
         if not is_json:
             print_benchmark_result(result)
@@ -138,11 +154,13 @@ def run_object_detection(config: dict[str, Any]) -> Any:
         return ConvertObjectDetectionModel(
             ConvertObjectDetectionRequest.from_config(config),
             reporter=reporter,
+            **provider_options(),
         ).execute()
     if action == "ls-models":
         summaries = ListObjectDetectionModels(
             ListObjectDetectionModelsRequest.from_config(config),
             reporter=reporter,
+            **provider_options(),
         ).execute()
         if not is_json:
             print_model_parameter_table(summaries, title="Object Detection Models")
@@ -155,7 +173,7 @@ def run_object_detection(config: dict[str, Any]) -> Any:
             {**config, "source": "camera" if action == "infer-camera" else "video"}
         )
         detector = CreateObjectDetector(
-            ObjectDetectionRequest.from_config(config)
+            ObjectDetectionRequest.from_config(config), **provider_options()
         ).execute()
         source = OpenCVFrameSource(
             source=stream_request.source,

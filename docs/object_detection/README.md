@@ -297,8 +297,8 @@ and stabilized Drax residual scaling at YOLOX-M neck/head scale. Its parameter b
 is intentionally below vanilla YOLOX-M; matching YOLOX-L accuracy remains an empirical
 training target rather than a guaranteed property of the architecture.
 
-The corrected paired low-data evaluation for `yolox-drax-csp-fusion-m` is
-documented in the [CSP-Drax fusion study](csp-drax-fusion-study.md).
+Use the ordinary training and benchmark commands with explicit settings to evaluate
+`yolox-drax-csp-fusion-m`. The fixed paired-study coordinator has been removed.
 
 Incremental adapter-only fine-tuning requires a LibreYOLO version whose training signature or
 trainer configuration explicitly supports the incremental-adapter controls. MLX rejects unsupported

@@ -95,6 +95,7 @@ def test_external_discovery_and_hybrid_report(baseline, tmp_path):
 def test_cli_accepts_hybrid_and_baseline():
     args = build_parser().parse_args([
         "--mode", "object-detection", "--action", "adapter-experiment",
+        "--checkpoint", "foundation.pt", "--dataset", "data", "--output", "out",
         "--adapter", "drax-hybrid", "--baseline-study", "/baseline",
         "--comparison-method", "drax-hybrid", "--device", "cuda",
     ])

@@ -88,14 +88,14 @@ class GenerateAdapterReport:
             for method, values in grouped.items()
         }
         paired = {}
-        for comparator in ("bottleneck", "conv-adapter", "full-finetune", "lora", "lora-r100", "convpass", "drax", "frozen"):
+        reference = {row["seed"]: row for row in grouped.get(self.comparison_method, [])}
+        for comparator in sorted(grouped):
             if comparator == self.comparison_method:
                 continue
-            drax = {row["seed"]: row for row in grouped.get(self.comparison_method, [])}
             other = {row["seed"]: row for row in grouped.get(comparator, [])}
             differences = [
-                float(drax[seed]["mAP50_95"]) - float(other[seed]["mAP50_95"])
-                for seed in sorted(drax.keys() & other.keys())
+                float(reference[seed]["mAP50_95"]) - float(other[seed]["mAP50_95"])
+                for seed in sorted(reference.keys() & other.keys())
             ]
             if differences:
                 paired[f"{self.comparison_method}_minus_{comparator}"] = _summary(differences)
@@ -105,7 +105,7 @@ class GenerateAdapterReport:
         )
 
         lines = [
-            "# YOLOX-L adapter study", "",
+            "# Adapter study", "",
             "Single-seed results are exploratory and do not establish statistical significance.", "",
             "| Method | Seeds | mAP50 | mAP50-95 | Trainable % | Peak CUDA MiB | Train seconds |",
             "|---|---:|---:|---:|---:|---:|---:|",

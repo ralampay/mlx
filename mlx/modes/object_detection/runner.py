@@ -38,6 +38,7 @@ from mlx.modes.object_detection.requests import (
 )
 from mlx.modes.object_detection.streaming import OpenCVFrameSink, OpenCVFrameSource
 from mlx.modes.object_detection.data import object_detection_dataset_root
+from mlx.modes.object_detection.adapter_composition import ADAPTER_ACTIONS, run_adapter_action
 
 
 def run_object_detection(config: dict[str, Any]) -> Any:
@@ -53,7 +54,8 @@ def run_object_detection(config: dict[str, Any]) -> Any:
         if config.get("platform", "local") != "local":
             raise MLXUserError("NEU-DET preparation is local only")
         from mlx.modes.object_detection.neu_det import PrepareNeuDetDataset
-        return PrepareNeuDetDataset(Path(config.get("dataset_path") or "~/Desktop/datasets/neu-det")).execute()
+        from mlx.modes.object_detection.adapter_configuration import adapter_path
+        return PrepareNeuDetDataset(adapter_path(config, "dataset_path", "--dataset")).execute()
     if config.get("action") in {"adapter-zero-shot", "adapter-zero-shot-report"}:
         if config.get("platform", "local") != "local":
             raise MLXUserError("Adapter zero-shot studies run locally only.")
@@ -71,47 +73,8 @@ def run_object_detection(config: dict[str, Any]) -> Any:
         )
 
     action = config.get("action") or "train"
-    if action in {"adapter-verify", "adapter-prepare", "adapter-calibrate", "adapter-experiment", "adapter-report", "adapter-slice-predict", "adapter-slice-report"}:
-        from mlx.modes.object_detection.adapter_experiment import (
-            AdapterExperimentRequest, RunAdapterExperiment, DEFAULT_DATASET, DEFAULT_OUTPUT,
-        )
-        from mlx.modes.object_detection.libreyolo.adapter_backend import (
-            VerifyFoundationCheckpoint,
-        )
-        from mlx.modes.object_detection.adapter_data import PrepareDawnAdapterDataset
-        from mlx.modes.object_detection.adapter_report import GenerateAdapterReport
-        if action in {"adapter-slice-predict", "adapter-slice-report"}:
-            from mlx.modes.object_detection.adapter_slices import (
-                AdapterSliceRequest,
-                CacheAdapterSlicePredictions,
-                GenerateAdapterSliceReport,
-            )
-            slice_request = AdapterSliceRequest.from_config(config)
-            command = (
-                CacheAdapterSlicePredictions(slice_request)
-                if action == "adapter-slice-predict"
-                else GenerateAdapterSliceReport(slice_request)
-            )
-            return command.execute()
-        if action == "adapter-report":
-            return GenerateAdapterReport(
-                Path(config.get("output_path") or DEFAULT_OUTPUT),
-                baseline_study=config.get("baseline_study"),
-                comparison_method=config.get("comparison_method") or "drax",
-            ).execute()
-        if action == "adapter-prepare":
-            source = Path(config.get("dataset_path") or "~/Desktop/datasets/object-detection/dawn/original")
-            destination = Path(config.get("output_path") or DEFAULT_DATASET)
-            return PrepareDawnAdapterDataset(source, destination, seed=42).execute()
-        request = AdapterExperimentRequest.from_config(config)
-        if action == "adapter-verify":
-            _, info = VerifyFoundationCheckpoint(request.model, request.checkpoint).execute()
-            return info
-        if action == "adapter-calibrate":
-            from .libreyolo.adapter_execution import CalibrateAdapterExperiment
-            return CalibrateAdapterExperiment(request).execute()
-        from .adapter_composition import create_experiment_backend
-        return RunAdapterExperiment(request, backend=create_experiment_backend()).execute()
+    if action in ADAPTER_ACTIONS:
+        return run_adapter_action(config)
     if action == "ls-models" and config.get("names_only"):
         from mlx.modes.object_detection.providers import get_provider
         from mlx.core.model_listing import ListComponentNames

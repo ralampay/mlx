@@ -10,15 +10,7 @@ import yaml
 
 from mlx.core.artifacts import sha256_file, write_json_atomic, write_csv
 from mlx.core.exceptions import MLXUserError
-from mlx.modes.object_detection.adapter_transfer import PrepareTransferStudy, RunQueuedTransferStudy
-
-
-def pilot_conditions():
-    return [{"id":name,"method":method,"rank":rank,"alpha":alpha} for name,method,rank,alpha in (
-        ("head-only","head-only",8,1.), ("ssf","ssf",8,1.),
-        ("convpass","convpass",8,1.), ("lora","lora",8,1.),
-        ("lora-r100","lora",100,12.5), ("drax-spatial","drax-spatial",8,1.),
-        ("drax-hybrid","drax-hybrid",8,1.), ("full-finetune","full-finetune",8,1.))]
+from mlx.modes.object_detection.adapter_transfer import RunQueuedTransferStudy
 
 
 class PrepareRemoteAdapterDataset:
@@ -90,36 +82,10 @@ class PrepareRemoteAdapterDataset:
             "max_labels":max(50,maximum),"split_policy":original["split_policy"],
             "overlap":{key:original.get(key) for key in ("cross_split_exact_duplicates","cross_split_source_scenes")},
             "limitations":["Original splits and documented cross-split overlap are preserved.",
-                "320-pixel pilot inputs may limit small-object detection.",
                 "Standard YOLOX preprocessing filters boxes no larger than one resized pixel; label capacity does not remove this geometric filter.",
-                "Primary COCO AP uses maxDets=100; predictions retain up to 1000 detections per image."]}
+                "Primary COCO AP uses maxDets=100."]}
         write_json_atomic(target / "manifest.json",manifest)
         return manifest
-
-
-class PrepareRemoteAdapterPilot:
-    def __init__(self, output, datasets_root, checkpoint, repositories):
-        self.output,self.datasets_root,self.checkpoint = map(Path,(output,datasets_root,checkpoint))
-        self.repositories = repositories
-
-    def execute(self):
-        if self.output.exists():
-            raise MLXUserError(f"Pilot output already exists: {self.output}")
-        self.output.mkdir(parents=True)
-        studies = []
-        for name in ("rsod","nwpu-vhr-10","ssdd","hrsid","dior"):
-            data = self.datasets_root / name / "adapter-pilot-v1"
-            manifest = PrepareRemoteAdapterDataset(self.datasets_root / name / "processed",data).execute()
-            output = self.output / name
-            PrepareTransferStudy(output,data,self.checkpoint,self.repositories,conditions=pilot_conditions(),settings={
-                "seeds":[1],"epochs":50,"image_size":320,"required_physical_batch":None,
-                "max_labels":manifest["max_labels"],"max_detections":1000,"report_gallery":False}).execute()
-            studies.append({"dataset":name,"config":str(output / "plan.json"),"runs":8})
-        config = {"output":str(self.output),"studies":studies,"total_runs":40,"seeds":[1],"epochs":50,
-            "interpretation":"Exploratory single-seed pilot. No seed-level statistical significance or equivalence claims.",
-            "foundation_checkpoint":str(self.checkpoint)}
-        write_json_atomic(self.output / "pilot.json",config)
-        return config
 
 
 class RunRemoteAdapterPilot:

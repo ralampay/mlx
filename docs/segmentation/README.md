@@ -45,9 +45,6 @@ extractors and replace their pooling/classification heads with a common U-Net
 decoder. Average and SKNet DRAX fusion are separate model identifiers so runs,
 checkpoints, and parameter counts remain unambiguous.
 
-The [KolektorSDD small DRAX study](kolektorsdd-drax-study.md) documents the
-scratch-trained CPU-focused comparison and its statistical analysis.
-
 ## Dataset Format
 
 Training expects a paired image/mask dataset root:

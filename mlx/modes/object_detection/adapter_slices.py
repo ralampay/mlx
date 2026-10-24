@@ -19,8 +19,8 @@ import torch
 
 from mlx.core.artifacts import sha256_file, write_csv, write_json_atomic
 from mlx.core.exceptions import MLXUserError
-from mlx.modes.object_detection.adapter_data import load_prepared_adapter_dataset
-from mlx.modes.object_detection.adapter_configuration import DEFAULT_DATASET, DEFAULT_OUTPUT, FOUNDATION
+from mlx.modes.object_detection.prepared_adapter_data import load_prepared_adapter_dataset
+from mlx.modes.object_detection.adapter_configuration import adapter_path
 from mlx.modes.object_detection.adapter_baselines import recorded_baseline_runs
 from mlx.modes.object_detection.libreyolo.adapter_backend import (
     VerifyFoundationCheckpoint,
@@ -51,8 +51,8 @@ class AdapterSliceRequest:
     """Inputs shared by prediction caching and CPU slice reporting."""
 
     output: Path
-    checkpoint: Path
-    dataset: Path
+    checkpoint: Path | None
+    dataset: Path | None
     device: str = "cuda"
     image_size: int = 640
     batch_size: int = 8
@@ -76,11 +76,9 @@ class AdapterSliceRequest:
         methods = _parse_strings(config.get("methods"))
         seeds = _parse_ints(config.get("experiment_seeds"))
         return cls(
-            output=Path(config.get("output_path") or DEFAULT_OUTPUT).expanduser().resolve(),
-            checkpoint=Path(
-                config.get("model_path") or FOUNDATION
-            ).expanduser().resolve(),
-            dataset=Path(value("dataset_path", DEFAULT_DATASET) or DEFAULT_DATASET).expanduser().resolve(),
+            output=adapter_path(config, "output_path", "--output"),
+            checkpoint=adapter_path(config, "model_path", "--checkpoint", required=config.get("action") != "adapter-slice-report"),
+            dataset=adapter_path(config, "dataset_path", "--dataset", required=config.get("action") != "adapter-slice-report"),
             device=str(value("device", "cuda") or "cuda"),
             image_size=int(value("height", 640) or 640),
             batch_size=int(value("batch_size", 8) or 8),
@@ -113,9 +111,9 @@ class AdapterSliceRequest:
         if self.seeds and any(seed < 0 for seed in self.seeds):
             raise MLXUserError("Slice seeds must be nonnegative integers")
         if prediction:
-            if not self.checkpoint.is_file():
+            if self.checkpoint is None or not self.checkpoint.is_file():
                 raise MLXUserError(f"Foundation checkpoint does not exist: {self.checkpoint}")
-            if not self.dataset.is_dir():
+            if self.dataset is None or not self.dataset.is_dir():
                 raise MLXUserError(f"Prepared adapter dataset does not exist: {self.dataset}")
             if self.image_size < 32 or self.image_size % 32:
                 raise MLXUserError("Slice evaluation image size must be a multiple of 32")

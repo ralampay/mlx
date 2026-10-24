@@ -148,6 +148,7 @@ def test_slice_request_ignores_unrelated_global_parser_defaults(tmp_path):
             "workers": 4,
             "device": "cpu",
             "dataset_path": "./tmp/dataset",
+            "action": "adapter-slice-report",
             "_explicit_options": {"output_path"},
         }
     )

@@ -24,13 +24,13 @@ from mlx.modes.object_detection.libreyolo.adapter_backend import require_experim
 
 def test_adapter_config_cli_and_validation(tmp_path):
     request = AdapterExperimentRequest.from_config(
-        {"model": "yolox-l", "dataset_path": str(tmp_path), "output_path": str(tmp_path / "out")}
+        {"model": "yolox-l", "model_path": str(tmp_path / "foundation.pt"), "dataset_path": str(tmp_path), "output_path": str(tmp_path / "out")}
     )
     assert request.methods == ("drax",)
-    assert request.checkpoint.name == "foundational-yolox-l.pt"
+    assert request.checkpoint == tmp_path / "foundation.pt"
     assert request.gradient_accumulation == 1
     with pytest.raises(MLXUserError):
-        AdapterExperimentRequest.from_config({"model": "yolox-l", "methods": "made-up"})
+        AdapterExperimentRequest.from_config({"model_path": "foundation.pt", "dataset_path": "data", "output_path": "out", "methods": "made-up"})
     options = build_parser().parse_args(
         [
             "--mode", "object-detection", "--action", "adapter-experiment",
@@ -56,7 +56,7 @@ def test_cuda_required_failure_is_explicit(monkeypatch):
 
 
 def test_adapter_dataset_explicit_path():
-    explicit = AdapterExperimentRequest.from_config({"dataset_path": "/custom", "_explicit_options": {"dataset_path"}})
+    explicit = AdapterExperimentRequest.from_config({"dataset_path": "/custom", "model_path": "foundation.pt", "output_path": "out", "_explicit_options": {"dataset_path", "model_path", "output_path"}})
     assert explicit.dataset == Path("/custom")
 
 
@@ -217,6 +217,7 @@ def test_freezing_verification_detects_batchnorm_buffer_updates(tmp_path):
 def test_residual_fusion_cli_configuration():
     options = build_parser().parse_args([
         '--mode', 'object-detection', '--action', 'adapter-experiment',
+        '--checkpoint', 'foundation.pt', '--dataset', 'data', '--output', 'out',
         '--adapter', 'drax-residual-fusion', '--adapter-reduction', '16',
         '--adapter-alpha', '1', '--adapter-target', 'neck',
     ])

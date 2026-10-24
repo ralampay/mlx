@@ -15,7 +15,7 @@ from mlx.modes.object_detection.adapter_baselines import LoadAdapterBaseline, ba
 from mlx.modes.object_detection.feature_adapters import DEFAULT_FEATURE_ADAPTER_REGISTRY
 from mlx.modes.object_detection.prepared_adapter_data import load_prepared_adapter_dataset
 from mlx.modes.object_detection.adapter_tensors import _flatten_tensors
-from mlx.modes.object_detection.adapter_configuration import FOUNDATION, DEFAULT_DATASET, DEFAULT_OUTPUT
+from mlx.modes.object_detection.adapter_configuration import adapter_path
 
 
 TRAINING_STRATEGIES = ("frozen", "head-only", "full-finetune")
@@ -66,9 +66,7 @@ class AdapterExperimentRequest:
             return config.get(name, default) if ("_explicit_options" not in config or name in explicit) else default
 
         model = config.get("model") or "yolox-l"
-        checkpoint = config.get("model_path") or (FOUNDATION if model == "yolox-l" else None)
-        if checkpoint is None:
-            raise MLXUserError("Provide --checkpoint for this model")
+        checkpoint = adapter_path(config, "model_path", "--checkpoint")
         methods_text = config.get("methods") or config.get("adapter") or "drax"
         methods = tuple(dict.fromkeys(item.strip() for item in methods_text.split(",") if item.strip()))
         seeds_text = config.get("experiment_seeds") or str(
@@ -80,9 +78,9 @@ class AdapterExperimentRequest:
             raise MLXUserError("--experiment-seeds must be comma-separated integers") from exc
         request = cls(
             model=model,
-            checkpoint=Path(checkpoint).expanduser().resolve(),
-            dataset=Path(value("dataset_path", DEFAULT_DATASET) or DEFAULT_DATASET).expanduser().resolve(),
-            output=Path(config.get("output_path") or DEFAULT_OUTPUT).expanduser().resolve(),
+            checkpoint=checkpoint,
+            dataset=adapter_path(config, "dataset_path", "--dataset"),
+            output=adapter_path(config, "output_path", "--output"),
             methods=methods,
             seeds=seeds,
             epochs=int(value("epochs", 12)),

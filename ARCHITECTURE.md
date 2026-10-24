@@ -5,10 +5,6 @@ dataset formats remain in `README.md` and the mode guides under `docs/`.
 
 ## Design Goals
 
-The CSP-Drax comparison supports explicit scratch initialization through `--scratch`.
-It dispatches `TrainObjectDetectionRequest` with no checkpoint and `pretrained=False`,
-uses a separate scratch manifest, and regenerates the statistical report after each run.
-
 MLX is organized so that machine-learning workflows can be invoked from the CLI, Python,
 tests, or another application without rewriting their orchestration. The governing rules are:
 
@@ -35,30 +31,14 @@ provider-owned. Historical source snapshots are never rewritten during migration
 
 `SnapshotRepositories` in `mlx.core.repository_snapshot` owns immutable source
 copies and checksums, shared by transfer and same-taxonomy study preparation.
-`RunDawnPriorityStudy` coordinates the explicitly paired same-taxonomy recipe,
-injecting calibration, experiment, report and export commands. Process holding
-and restoration are OS-specific launcher responsibilities, not training logic.
-The optional `include_lora100` recipe flag adds five rank-100/alpha-12.5 runs
-under a separate same-taxonomy study after the rank-eight comparison. It uses
-the same calibration, smoke and protocol checks. `GenerateAdapterReport` accepts
-explicit `extra_runs` for combined reporting, rejecting duplicate method/seed
-identities. Rank-100 rows have a reporting alias and a `source_run` path; their
-original model method remains LoRA. Original dispatchers resume after this stage.
-The optional Python request field `seed_adapter_initialization` seeds every
-method before construction when enabled; its default preserves legacy behavior.
-
-`RunPairedDawnStudy` coordinates a fixed 80-run overall-AP study using the existing
-calibration and experiment commands: fusion, rank-four LoRA, rank-100 LoRA and
-full fine-tuning, with twenty fresh paired seeds. Separate condition roots retain
-native model-method identities; reporting aliases carry explicit source paths.
-`GeneratePairedDawnReport` owns final paired TOST and directional superiority
-inference, applying one Holm correction across six prespecified claims. Interim
-reports are descriptive only; final claims require all planned observations.
-The priority launcher also supports identity-checked, in-memory suspended jobs.
-Only explicitly stopped CUDA clients are allowed alongside calibration, accounting
-for their retained VRAM. Its cleanup resumes held processes after the child exits,
-including failure. This preserves live state, not durability across host reboots
-or SIGKILL; the held-process manifest supports manual recovery.
+Fixed DAWN/CSP-Drax study coordinators and machine-specific study launchers have been removed.
+Callers supply paths and experiment settings to the reusable commands. Adapter
+implementations, reconstruction, generic training, reporting and dataset conversion
+remain mode-owned. The removed DAWN priority/paired and CSP-Drax comparison workflows
+have no compatibility entrypoints; their model implementations remain available.
+`GenerateAdapterReport` derives paired comparators from completed input methods,
+including custom aliases in `extra_runs`, rather than a fixed study method list.
+Duplicate method/seed identities remain errors.
 
 `ExportBestAdapterDetector` selects a seed only by validation AP and writes the
 tensor-only `mlx-yolox-adapter-detector-v1` format after an exact CUDA reload
@@ -119,20 +99,10 @@ compatibility. Baselines remain read-only; new snapshots, ten runs, combined rep
 and galleries live in a separate study. Combined reports consistently use cached COCO
 scores, retain native metrics separately, and declare four paired ablation comparisons.
 
-`remote_sensing_pilot` composes the same transfer-study lifecycle for already-prepared
-RSOD, NWPU-VHR-10, SSDD, HRSID and DIOR datasets. Dataset views link individual
-images/labels, preserve source COCO annotations and splits, verify source image hashes,
-and record known cross-split overlap. The pilot script is a thin command entrypoint;
-each dataset has immutable source/foundation snapshots and an independent fail-stop
-queue. Eight conditions use one seed, with calibrated common physical batch and
-effective batch eight per dataset. This is exploratory, not seed-level confirmation.
-Transfer requests expose label capacity and detection limits to the LibreYOLO boundary.
-YOLOX defaults remain 50 labels; dense pilots set capacity from annotation counts
-and retain up to 1000 predictions. Primary COCO AP retains standard maxDets=100.
-The existing one-pixel resized-box filter still applies. Remote reports use a single
-image group rather than NEU filename categories; expensive full galleries may be
-deferred while retaining predictions for later analysis. Parent aggregates identify
-each dataset explicitly and are updated after each dataset queue completes.
+`remote_sensing_pilot` retains dataset-view conversion and execution of caller-supplied
+study queues. It does not prescribe a dataset inventory, condition matrix, seed budget
+or training schedule. Dataset views preserve annotations, splits and source hashes.
+Transfer requests expose label capacity and detection limits at the provider boundary.
 
 `adapter_queue` isolates CUDA client filtering and read-only completed-study reuse.
 Nautilus is excluded only when its exact system executable is verified through
@@ -206,7 +176,6 @@ mlx/
     │   ├── adapter_experiment.py typed request and backend-independent experiment orchestration
     │   ├── adapter_report.py     comparative CSV and paired-seed Markdown report command
     │   ├── adapter_slices.py     post-training prediction cache and targeted slice-analysis commands
-    │   ├── comparison_experiment.py paired low-data YOLOX/CSP-Drax preparation, execution, and statistical report commands
     │   ├── artifacts.py          shared checkpoint discovery and export-path rules
     │   ├── streaming.py          frame-sink adapter and compatibility frame-source re-exports
     │   ├── aws/                  SageMaker submission, recovery, and comparison commands
@@ -234,7 +203,7 @@ The primary workflow commands are:
 | Segmentation | `TrainSegmentationModel`, `TrainAllSegmentationModels`, `GenerateSegmentationSamples`, `SmokeTestSegmentationModel`, `BenchmarkSegmentation`, `InferSegmentationImage`, `RunSegmentationStreamInference`, `BuildSegmentationDataset`, `ListSegmentationModels` |
 | Saliency mapping | `TrainSaliencyModel`, `TrainSaliencyModelGroup`, `GenerateSaliencySamples`, `SmokeTestSaliencyModels`, `BenchmarkSaliencyMapping`, `BenchmarkSaliencyModelGroup`, `InferSaliencyImage`, `BuildSaliencyDataset`, `ListSaliencyModels` |
 | Video anomaly detection | `TrainVideoAnomalyModel`, `BenchmarkVideoAnomalyModel`, `InferVideoAnomaly`, `ListVideoAnomalyModels`, AWS all-model submit/status/resume commands |
-| Object detection | `TrainObjectDetectionModel`, `FineTuneObjectDetectionModel`, `BenchmarkObjectDetectionModel`, `CreateObjectDetector`, `ConvertObjectDetectionModel`, `ListObjectDetectionModels`, `RunObjectDetectionStream`, `PrepareDawnAdapterDataset`, `VerifyFoundationCheckpoint`, `CalibrateAdapterBatchSize`, `RunAdapterExperiment`, `GenerateAdapterReport`, `CacheAdapterSlicePredictions`, `GenerateAdapterSliceReport`, `PrepareCSPDraxComparison`, `RunCSPDraxComparison`, `AnalyzeCSPDraxComparison`, AWS submit/status/stop/resume and best-model locator commands |
+| Object detection | `TrainObjectDetectionModel`, `FineTuneObjectDetectionModel`, `BenchmarkObjectDetectionModel`, `CreateObjectDetector`, `ConvertObjectDetectionModel`, `ListObjectDetectionModels`, `RunObjectDetectionStream`, `PrepareDawnAdapterDataset`, `VerifyFoundationCheckpoint`, `CalibrateAdapterBatchSize`, `RunAdapterExperiment`, `GenerateAdapterReport`, `CacheAdapterSlicePredictions`, `GenerateAdapterSliceReport`, AWS submit/status/stop/resume and best-model locator commands |
 | Tracking | `CreateTrackingAlgorithm`, `RunObjectDetectionTrackingCommand`, `RunTrackByDetectionCommand`, `RunTrackingVideo`, `PrepareTrackingBenchmarks`, `CompileTrackingVideo`, `BenchmarkTrackingDataset`, `ExportMOTFromClassAwareTracking`, `BenchmarkMOTTracking`, `ExportTrackingReplay` |
 | Text embedding | `EmbedTextCommand`, `BenchmarkTextEmbeddingCommand`, `PrepareRetrievalDatasets`, `BenchmarkAutoencoderRetrieval`, `TransformEmbeddingArtifacts`, `AnalyzeAutoencoderRetrieval`, `BenchmarkConfiguredAutoencoders`, `SelectAutoencoderExperimentSettings`; legacy `EmbedCsvCommand` remains supported |
 | Autoencoder | `TrainAutoencoder`, `EmbedAutoencoder`, `ListAutoencoderModels`, `ListAutoencoderLosses` |
@@ -1072,8 +1041,13 @@ coordinates calibration outside the runner. Historical helper imports remain laz
 
 `prepared_adapter_data` reads manifests independently of dataset provenance. The old `adapter_data`
 loader retains its taxonomy default; explicit experiment inputs use manifest classes and compare
-against the foundation for same-taxonomy training. Historical CLI path defaults are isolated in
-`adapter_configuration`; Python request objects continue to take explicit paths.
+against the foundation for same-taxonomy training. `adapter_configuration` requires explicit checkpoint, dataset and output paths,
+rejecting unrelated parser defaults. `adapter_composition` dispatches adapter actions
+and constructs only their required dependencies. Verification needs a checkpoint;
+reports need an output directory; prediction and training also need a dataset.
+Cached slice reports do not require the original checkpoint or dataset. Slice prediction
+uses the dataset-neutral prepared-manifest loader, validating taxonomy against the
+supplied foundation rather than the historical DAWN classes.
 
 The same registry is passed to `ApplyYOLOXAdapter`, `LoadAdaptedYOLOX`, `LibreYOLOProvider`, `LoadAdapterDetector`,
 `ExportBestAdapterDetector`, `ReconstructAdapterModel`, calibration and slice prediction/report
@@ -1256,9 +1230,9 @@ SVD fit counts, artifacts, and provenance remain distinct from PCA. Selection me
 retained in reports; two-sided difference tests have a separate Holm family from
 non-inferiority and prespecified secondary tests. Confidence intervals remain unadjusted.
 
-The orthogonal experiment recipe is exploratory: the existing ten datasets have already
-informed model selection. Its launch scripts use `scripts/experiment-job.py`, a POSIX-only
-process supervisor outside ML workflow code. Foreground and background execution share
+`scripts/experiment-job.py` is a reusable POSIX-only process supervisor outside ML workflow code.
+Fixed autoencoder recipes and their shell launchers have been removed; callers supply
+configuration through the existing benchmark CLI. Foreground and background execution share
 an advisory per-output lock. Detached workers use nohup, a new session, disconnected stdin,
 timestamped logs, PID/child PID metadata, explicit thread settings, and exit-status records.
 The experiment child inherits the lock descriptor so a lost supervisor does not permit a

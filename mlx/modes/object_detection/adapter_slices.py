@@ -15,17 +15,13 @@ from typing import Any, Callable, Iterable, Mapping, Sequence
 
 import numpy as np
 from PIL import Image
-import torch
 
 from mlx.core.artifacts import sha256_file, write_csv, write_json_atomic
 from mlx.core.exceptions import MLXUserError
+from mlx.modes.object_detection.adapter_slice_contracts import AdapterSliceBackend
 from mlx.modes.object_detection.prepared_adapter_data import load_prepared_adapter_dataset
 from mlx.modes.object_detection.adapter_configuration import adapter_path
 from mlx.modes.object_detection.adapter_baselines import recorded_baseline_runs
-from mlx.modes.object_detection.libreyolo.adapter_backend import (
-    VerifyFoundationCheckpoint,
-    require_experiment_device,
-)
 
 
 WEATHER_GROUPS = {
@@ -33,7 +29,6 @@ WEATHER_GROUPS = {
     "precipitation": ("rainstorm", "snowstorm"),
     "airborne-particulate": ("sandstorm", "dust-tornado"),
 }
-COMPARATORS = ("lora", "convpass", "conv-adapter", "bottleneck", "full-finetune", "frozen", "drax")
 SLICE_FIELDS = (
     "method", "seed", "slice_family", "slice_name", "image_count", "object_count",
     "low_support", "mAP50", "mAP50_95", "precision", "recall", "AP_small",
@@ -115,14 +110,12 @@ class AdapterSliceRequest:
                 raise MLXUserError(f"Foundation checkpoint does not exist: {self.checkpoint}")
             if self.dataset is None or not self.dataset.is_dir():
                 raise MLXUserError(f"Prepared adapter dataset does not exist: {self.dataset}")
-            if self.image_size < 32 or self.image_size % 32:
-                raise MLXUserError("Slice evaluation image size must be a multiple of 32")
+            if self.image_size < 1:
+                raise MLXUserError("Slice evaluation image size must be positive")
             if self.batch_size < 1 or self.workers < 0:
                 raise MLXUserError(
                     "Slice evaluation requires positive batch size and nonnegative workers"
                 )
-            if not self.device.lower().startswith("cuda"):
-                raise MLXUserError("Adapter slice prediction generation requires --device cuda")
 
 
 @dataclass(frozen=True)
@@ -316,19 +309,24 @@ class CacheAdapterSlicePredictions:
         self,
         request: AdapterSliceRequest,
         *,
-        prediction_writer_factory: Callable[[Mapping[str, Any], torch.device], Callable] | None = None,
+        backend: AdapterSliceBackend | None = None,
+        prediction_writer_factory: Callable[[Mapping[str, Any], Any], Callable] | None = None,
         registry=None,
     ):
         self.request = request
+        self.backend = backend
         self.prediction_writer_factory = prediction_writer_factory
         self.registry = registry
 
     def execute(self) -> dict[str, Any]:
         request = self.request
         request.validate(prediction=True, registry=self.registry)
-        device = require_experiment_device(request.device)
-        model_name = str(_load_json(request.output / "study.json").get("model") or "yolox-l")
-        _, foundation = VerifyFoundationCheckpoint(model_name, request.checkpoint).execute()
+        backend = self.backend
+        if backend is None:
+            from .adapter_composition import create_slice_backend
+            backend = create_slice_backend()
+        model_name = _load_json(request.output / "study.json").get("model")
+        foundation, device = backend.prepare(request, model_name)
         dataset = load_prepared_adapter_dataset(request.dataset)
         classes = [foundation["classes"][index] for index in range(foundation["nc"])]
         if dataset["classes"] != classes:
@@ -356,17 +354,11 @@ class CacheAdapterSlicePredictions:
                 if _load_json(source / "sliced-analysis" / f"ground_truth_{split}.json") != payload:
                     raise MLXUserError(f"Baseline {split} ground truth differs: {source}")
 
-        if self.prediction_writer_factory is None:
-            from mlx.modes.object_detection.libreyolo.adapter_slice_backend import (
-                LibreYOLOAdapterPredictionWriter,
-            )
-
-            factory = lambda current, current_device: LibreYOLOAdapterPredictionWriter(
-                request, current, current_device, registry=self.registry
-            )
-        else:
-            factory = self.prediction_writer_factory
-        writer = factory(foundation, device)
+        writer = (
+            self.prediction_writer_factory(foundation, device)
+            if self.prediction_writer_factory is not None
+            else backend.create_writer(request, foundation, device, registry=self.registry)
+        )
         signature_cache: dict[tuple[str, str], tuple[Path, Mapping[str, Any]]] = {}
         generated = reused = 0
         frozen_run = next(run for run in runs if run.method == "frozen")
@@ -900,11 +892,17 @@ class GenerateAdapterSliceReport:
             return quality_cache[key]
 
         paired = []
-        for comparator in COMPARATORS:
+        for comparator in sorted({row["method"] for row in rows}):
             if comparator == candidate:
                 continue
-            if not all((comparator, value) in prediction_cache for value in seeds):
-                continue
+            comparator_seeds = {int(row["seed"]) for row in rows if row["method"] == comparator}
+            if comparator_seeds != set(seeds) or not all(
+                (method, value) in prediction_cache
+                for method in (candidate, comparator) for value in seeds
+            ):
+                raise MLXUserError(
+                    f"Incomplete paired seed coverage for {candidate} versus {comparator}."
+                )
             for index, (family, name, image_ids, categories, area_label) in enumerate(slice_specs):
                 differences = [
                     float(by_key[(candidate, value, family, name)]["mAP50_95"])

@@ -48,10 +48,8 @@ class FakeTrainer:
         )
         paths["output_dir"].mkdir(parents=True, exist_ok=True)
         paths["checkpoint_path"].write_bytes(b"checkpoint")
-        paths["training_csv_path"].write_text(
-            "epoch,val_loss\n1,0.4\n2,0.2\n",
-            encoding="utf-8",
-        )
+        from mlx.modes.segmentation.training_results import SegmentationTrainingResult
+        return SegmentationTrainingResult(paths["checkpoint_path"], 0.2, paths["output_dir"])
 
 
 class FakeBenchmark:
@@ -343,3 +341,24 @@ def test_model_all_is_rejected_outside_training(model_group: str) -> None:
         segmentation_runner.run_segmentation(
             {"action": "benchmark", "model": model_group}
         )
+
+
+def test_batch_consumes_trainer_result_without_prescribed_artifact_layout(tmp_path):
+    from types import SimpleNamespace
+    from mlx.modes.segmentation.training_results import SegmentationTrainingResult
+    request = _request(tmp_path)
+    checkpoint = tmp_path / "external-artifacts" / "selected.weights"
+    checkpoint.parent.mkdir()
+    checkpoint.write_bytes(b"weights")
+    training = SegmentationTrainingResult(checkpoint, 0.3, checkpoint.parent)
+    captured = []
+    def benchmark(request, reporter):
+        captured.append(request.model_path)
+        return SimpleNamespace(execute=lambda: {"mean_foreground_dice": 0.8})
+    result = TrainAllSegmentationModels(request, model_names=["custom"],
+        trainer_factory=lambda request, reporter: SimpleNamespace(execute=lambda: training),
+        benchmark_factory=benchmark).execute()
+    assert captured == [str(checkpoint)]
+    assert result.results[0].best_validation_loss == 0.3
+    assert result.results[0].output_dir == checkpoint.parent
+    assert not list(tmp_path.rglob("training.csv"))

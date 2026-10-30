@@ -22,6 +22,23 @@ from mlx.modes.object_detection.libreyolo.adapter_loading import (
 )
 
 
+class LibreYOLOSliceBackend:
+    """Provider-owned foundation verification and CUDA prediction construction."""
+
+    def prepare(self, request, model_name):
+        from .adapter_backend import require_experiment_device
+        if not request.device.lower().startswith("cuda"):
+            raise MLXUserError("Adapter slice prediction generation requires --device cuda")
+        if request.image_size < 32 or request.image_size % 32:
+            raise MLXUserError("Slice evaluation image size must be a multiple of 32")
+        device = require_experiment_device(request.device)
+        _, foundation = VerifyFoundationCheckpoint(model_name or "yolox-l", request.checkpoint).execute()
+        return foundation, device
+
+    def create_writer(self, request, foundation, device, *, registry=None):
+        return LibreYOLOAdapterPredictionWriter(request, foundation, device, registry=registry)
+
+
 class LibreYOLOAdapterPredictionWriter:
     """Reconstruct one study checkpoint and cache native COCO predictions."""
 

@@ -3,7 +3,7 @@ from __future__ import annotations
 import platform
 import time
 from pathlib import Path
-from typing import Any
+from typing import Any, Callable
 
 import cv2
 import numpy as np
@@ -11,8 +11,9 @@ import torch
 from torch import nn, optim
 from torch.utils.data import DataLoader
 
-from mlx.core.commands import NullWorkflowReporter, WorkflowReporter, emit
+from mlx.core.commands import Command, NullWorkflowReporter, WorkflowReporter, emit
 from mlx.core.exceptions import MLXUserError
+from mlx.core.training_data import TrainingDatasets
 from mlx.core.configuration import resolve_data_loader_workers
 from mlx.core.losses import validate_scalar_loss
 from mlx.modes.segmentation.data import (
@@ -34,6 +35,7 @@ from mlx.modes.segmentation.research import (
 )
 from mlx.modes.segmentation.requests import SegmentationRequest
 from mlx.modes.segmentation.samples import GenerateSegmentationSamples
+from mlx.modes.segmentation.training_results import SegmentationTrainingResult
 from mlx.modes.segmentation.utils import (
     load_training_checkpoint,
     resolve_class_names,
@@ -52,9 +54,15 @@ class TrainSegmentationModel:
         reporter: WorkflowReporter | None = None,
         model_registry=None,
         loss_factory=build_loss,
+        dataset_loader: Callable[[dict[str, Any]], TrainingDatasets] | None = None,
+        optimizer_factory: Callable[..., torch.optim.Optimizer] | None = None,
+        sample_factory: Callable[..., Command] | None = None,
     ) -> None:
         self.model_registry = model_registry
         self.loss_factory = loss_factory
+        self.dataset_loader = self._load_datasets if dataset_loader is None else dataset_loader
+        self.optimizer_factory = optimizer_factory if optimizer_factory is not None else optim.Adam
+        self.sample_factory = sample_factory if sample_factory is not None else GenerateSegmentationSamples
         if isinstance(config, SegmentationRequest):
             config = config.to_config()
         self.config = dict(config)
@@ -73,26 +81,19 @@ class TrainSegmentationModel:
         self.paths = resolve_train_output_paths(config, model_name=self.model_name)
         self.reporter = reporter or NullWorkflowReporter()
 
-    def execute(self) -> None:
+    def execute(self) -> SegmentationTrainingResult:
         if self.epochs < 1:
             raise MLXUserError("--epochs must be at least 1 for segmentation training.")
         if self.num_classes < 2:
             raise MLXUserError("--num-classes must be at least 2 for segmentation training.")
-        test_split_path = resolve_optional_segmentation_test_split(
-            self.config["dataset_path"]
-        )
+        datasets = self.dataset_loader(self.config)
+        test_split_path = datasets.sample_source
         emit(
             self.reporter,
             "info",
             f"Starting segmentation training on device={self.device} for {self.epochs} epochs"
         )
-        train_dataset, val_dataset = load_segmentation_datasets(
-            self.config["dataset_path"],
-            input_size=self.input_size,
-            num_classes=self.num_classes,
-            colored=self.colored,
-            transform=self.transform,
-        )
+        train_dataset, val_dataset = datasets.train, datasets.validation
         train_loader = DataLoader(
             train_dataset,
             batch_size=self.batch_size,
@@ -112,7 +113,7 @@ class TrainSegmentationModel:
             **({"registry": self.model_registry} if self.model_registry is not None else {}),
         ).to(self.device)
         criterion = self.loss_factory(self.config).to(self.device)
-        optimizer = optim.Adam(model.parameters(), lr=self.learning_rate)
+        optimizer = self.optimizer_factory(model.parameters(), lr=self.learning_rate)
         start_epoch, best_val_loss, best_dice, history = self._prepare_state(
             model,
             optimizer,
@@ -156,7 +157,26 @@ class TrainSegmentationModel:
             f"Segmentation training complete; research artifacts are in {self.paths['output_dir']}"
         )
 
-    def _generate_test_samples(self, test_split_path: Path) -> None:
+        losses = [best_val_loss, *(float(row["val_loss"]) for row in history)]
+        return SegmentationTrainingResult(
+            checkpoint_path=self.paths["checkpoint_path"],
+            best_validation_loss=min(losses),
+            output_dir=self.paths["output_dir"],
+            last_checkpoint_path=self.paths["last_checkpoint_path"],
+            best_dice_checkpoint_path=self.paths["dice_checkpoint_path"],
+        )
+
+    @staticmethod
+    def _load_datasets(config: dict[str, Any]) -> TrainingDatasets:
+        sample_source = resolve_optional_segmentation_test_split(config["dataset_path"])
+        train, validation = load_segmentation_datasets(
+            config["dataset_path"], input_size=tuple(config.get("input_size", (256, 256))),
+            num_classes=int(config.get("num_classes", 2)), colored=bool(config.get("colored", True)),
+            transform=str(config.get("transform", "resize")),
+        )
+        return TrainingDatasets(train, validation, sample_source)
+
+    def _generate_test_samples(self, test_split_path: Any) -> None:
         checkpoint_path = self.paths["dice_checkpoint_path"]
         if not checkpoint_path.is_file():
             checkpoint_path = self.paths["checkpoint_path"]
@@ -166,7 +186,7 @@ class TrainSegmentationModel:
                 "Best-Dice checkpoint is unavailable; using the best-validation-loss "
                 "checkpoint for segmentation test samples.",
             )
-        GenerateSegmentationSamples(
+        self.sample_factory(
             self.config,
             checkpoint_path=checkpoint_path,
             test_split_path=test_split_path,

@@ -12,6 +12,7 @@ from urllib.parse import quote, urlparse
 from uuid import uuid4
 
 from mlx.core.exceptions import MLXUserError
+from mlx.core.aws.operations import FindActiveTrainingAttempt, S3JsonStore, SubmitTrainingJob
 from mlx.modes.object_detection.aws.clients import AwsClientBundle
 from mlx.modes.object_detection.aws.config import AwsTrainingConfig
 from mlx.modes.object_detection.aws.image import PublishSageMakerImage, source_digest
@@ -637,46 +638,20 @@ class SageMakerTrainingService:
         return max(epochs)
 
     def _create_training_job(self, request: Mapping[str, Any]) -> Mapping[str, Any]:
-        delays = (0, 2, 4, 8, 16)
-        for index, delay in enumerate(delays):
-            if delay:
-                time.sleep(delay)
-            try:
-                return self.sagemaker.create_training_job(**request)
-            except self._client_error as exc:
-                error = exc.response.get("Error", {})
-                message = str(error.get("Message", "")).lower()
-                role_propagation = (
-                    error.get("Code") == "ValidationException"
-                    and ("role" in message or "assume" in message)
-                )
-                if not role_propagation or index == len(delays) - 1:
-                    raise self._translate("training job submission", exc) from exc
-            except self._boto_error as exc:
-                raise self._translate("training job submission", exc) from exc
-        raise MLXUserError("AWS training job submission failed after IAM propagation retries.")
+        return SubmitTrainingJob(
+            self.sagemaker, request, client_error=self._client_error,
+            boto_error=self._boto_error, wait=time.sleep, action='training job submission',
+        ).execute()
 
     def _ensure_no_active_attempt(self, run_id: str, *, excluding: str) -> None:
-        for status in ("InProgress", "Stopping"):
-            try:
-                paginator = self.sagemaker.get_paginator("list_training_jobs")
-                pages = paginator.paginate(
-                    StatusEquals=status,
-                    NameContains=_safe_job_component(self.config.resource_prefix)[:32],
-                )
-                for page in pages:
-                    for summary in page.get("TrainingJobSummaries", []):
-                        candidate = summary["TrainingJobName"]
-                        if candidate == excluding:
-                            continue
-                        description = self._describe(candidate)
-                        if description.get("HyperParameters", {}).get("mlx_run_id") == run_id:
-                            raise MLXUserError(
-                                f"Logical run '{run_id}' already has active SageMaker job "
-                                f"'{candidate}'."
-                            )
-            except (self._client_error, self._boto_error) as exc:
-                raise self._translate("active training attempt lookup", exc) from exc
+        active = FindActiveTrainingAttempt(
+            self.sagemaker, describe=self._describe,
+            prefix=_safe_job_component(self.config.resource_prefix)[:32],
+            identity_key='mlx_run_id', identity=run_id, excluding=excluding,
+            client_error=self._client_error, boto_error=self._boto_error, action='active training attempt lookup',
+        ).execute()
+        if active is not None:
+            raise MLXUserError(f"Logical run '{run_id}' already has active SageMaker job '{active}'.")
 
     def status(self, job_name: str) -> AwsTrainingStatus:
         description = self._describe(job_name)
@@ -865,48 +840,17 @@ class SageMakerTrainingService:
         prefix = _safe_job_component(self.config.resource_prefix)[:32]
         return f"{prefix}-{timestamp}-{run_id[:8]}-{uuid4().hex[:4]}"[:63].rstrip("-")
 
+    def _manifest_store(self):
+        return S3JsonStore(self.s3, client_error=self._client_error, boto_error=self._boto_error)
+
     def _put_json(self, uri: str, value: Mapping[str, Any]) -> None:
-        bucket, key = _parse_s3_uri(uri)
-        try:
-            self.s3.put_object(
-                Bucket=bucket,
-                Key=key,
-                Body=json.dumps(value, sort_keys=True).encode("utf-8"),
-                ContentType="application/json",
-            )
-        except (self._client_error, self._boto_error) as exc:
-            raise self._translate("run manifest upload", exc) from exc
+        self._manifest_store().put(uri, value, action='run manifest upload')
 
     def _get_json(self, uri: str) -> Mapping[str, Any]:
-        bucket, key = _parse_s3_uri(uri)
-        try:
-            body = self.s3.get_object(Bucket=bucket, Key=key)["Body"].read()
-            value = json.loads(body)
-        except (self._client_error, self._boto_error, json.JSONDecodeError) as exc:
-            raise self._translate("run manifest retrieval", exc) from exc
-        if not isinstance(value, Mapping):
-            raise MLXUserError(f"AWS run manifest is invalid: {uri}")
-        return value
+        return self._manifest_store().get(uri, action='run manifest retrieval', label='AWS run manifest')
 
     def _get_optional_json(self, uri: str) -> Optional[Mapping[str, Any]]:
-        bucket, key = _parse_s3_uri(uri)
-        try:
-            body = self.s3.get_object(Bucket=bucket, Key=key)["Body"].read()
-        except self._client_error as exc:
-            if exc.response.get("Error", {}).get("Code") in {
-                "404",
-                "NoSuchKey",
-                "NotFound",
-            }:
-                return None
-            raise self._translate("recovery metadata retrieval", exc) from exc
-        except self._boto_error as exc:
-            raise self._translate("recovery metadata retrieval", exc) from exc
-        try:
-            value = json.loads(body)
-        except json.JSONDecodeError:
-            return None
-        return value if isinstance(value, Mapping) else None
+        return self._manifest_store().get(uri, optional=True, action='recovery metadata retrieval')
 
     def _describe(self, job_name: str) -> Mapping[str, Any]:
         try:

@@ -4,7 +4,7 @@ import platform
 import time
 import gc
 from pathlib import Path
-from typing import Any
+from typing import Any, Callable
 
 import matplotlib.pyplot as plt
 import numpy as np
@@ -13,8 +13,9 @@ from torch.optim import Adam
 from torch.utils.data import DataLoader
 
 from mlx.core.artifacts import write_csv, write_json_atomic
-from mlx.core.commands import NullWorkflowReporter, WorkflowReporter, emit
+from mlx.core.commands import Command, NullWorkflowReporter, WorkflowReporter, emit
 from mlx.core.exceptions import MLXUserError
+from mlx.core.training_data import TrainingDatasets
 from mlx.modes.saliency_mapping.checkpoints import (
     load_training_checkpoint,
     save_checkpoint,
@@ -36,7 +37,13 @@ class TrainSaliencyModel:
         *,
         reporter: WorkflowReporter | None = None,
         model_registry=None,
+        dataset_loader: Callable[[TrainSaliencyRequest], TrainingDatasets] | None = None,
+        optimizer_factory: Callable[..., torch.optim.Optimizer] | None = None,
+        sample_factory: Callable[..., Command] | None = None,
     ) -> None:
+        self.dataset_loader = self._load_datasets if dataset_loader is None else dataset_loader
+        self.optimizer_factory = optimizer_factory if optimizer_factory is not None else Adam
+        self.sample_factory = sample_factory if sample_factory is not None else GenerateSaliencySamples
         self.model_registry = model_registry
         self.request = request
         self.config = request.to_config()
@@ -47,12 +54,8 @@ class TrainSaliencyModel:
     def execute(self) -> dict[str, Any]:
         if self.request.epochs < 1:
             raise MLXUserError("--epochs must be at least 1 for saliency training.")
-        train_dataset, validation_dataset = load_saliency_datasets(
-            self.request.dataset_path,
-            input_size=self.request.input_size,
-            colored=self.request.colored,
-            transform=self.request.transform,
-        )
+        datasets = self.dataset_loader(self.request)
+        train_dataset, validation_dataset = datasets.train, datasets.validation
         workers = max(0, self.request.workers)
         train_loader = DataLoader(
             train_dataset,
@@ -67,7 +70,7 @@ class TrainSaliencyModel:
             num_workers=workers,
         )
         model = build_saliency_model(self.model_name, self.config, **({"registry": self.model_registry} if self.model_registry is not None else {})).to(self.request.device)
-        optimizer = Adam(model.parameters(), lr=float(self.request.lr or 1e-3))
+        optimizer = self.optimizer_factory(model.parameters(), lr=float(self.request.lr or 1e-3))
         criterion = SaliencyHybridLoss(
             bce_weight=self.request.bce_weight,
             ssim_weight=self.request.ssim_weight,
@@ -139,7 +142,8 @@ class TrainSaliencyModel:
                     "best_checkpoint_path": str(self.paths["checkpoint_path"]),
                 },
             )
-        self._generate_optional_samples()
+        if datasets.sample_source is not None:
+            self._generate_optional_samples(datasets.sample_source)
         result = {
             "model_name": self.model_name,
             "checkpoint_path": self.paths["checkpoint_path"],
@@ -201,19 +205,21 @@ class TrainSaliencyModel:
             )
         return state["completed_epoch"], state["best_validation_mae"], history
 
-    def _generate_optional_samples(self) -> None:
-        test_path = Path(self.request.dataset_path).expanduser() / "test"
-        if not test_path.exists():
-            return
-        # Constructing the dataset validates incomplete and mismatched test partitions.
-        SaliencyDataset(
-            test_path,
-            split="test",
-            input_size=self.request.input_size,
-            colored=self.request.colored,
-            transform=self.request.transform,
+    @staticmethod
+    def _load_datasets(request: TrainSaliencyRequest) -> TrainingDatasets:
+        train, validation = load_saliency_datasets(
+            request.dataset_path, input_size=request.input_size,
+            colored=request.colored, transform=request.transform,
         )
-        GenerateSaliencySamples(
+        test_path = Path(request.dataset_path).expanduser() / "test"
+        if not test_path.exists():
+            return TrainingDatasets(train, validation)
+        SaliencyDataset(test_path, split="test", input_size=request.input_size,
+                        colored=request.colored, transform=request.transform)
+        return TrainingDatasets(train, validation, test_path)
+
+    def _generate_optional_samples(self, test_path) -> None:
+        self.sample_factory(
             self.config,
             checkpoint_path=self.paths["checkpoint_path"],
             split_path=test_path,

@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import csv
 import gc
 from dataclasses import asdict, dataclass, replace
 from pathlib import Path
@@ -9,7 +8,7 @@ from typing import Any, Callable, Mapping
 import numpy as np
 
 from mlx.core.artifacts import write_csv, write_json_atomic
-from mlx.core.commands import NullWorkflowReporter, WorkflowReporter, emit
+from mlx.core.commands import Command, NullWorkflowReporter, WorkflowReporter, emit
 from mlx.core.exceptions import MLXUserError
 from mlx.modes.segmentation.data import resolve_optional_segmentation_test_split
 from mlx.modes.segmentation.evaluation import BenchmarkSegmentation
@@ -19,7 +18,7 @@ from mlx.modes.segmentation.requests import (
     TrainSegmentationRequest,
 )
 from mlx.modes.segmentation.train import TrainSegmentationModel
-from mlx.modes.segmentation.utils import resolve_train_output_paths
+from mlx.modes.segmentation.training_results import SegmentationTrainingResult
 
 
 RANKING_METRIC = "mean_foreground_dice"
@@ -67,11 +66,11 @@ class SegmentationAllModelsResult:
 
 TrainerFactory = Callable[
     [TrainSegmentationRequest, WorkflowReporter],
-    TrainSegmentationModel,
+    Command[SegmentationTrainingResult],
 ]
 BenchmarkFactory = Callable[
     [BenchmarkSegmentationRequest, WorkflowReporter],
-    BenchmarkSegmentation,
+    Command[Mapping[str, float]],
 ]
 
 
@@ -86,7 +85,9 @@ class TrainAllSegmentationModels:
         model_registry=None,
         model_names: list[str] | tuple[str, ...] | None = None,
         allow_dataset_source_manifest: bool = False,
+        test_source_resolver=resolve_optional_segmentation_test_split,
     ) -> None:
+        self.test_source_resolver = test_source_resolver
         self.request = request
         self.reporter = reporter or NullWorkflowReporter()
         self.trainer_factory = trainer_factory or (
@@ -111,7 +112,7 @@ class TrainAllSegmentationModels:
             self.request,
             allow_dataset_source_manifest=self.allow_dataset_source_manifest,
         )
-        test_split = resolve_optional_segmentation_test_split(
+        test_split = self.test_source_resolver(
             self.request.dataset_path
         )
         if test_split is None:
@@ -208,20 +209,15 @@ class TrainAllSegmentationModels:
             model_path=None,
             output_path=str(model_output),
         )
-        self.trainer_factory(model_request, self.reporter).execute()
-        paths = resolve_train_output_paths(
-            model_request.to_config(),
-            model_name=model_name,
-        )
-        checkpoint_path = paths["checkpoint_path"]
+        training = self.trainer_factory(model_request, self.reporter).execute()
+        checkpoint_path = Path(training.checkpoint_path)
         if not checkpoint_path.is_file():
             raise MLXUserError(
-                f"Training model '{model_name}' did not produce its best-validation-loss "
-                f"checkpoint at '{checkpoint_path}'."
+                f"Training did not produce its selected checkpoint: {checkpoint_path}"
             )
-        best_validation_loss = _read_best_validation_loss(
-            paths["training_csv_path"]
-        )
+        best_validation_loss = float(training.best_validation_loss)
+        if not np.isfinite(best_validation_loss):
+            raise MLXUserError("Training returned a non-finite best validation loss.")
 
         benchmark_dir = model_output / "benchmark"
         benchmark_request = BenchmarkSegmentationRequest.from_config(
@@ -239,7 +235,7 @@ class TrainAllSegmentationModels:
         ).execute()
         return SegmentationModelEvaluation(
             model_name=model_name,
-            output_dir=model_output,
+            output_dir=Path(training.output_dir),
             checkpoint_path=checkpoint_path,
             benchmark_dir=benchmark_dir,
             best_validation_loss=best_validation_loss,
@@ -340,30 +336,6 @@ def _rank_results(
         return (0, -value, result.model_name)
 
     return sorted(results, key=sort_key)
-
-
-def _read_best_validation_loss(path: Path) -> float:
-    if not path.is_file():
-        raise MLXUserError(
-            f"Segmentation training did not produce its history at '{path}'."
-        )
-    try:
-        with path.open(newline="", encoding="utf-8") as input_file:
-            values = [
-                float(row["val_loss"])
-                for row in csv.DictReader(input_file)
-                if row.get("val_loss") not in (None, "")
-            ]
-    except (KeyError, OSError, TypeError, ValueError) as exc:
-        raise MLXUserError(
-            f"Unable to read validation loss history from '{path}': {exc}"
-        ) from exc
-    finite = [value for value in values if np.isfinite(value)]
-    if not finite:
-        raise MLXUserError(
-            f"Segmentation training history '{path}' contains no finite validation loss."
-        )
-    return min(finite)
 
 
 def _default_trainer_factory(

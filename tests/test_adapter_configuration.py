@@ -117,8 +117,9 @@ def test_slice_prediction_checks_supplied_foundation_taxonomy(tmp_path, monkeypa
         def execute(self):
             return object(), {'classes': {0: 'widget'}, 'nc': 1}
 
-    monkeypatch.setattr(adapter_slices, 'VerifyFoundationCheckpoint', Verify)
-    monkeypatch.setattr(adapter_slices, 'require_experiment_device', lambda value: value)
+    class Backend:
+        def prepare(self, request, model_name):
+            return Verify().execute()[1], request.device
     request = AdapterSliceRequest(tmp_path, checkpoint, dataset)
     with pytest.raises(MLXUserError, match=error):
-        adapter_slices.CacheAdapterSlicePredictions(request).execute()
+        adapter_slices.CacheAdapterSlicePredictions(request, backend=Backend()).execute()

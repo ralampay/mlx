@@ -14,6 +14,7 @@ from mlx.core.aws.clients import AwsClientBundle
 from mlx.core.aws.image import PublishSageMakerImage
 from mlx.core.aws.models import AwsInfrastructure
 from mlx.core.exceptions import MLXUserError
+from mlx.core.aws.operations import FindActiveTrainingAttempt, S3JsonStore, SubmitTrainingJob
 from mlx.modes.image_recognition_oc.aws.config import AwsImageOneClassConfig
 from mlx.modes.image_recognition_oc.aws.models import (
     AwsImageOneClassStatus,
@@ -501,33 +502,20 @@ class SageMakerImageOneClassService:
         }
 
     def _create_job(self, request: Mapping[str, Any]) -> Mapping[str, Any]:
-        for index, delay in enumerate((0, 2, 4, 8, 16)):
-            if delay:
-                time.sleep(delay)
-            try:
-                return self.sagemaker.create_training_job(**request)
-            except self._client_error as exc:
-                error = exc.response.get("Error", {})
-                message = str(error.get("Message", "")).lower()
-                retry = error.get("Code") == "ValidationException" and ("role" in message or "assume" in message)
-                if not retry or index == 4:
-                    raise self._error("job submission", exc) from exc
-            except self._boto_error as exc:
-                raise self._error("job submission", exc) from exc
-        raise MLXUserError("AWS one-class image job submission failed after IAM propagation retries.")
+        return SubmitTrainingJob(
+            self.sagemaker, request, client_error=self._client_error,
+            boto_error=self._boto_error, wait=time.sleep, action='job submission',
+        ).execute()
 
     def _ensure_no_active_attempt(self, run_id: str, *, excluding: str) -> None:
-        try:
-            paginator = self.sagemaker.get_paginator("list_training_jobs")
-            for state in ("InProgress", "Stopping"):
-                for page in paginator.paginate(StatusEquals=state, NameContains=_safe_name(self.config.resource_prefix)[:32]):
-                    for summary in page.get("TrainingJobSummaries", []):
-                        candidate = summary["TrainingJobName"]
-                        candidate_id = self._describe(candidate).get("HyperParameters", {}).get("mlx_run_id")
-                        if candidate != excluding and candidate_id == run_id:
-                            raise MLXUserError(f"Run '{run_id}' already has active job '{candidate}'.")
-        except (self._client_error, self._boto_error) as exc:
-            raise self._error("active attempt lookup", exc) from exc
+        active = FindActiveTrainingAttempt(
+            self.sagemaker, describe=self._describe,
+            prefix=_safe_name(self.config.resource_prefix)[:32],
+            identity_key='mlx_run_id', identity=run_id, excluding=excluding,
+            client_error=self._client_error, boto_error=self._boto_error, action='active attempt lookup',
+        ).execute()
+        if active is not None:
+            raise MLXUserError(f"Run '{run_id}' already has active job '{active}'.")
 
     def _new_job_name(self, run_id: str, operation: str) -> str:
         prefix = _safe_name(self.config.resource_prefix)[:25]
@@ -535,12 +523,11 @@ class SageMakerImageOneClassService:
         timestamp = datetime.now(timezone.utc).strftime("%Y%m%d-%H%M%S")
         return f"{prefix}-{action}-{timestamp}-{run_id[:8]}-{uuid4().hex[:4]}"[:63].rstrip("-")
 
+    def _manifest_store(self):
+        return S3JsonStore(self.s3, client_error=self._client_error, boto_error=self._boto_error)
+
     def _put_json(self, uri: str, value: Mapping[str, Any]) -> None:
-        bucket, key = _parse_s3(uri)
-        try:
-            self.s3.put_object(Bucket=bucket, Key=key, Body=json.dumps(value, sort_keys=True).encode(), ContentType="application/json")
-        except (self._client_error, self._boto_error) as exc:
-            raise self._error("manifest upload", exc) from exc
+        self._manifest_store().put(uri, value, action='manifest upload')
 
     def _get_json(self, uri: str) -> Mapping[str, Any]:
         value = self._get_optional_json(uri)
@@ -549,20 +536,7 @@ class SageMakerImageOneClassService:
         return value
 
     def _get_optional_json(self, uri: str) -> Optional[Mapping[str, Any]]:
-        bucket, key = _parse_s3(uri)
-        try:
-            body = self.s3.get_object(Bucket=bucket, Key=key)["Body"].read()
-        except self._client_error as exc:
-            if exc.response.get("Error", {}).get("Code") in {"404", "NoSuchKey", "NotFound"}:
-                return None
-            raise self._error("manifest retrieval", exc) from exc
-        except self._boto_error as exc:
-            raise self._error("manifest retrieval", exc) from exc
-        try:
-            value = json.loads(body)
-        except json.JSONDecodeError:
-            return None
-        return value if isinstance(value, Mapping) else None
+        return self._manifest_store().get(uri, optional=True, action='manifest retrieval')
 
     def _describe(self, job_name: str) -> Mapping[str, Any]:
         try:

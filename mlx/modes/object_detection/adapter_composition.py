@@ -44,10 +44,18 @@ def run_adapter_action(config):
     if action in {"adapter-slice-predict", "adapter-slice-report"}:
         from .adapter_slices import AdapterSliceRequest, CacheAdapterSlicePredictions, GenerateAdapterSliceReport
         command = CacheAdapterSlicePredictions if action == "adapter-slice-predict" else GenerateAdapterSliceReport
-        return command(AdapterSliceRequest.from_config(config)).execute()
+        return command(
+            AdapterSliceRequest.from_config(config),
+            **({"backend": create_slice_backend()} if action == "adapter-slice-predict" else {}),
+        ).execute()
     from .adapter_experiment import AdapterExperimentRequest, RunAdapterExperiment
     request = AdapterExperimentRequest.from_config(config)
     if action == "adapter-calibrate":
         from .libreyolo.adapter_execution import CalibrateAdapterExperiment
         return CalibrateAdapterExperiment(request).execute()
     return RunAdapterExperiment(request, backend=create_experiment_backend()).execute()
+
+
+def create_slice_backend():
+    from .libreyolo.adapter_slice_backend import LibreYOLOSliceBackend
+    return LibreYOLOSliceBackend()

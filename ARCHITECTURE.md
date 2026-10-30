@@ -1395,3 +1395,36 @@ for in-process loading, before workflow dataset access. Python and CLI
 calls preserve the historical default of two workers; explicitly supplied `--workers` values are
 honored. Zero workers permits in-process loading for portable synthetic round trips and constrained
 runtimes. Grouped training carries the same request setting into child commands.
+
+### Replaceable training and slice-analysis collaborators
+
+`core.training_data.TrainingDatasets` carries training and validation partitions plus an
+optional sample source interpreted by the selected sample generator. Native segmentation
+and saliency trainers accept `dataset_loader`, `optimizer_factory`, and `sample_factory`.
+The segmentation loader receives normalized configuration; the saliency loader receives
+its typed request. Defaults retain the existing filesystem layouts, Adam optimization,
+and qualitative samples. Injected loaders completely replace filesystem discovery,
+including optional test-source discovery. Sample factories retain each mode's existing
+sample-command constructor and return commands with `execute()`.
+
+`segmentation.training_results.SegmentationTrainingResult` exposes the selected checkpoint,
+validation loss, output directory, and optional last/best-Dice checkpoints. Grouped training
+consumes this result instead of rebuilding checkpoint names or parsing history CSVs.
+Injected trainers must return this result contract; the legacy `train_segmentation`
+function still returns `None`. The grouped command's `test_source_resolver` allows an
+injected evaluation source while preserving paired-directory validation by default.
+
+`object_detection.adapter_slice_contracts.AdapterSliceBackend` owns foundation verification,
+device resolution, and prediction-writer construction. `CacheAdapterSlicePredictions`
+accepts this backend; composition selects `LibreYOLOSliceBackend`, which retains CUDA and
+YOLOX validation. An alternate backend can run on CPU without invoking LibreYOLO.
+The previous prediction-writer factory remains supported with default provider preparation.
+Slice reports derive paired comparators from observed methods, require matching seed
+coverage, and reject incomplete pairs rather than silently dropping them.
+
+`core.aws.operations` owns `SubmitTrainingJob`, `FindActiveTrainingAttempt`, and `S3JsonStore`.
+The four AWS mode services delegate IAM-propagation retries, active-attempt lookup, and
+JSON transport to these collaborators. Client exceptions and wait callbacks are injected;
+mode-owned services retain identity keys, error context, manifest requirements, training
+payloads, and resume policies. Optional JSON reads preserve the existing absent/corrupt
+metadata behavior; authorization and transport errors still propagate as `MLXUserError`.

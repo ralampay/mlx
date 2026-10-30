@@ -908,6 +908,8 @@ def test_submit_payload_uses_spot_and_shared_run_prefix(provider, model) -> None
         training=TrainObjectDetectionRequest(provider=provider, model=model, device="auto"),
     )
     service = object.__new__(SageMakerTrainingService)
+    service._client_error = _FakeAwsClientError
+    service._boto_error = _FakeAwsBotoError
     service.config = config
     service.region = "us-east-1"
     service.s3 = FakeS3()
@@ -1017,6 +1019,8 @@ def test_fine_tune_submit_adds_model_channel_and_manifest_identity() -> None:
         model_s3_uri=model_uri,
     )
     service = object.__new__(SageMakerTrainingService)
+    service._client_error = _FakeAwsClientError
+    service._boto_error = _FakeAwsBotoError
     service.config = config
     service.region = "us-east-1"
     service.s3 = FakeS3()

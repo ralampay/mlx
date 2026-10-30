@@ -269,6 +269,8 @@ def test_submit_uses_spot_and_classification_prefix() -> None:
         training=ImageClassificationRequest(model="resnet18", device="auto"),
     )
     service = object.__new__(SageMakerTrainingService)
+    service._client_error = type("ClientError", (Exception,), {})
+    service._boto_error = type("BotoError", (Exception,), {})
     service.config, service.region, service.s3, service.sagemaker = config, "us-east-1", FakeS3(), FakeSageMaker()
     result = service.submit(
         AwsInfrastructure("us-east-1", "123", "arn:aws:iam::123:role/mlx", "image@sha256:abc"),

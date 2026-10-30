@@ -247,6 +247,7 @@ def test_training_sample_generation_falls_back_to_best_loss(
         FakeGenerateSamples,
     )
 
+    command.sample_factory = FakeGenerateSamples
     command._generate_test_samples(tmp_path / "dataset" / "test")
 
     assert captured["checkpoint_path"] == command.paths["checkpoint_path"]

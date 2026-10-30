@@ -125,7 +125,8 @@ def test_study_discovery_rejects_incomplete_matrix(tmp_path):
 def test_slice_prediction_requires_cuda(tmp_path):
     request = _request(tmp_path, device="cpu")
     with pytest.raises(MLXUserError, match="requires --device cuda"):
-        request.validate(prediction=True)
+        from mlx.modes.object_detection.libreyolo.adapter_slice_backend import LibreYOLOSliceBackend
+        LibreYOLOSliceBackend().prepare(request, "yolox-l")
 
 
 def test_cli_parses_slice_analysis_options():
@@ -207,11 +208,12 @@ def test_head_only_reconstruction_preserves_foundation_and_restores_head_buffers
     )
 
 
-def test_cached_prediction_report_end_to_end(tmp_path):
-    request = _request(tmp_path)
+@pytest.mark.parametrize("comparator", ["lora", "drax-spatial"])
+def test_cached_prediction_report_end_to_end(tmp_path, comparator):
+    request = _request(tmp_path, methods=("frozen", "drax", comparator))
     _write_json(
         tmp_path / "study.json",
-        {"available_methods": ["frozen", "drax", "lora"], "planned_seeds": [1, 2]},
+        {"available_methods": ["frozen", "drax", comparator], "planned_seeds": [1, 2]},
     )
     images = [
         {"id": 0, "file_name": "foggy-001.jpg", "width": 100, "height": 100},
@@ -240,12 +242,12 @@ def test_cached_prediction_report_end_to_end(tmp_path):
             "bootstrap_samples": 25,
         },
     )
-    for method in ("frozen", "drax", "lora"):
+    for method in ("frozen", "drax", comparator):
         for seed in (1, 2):
             run = tmp_path / method / f"seed-{seed}"
             _write_json(run / "metrics.json", {"status": "completed"})
             _write_json(run / "config.json", {})
-            score = {"drax": 0.9, "lora": 0.8, "frozen": 0.7}[method]
+            score = {"drax": 0.9, comparator: 0.8, "frozen": 0.7}[method]
             predictions = [
                 {
                     "image_id": image["id"], "category_id": 0,
@@ -263,8 +265,50 @@ def test_cached_prediction_report_end_to_end(tmp_path):
     assert result["runs"] == 6
     assert (root / "slice_results.csv").is_file()
     assert (root / "paired_differences.csv").is_file()
-    assert "drax-minus-lora" in (root / "summary.md").read_text()
+    assert f"drax-minus-{comparator}" in (root / "summary.md").read_text()
     rows = list(csv.DictReader((root / "slice_results.csv").open()))
     overall = [row for row in rows if row["slice_family"] == "overall"]
     assert len(overall) == 6
     assert all(float(row["mAP50_95"]) == pytest.approx(1.0) for row in overall)
+
+
+def test_paired_report_rejects_missing_comparator_seeds():
+    rows = [dict(method=method, seed=seed, slice_family="overall", slice_name="all")
+            for method, seed in (("drax", 1), ("drax", 2), ("custom", 1))]
+    with pytest.raises(MLXUserError, match="Incomplete paired seed coverage"):
+        GenerateAdapterSliceReport._paired_results(rows, [], {}, {}, 10, 42)
+
+
+def test_injected_cpu_backend_caches_and_reuses_predictions(tmp_path):
+    from mlx.modes.object_detection.adapter_slices import CacheAdapterSlicePredictions
+    request = _request(tmp_path, device="cpu", methods=("frozen",), seeds=(1,))
+    dataset = request.dataset
+    _write_json(dataset / "manifest.json", {"classes": ["widget"], "selection_sha256": "selection"})
+    _write_json(dataset / "data.yaml", {"names": ["widget"]})
+    for split in ("train", "val", "test"):
+        images, labels = dataset / "images" / split, dataset / "labels" / split
+        images.mkdir(parents=True)
+        labels.mkdir(parents=True)
+        for index in range(3):
+            Image.new("RGB", (32, 32)).save(images / f"foggy-{index:03d}.jpg")
+            (labels / f"foggy-{index:03d}.txt").write_text("0 0.5 0.5 0.5 0.5\n")
+    _write_json(tmp_path / "study.json", {"dataset_selection_sha256": "selection"})
+    run = tmp_path / "frozen" / "seed-1"
+    _write_json(run / "metrics.json", dict(status="completed", checkpoint_sha256="foundation",
+        dataset_selection_sha256="selection", mAP50=1, mAP50_95=1))
+    _write_json(run / "config.json", {})
+    calls = []
+    class Backend:
+        def prepare(self, request, model_name):
+            assert request.device == "cpu"
+            return dict(classes={0: "widget"}, nc=1, sha256="foundation"), "cpu"
+        def create_writer(self, request, foundation, device, *, registry=None):
+            def write(run, split, destination):
+                calls.append(split)
+                _write_json(destination, [dict(image_id=index, category_id=0, bbox=[8, 8, 16, 16], score=1) for index in range(3)])
+                return dict(map_50=1, map_50_95=1)
+            return write
+    command = CacheAdapterSlicePredictions(request, backend=Backend())
+    command.execute()
+    command.execute()
+    assert calls == ["val", "test"]

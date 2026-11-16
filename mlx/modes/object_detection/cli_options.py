@@ -34,7 +34,7 @@ OPTIONS = (
     CliOption(('--bootstrap-samples',), {
         'type': int,
         'default': 2000,
-        'help': 'Deterministic image-bootstrap samples for adapter slice reports.',
+        'help': 'Bootstrap resamples for adapter reports (2000) or temporal quality reports (100).',
     }),
     CliOption(('--adapter-reduction',), {
         'type': int,

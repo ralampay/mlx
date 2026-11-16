@@ -266,6 +266,7 @@ The primary workflow commands are:
 | Object detection | `TrainObjectDetectionModel`, `FineTuneObjectDetectionModel`, `BenchmarkObjectDetectionModel`, `CreateObjectDetector`, `ConvertObjectDetectionModel`, `ListObjectDetectionModels`, `RunObjectDetectionStream`, `PrepareDawnAdapterDataset`, `VerifyFoundationCheckpoint`, `CalibrateAdapterBatchSize`, `RunAdapterExperiment`, `GenerateAdapterReport`, `CacheAdapterSlicePredictions`, `GenerateAdapterSliceReport`, AWS submit/status/stop/resume and best-model locator commands |
 | Tracking | `CreateTrackingAlgorithm`, `RunObjectDetectionTrackingCommand`, `RunTrackByDetectionCommand`, `RunTrackingVideo`, `PrepareTrackingBenchmarks`, `CompileTrackingVideo`, `BenchmarkTrackingDataset`, `ExportMOTFromClassAwareTracking`, `BenchmarkMOTTracking`, `ExportTrackingReplay` |
 | Text embedding | `EmbedTextCommand`, `BenchmarkTextEmbeddingCommand`, `PrepareRetrievalDatasets`, `BenchmarkAutoencoderRetrieval`, `TransformEmbeddingArtifacts`, `AnalyzeAutoencoderRetrieval`, `BenchmarkConfiguredAutoencoders`, `SelectAutoencoderExperimentSettings`; legacy `EmbedCsvCommand` remains supported |
+| Time series | `TrainTimeSeriesGenerator`, `SynthesizeTimeSeries`, `BenchmarkSyntheticTimeSeries` |
 | Autoencoder | `TrainAutoencoder`, `EmbedAutoencoder`, `ListAutoencoderModels`, `ListAutoencoderLosses` |
 
 Large commands should keep `execute()` readable by delegating cohesive steps to private methods
@@ -1428,3 +1429,56 @@ JSON transport to these collaborators. Client exceptions and wait callbacks are 
 mode-owned services retain identity keys, error context, manifest requirements, training
 payloads, and resume policies. Optional JSON reads preserve the existing absent/corrupt
 metadata behavior; authorization and transport errors still propagate as `MLXUserError`.
+
+
+## Temporal Synthetic Data
+
+`mlx.modes.time_series` owns numeric temporal CSV preparation, generative model
+registries, VAE definitions, training, sampling, checkpoints, evaluation, and reports.
+It is independent of vector `autoencoder` and detector/provider packages. The lazy
+mode descriptor registers `time_series` / `time-series`; its runner only normalizes
+options, selects commands, constructs reporters, and presents results.
+
+`TrainTimeSeriesGenerator`, `SynthesizeTimeSeries`, and `BenchmarkSyntheticTimeSeries`
+accept typed immutable requests and expose `execute()`. Loader, registry, training
+backend, checkpoint store, CSV writer, evaluator, and report writer are constructor-injected at
+the applicable command boundary. Defaults are resolved lazily. Commands return
+structured results and training uses the shared `WorkflowReporter` contract.
+
+`TemporalCsvLoader` sorts within series, validates finite regularly sampled numeric
+features, splits each series 70/15/15 before windowing, and fits standardization on
+training rows only. Evaluation uses non-overlapping windows. Metadata preserves
+feature order, time units/interval, split boundaries, input digest, and scaler. An
+original-file digest and metadata comparison prevent benchmark input drift.
+
+`TemporalModelRegistry` is immutable and maps aliases to lazy definition imports via
+`core.extensions`. Callers may inject a registry for extensions; checkpoint imports
+must match its exact registered definition. Definitions expose `description` and
+`build(config)`; the PyTorch backend expects a module providing
+`objective(values, kl_weight, generator)` (scalar `loss`, `reconstruction`, `kl`),
+`sample(count, generator)`, and the standard module state interface. Model selection
+stays in the registry. New training paradigms, such as a discrete VQ prior stage,
+should supply an appropriate backend instead of adding model-name branches to commands.
+Initial aliases are `vanilla-vae`, `conv-vae`, and `timevae`; the last is an independent
+TimeVAE-inspired additive decoder, not a verified paper reproduction.
+
+`TorchTemporalBackend` owns CPU/CUDA selection, scoped random state, Adam optimization,
+fixed-noise validation, and best-state selection. Inputs/outputs use `(N,T,F)`.
+Model objectives own prior/loss semantics. The initial Gaussian VAEs use mean MSE plus
+weighted mean latent KL and sample standard-normal latents. Framework exceptions are
+translated at this boundary. Other recoverable input/artifact failures use `MLXUserError`.
+
+`TemporalCheckpointStore` owns `mlx-temporal-vae-v1`: weights, architecture reference,
+configuration, preprocessing, and training settings. Loading is restricted to
+`weights_only=True`, validates metadata before resolving code, and never falls back to
+unsafe pickle. Synthesis needs no source CSV and writes independent IDs, timestep,
+elapsed time, and inverse-scaled features through the injected `SyntheticCsvWriter`.
+Artifact directories are staged and
+published only after successful work, refusing existing destinations.
+
+`TemporalQualityEvaluator` owns standardized fidelity, variation, autocorrelation,
+correlation, spectra, nearest-neighbor diagnostics, one-step ridge TSTR/TRTR utility,
+and seeded bootstrap intervals with explicit undefined metrics. Benchmark counts
+are bounded and recorded. `TemporalReportWriter` owns HTML/PNG rendering; quantitative
+results remain JSON. Metrics do not confer a privacy guarantee or universal quality
+score. User-facing formats and commands live in [the guide](docs/time-series.md).

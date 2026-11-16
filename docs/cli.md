@@ -96,3 +96,7 @@ to the existing descriptor and runner, and keep workflow logic in commands.
 The [development guide](development.md#add-a-cli-option-or-action) provides the implementation
 steps. [ARCHITECTURE.md](../ARCHITECTURE.md#layers-and-dependency-direction) owns the detailed
 routing, validation, and dependency rules.
+
+Temporal numeric CSV generation uses `--mode time_series` with `train`, `synthesize`,
+and `benchmark`; see the [time-series guide](time-series.md) for column selection,
+shared VAE hyperparameters, checkpoint sampling, and quality reports.

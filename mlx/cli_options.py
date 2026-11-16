@@ -79,7 +79,7 @@ OPTIONS = (
     CliOption(('--input',), {
         'default': None,
         'dest': 'input_path',
-        'help': 'BEIR/artifact input for text embedding, or an embedding CSV for autoencoder workflows.',
+        'help': 'BEIR/artifact input for text embedding, an embedding CSV for autoencoders, or a numeric time-series CSV.',
     }),
     CliOption(('--names-only',), {
         'action': 'store_true',

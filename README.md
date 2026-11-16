@@ -42,6 +42,7 @@ The [documentation index](docs/README.md) also links setup, development, AWS, an
 | `mlx.modes.segmentation` | [Semantic segmentation](docs/segmentation/README.md) |
 | `mlx.modes.saliency_mapping` | [Saliency mapping](docs/saliency-mapping/README.md) |
 | `mlx.modes.text_embedding` | [Text embedding and retrieval](docs/text-embedding.md) |
+| `mlx.modes.time_series` | [Temporal synthetic data](docs/time-series.md) |
 | `mlx.modes.autoencoder` | [Vector autoencoders](docs/autoencoder.md) |
 | `mlx.modes.nlp` | [Legacy NLP CSV embedding](docs/nlp.md) |
 
@@ -167,6 +168,7 @@ for the complete registered action inventory; action availability can depend on
 | `video_anomaly_detection` | `ls-models` | `train`, `benchmark`, `infer-video`, `ls-models`; AWS `train-all`, `status`, `resume` |
 | `segmentation` | `test` | `train`, `benchmark`, `infer-image`, `infer-camera`, `infer-video`, `build-dataset`, `ls-models`, `ls-losses` |
 | `text_embedding` (`text-embedding`, `nlp`) | `embed` | `embed`, `benchmark`, `ls-metrics`, `ls-vector-stores`, `ls-embedding-backends`, `prepare-datasets`, `benchmark-autoencoders`, `select-autoencoder-settings` |
+| `time_series` (`time-series`) | `ls-models` | `train`, `synthesize`, `benchmark`, `ls-models` |
 | `autoencoder` | `ls-models` | `train`, `embed`, `ls-models`, `ls-loss-functions` (`ls-losses`) |
 | `saliency_mapping` (`saliency-mapping`) | `test` | `train`, `benchmark`, `infer-image`, `build-dataset`, `ls-models` |
 

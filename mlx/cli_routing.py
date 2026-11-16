@@ -29,6 +29,13 @@ class ModeDescriptor:
 
 MODE_DESCRIPTORS: tuple[ModeDescriptor, ...] = (
     ModeDescriptor(
+        name="time_series", aliases=("time-series",),
+        runner="mlx.modes.time_series.runner:run_time_series",
+        default_action="ls-models", actions=("ls-models", "train", "synthesize", "benchmark"),
+        purpose="Numeric temporal VAE training, synthetic generation, and quality evaluation",
+        options="mlx.modes.time_series.cli_options:OPTIONS",
+    ),
+    ModeDescriptor(
         name="sar", aliases=(), runner="mlx.modes.sar.runner:run_sar",
         default_action="search", actions=("search", "download", "prepare"),
         purpose="Sentinel-1 SAR discovery, verified downloads, and radar-grid preparation",

@@ -12,6 +12,7 @@ dependencies = [
     "opencv-python",
     "rich>=13.7.0",
     "scikit-learn",
+    "scipy>=1.10",
     "torch",
     "torchvision",
     "tqdm"

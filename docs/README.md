@@ -32,6 +32,7 @@ Start with a shared-layer guide or select a task-specific package:
 | `mlx.modes.video_anomaly_detection` | Normal-only clip-native 3D CNN, Deep SVDD, and sequential SageMaker workflows | [Video anomaly detection](./video_anomaly_detection/README.md), [AWS training](./video_anomaly_detection/aws-sagemaker-training.md) |
 | `mlx.modes.segmentation` | Semantic segmentation workflows for U-Net style models | [Segmentation](./segmentation/README.md) |
 | `mlx.modes.text_embedding` | GGUF embedding, exact/Chroma indexing, and BEIR retrieval benchmarking | [Text embedding](./text-embedding.md) |
+| `mlx.modes.time_series` | Temporal VAE synthesis and quality evaluation | [Time series](./time-series.md) |
 | `mlx.modes.autoencoder` | Generic 1D vector autoencoder training and bottleneck export | [Autoencoder](./autoencoder.md) |
 | `mlx.modes.saliency_mapping` | Still-image single-channel salient-object detection | [Saliency mapping](./saliency-mapping/README.md) |
 | `mlx.modes.nlp` | Historical text-column CSV embedding compatibility | [Legacy NLP](nlp.md) |
@@ -47,6 +48,7 @@ Start with a shared-layer guide or select a task-specific package:
 | `video_anomaly_detection`, `video-anomaly-detection` | `mlx.modes.video_anomaly_detection` |
 | `segmentation` | `mlx.modes.segmentation` |
 | `text_embedding`, `text-embedding`, `nlp` | `mlx.modes.text_embedding` (`nlp` also retains legacy CSV options) |
+| `time_series`, `time-series` | `mlx.modes.time_series` |
 | `autoencoder` | `mlx.modes.autoencoder` |
 | `saliency_mapping`, `saliency-mapping` | `mlx.modes.saliency_mapping` |
 

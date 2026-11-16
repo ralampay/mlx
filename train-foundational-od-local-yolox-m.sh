@@ -6,10 +6,10 @@ python -m mlx \
     --platform local \
     --action train \
     --provider libreyolo \
-    --model yolox-l \
+    --model yolox-m \
     --dataset-s3-uri s3://mlx-object-detection-datasets/foundational-urban.zip \
-    --output ./runs/foundational-urban-yolox-l \
-    --run-name foundational-urban-yolox-l \
+    --output ./runs/foundational-urban-yolox-m \
+    --run-name foundational-urban-yolox-m \
     --device 0 \
     --epochs 50 \
     --batch-size 8 \

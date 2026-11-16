@@ -54,6 +54,7 @@ class TrainObjectDetectionRequest(ObjectDetectionRequest):
     eval_interval: Optional[int] = None
     no_aug_epochs: Optional[int] = None
     patience: Optional[int] = None
+    max_labels: Optional[int] = None
 
 
 @dataclass(frozen=True)

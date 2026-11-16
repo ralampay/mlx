@@ -3,13 +3,27 @@
 import json
 import os
 from pathlib import Path
+import re
 import subprocess
 
 from mlx.core.exceptions import MLXUserError
 
 
+def _verified_desktop_client(pid, name):
+    """Recognize known desktop executables only after a procfs identity check."""
+    known = name == "/usr/bin/nautilus" or re.fullmatch(
+        r"/snap/snapd-desktop-integration/[0-9]+/usr/bin/snapd-desktop-integration", name
+    ) is not None
+    if not known:
+        return False
+    try:
+        return os.readlink(f"/proc/{pid}/exe") == name
+    except OSError:
+        return False
+
+
 def active_cuda_jobs():
-    """Keep unknown clients blocking; verify Nautilus through procfs, not its name."""
+    """Keep unknown clients blocking; verify additional desktop clients via procfs."""
     result = subprocess.run(
         ["nvidia-smi", "--query-compute-apps=pid,process_name", "--format=csv,noheader,nounits"],
         check=True, text=True, capture_output=True,
@@ -22,12 +36,8 @@ def active_cuda_jobs():
         pid, name = int(pid_text), name.strip()
         if pid == os.getpid() or Path(name).name in {"ptyxis", "gnome-shell", "Xorg"}:
             continue
-        if name == "/usr/bin/nautilus":
-            try:
-                if os.readlink(f"/proc/{pid}/exe") == name:
-                    continue
-            except OSError:
-                pass  # Unverified processes remain blocking.
+        if _verified_desktop_client(pid, name):
+            continue
         jobs.append({"pid": pid, "name": name})
     return jobs
 

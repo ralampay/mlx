@@ -217,6 +217,11 @@ class TrainLibreYOLOObjectDetection:
             kwargs["lr0"] = float(self.config["lr0"])
         if self.config.get("random_seed") is not None:
             kwargs["seed"] = int(self.config["random_seed"])
+        capacity = self.config.get("max_labels")
+        if capacity is not None:
+            if isinstance(capacity, bool) or not isinstance(capacity, int) or capacity < 1:
+                raise MLXUserError("max_labels must be a positive integer.")
+            kwargs["max_labels"] = capacity
         return kwargs
 
     def _select_checkpoint(

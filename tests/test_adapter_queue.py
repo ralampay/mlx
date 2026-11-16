@@ -27,6 +27,29 @@ def test_existing_clients_and_self_ignored(monkeypatch):
     assert queue.active_cuda_jobs() == [{"pid": 789, "name": "/tmp/nautilus"}]
 
 
+@pytest.mark.parametrize('reported,actual,ignored', [
+    ('/snap/snapd-desktop-integration/123/usr/bin/snapd-desktop-integration',
+     '/snap/snapd-desktop-integration/123/usr/bin/snapd-desktop-integration', True),
+    ('/snap/snapd-desktop-integration/456/usr/bin/snapd-desktop-integration',
+     '/snap/snapd-desktop-integration/456/usr/bin/snapd-desktop-integration', True),
+    ('/snap/snapd-desktop-integration/123/usr/bin/snapd-desktop-integration', '/tmp/python', False),
+    ('/snap/snapd-desktop-integration/123/usr/bin/snapd-desktop-integration', None, False),
+    ('/tmp/snapd-desktop-integration', '/tmp/snapd-desktop-integration', False),
+    ('/snap/snapd-desktop-integration/current/usr/bin/snapd-desktop-integration',
+     '/snap/snapd-desktop-integration/current/usr/bin/snapd-desktop-integration', False),
+])
+def test_snap_desktop_client_requires_exact_verified_revision_path(monkeypatch, reported, actual, ignored):
+    monkeypatch.setattr(queue.os, 'getpid', lambda: 1)
+    monkeypatch.setattr(queue.subprocess, 'run', lambda *a, **k: SimpleNamespace(
+        stdout=f'999, {reported}\n888, /usr/bin/python\n'))
+    def readlink(path):
+        if actual is None:
+            raise PermissionError(path)
+        return actual
+    monkeypatch.setattr(queue.os, 'readlink', readlink)
+    assert {r['pid'] for r in queue.active_cuda_jobs()} == ({888} if ignored else {888,999})
+
+
 def test_completed_study_reused_without_execution_or_writes(tmp_path, monkeypatch):
     config = tmp_path / "plan.json"
     config.write_text(json.dumps({"output": str(tmp_path), "methods": ["lora"], "seeds": [1]}))

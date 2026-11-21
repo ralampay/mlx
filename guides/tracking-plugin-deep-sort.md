@@ -66,7 +66,10 @@ custom-tracking-deep-sort/
 │       └── deep_sort.py
 ├── configs/deep_sort.json
 ├── tests/test_plugin.py
-└── examples/run_observations.py
+└── examples/
+    ├── __init__.py
+    ├── run_observations.py
+    └── session_factory.py
 ```
 
 `components/` contains algorithm/backend code. `mlx_plugins/` converts MLX inputs and
@@ -77,10 +80,10 @@ detector, and `examples/` gives you a runnable Python entrypoint.
 
 Create **every file below**, relative to the project directory you just created.
 Do not run the Python file contents individually in the terminal. Save them in the
-named files first. The three `__init__.py` files make the directories Python packages.
+named files first. The `__init__.py` files make the directories Python packages.
 There are no files to create or edit in the `mlx/` checkout.
 
-**File 1 of 11.** This tells pip how to install your package and its dependencies. MLX itself is installed separately in Step 4.
+**File 1 of 13.** This tells pip how to install your package and its dependencies. MLX itself is installed separately in Step 4.
 
 ### File: `pyproject.toml`
 
@@ -102,7 +105,7 @@ test = ["pytest>=7"]
 where = ["src"]
 ```
 
-**File 2 of 11.** Save this file exactly as shown.
+**File 2 of 13.** Save this file exactly as shown.
 
 ### File: `src/custom_tracking/__init__.py`
 
@@ -110,7 +113,7 @@ where = ["src"]
 """Standalone tracking plugin package."""
 ```
 
-**File 3 of 11.** Save this file exactly as shown.
+**File 3 of 13.** Save this file exactly as shown.
 
 ### File: `src/custom_tracking/components/__init__.py`
 
@@ -118,7 +121,7 @@ where = ["src"]
 """Standalone tracking plugin package."""
 ```
 
-**File 4 of 11.** Save this file exactly as shown.
+**File 4 of 13.** Save this file exactly as shown.
 
 ### File: `src/custom_tracking/mlx_plugins/__init__.py`
 
@@ -126,7 +129,7 @@ where = ["src"]
 """Standalone tracking plugin package."""
 ```
 
-**File 5 of 11.** Internal observations and snapshots keep the tracking components independent of MLX.
+**File 5 of 13.** Internal observations and snapshots keep the tracking components independent of MLX.
 
 ### File: `src/custom_tracking/components/observations.py`
 
@@ -162,7 +165,7 @@ class Snapshot:
     confirmed: bool
 ```
 
-**File 6 of 11.** This is the shared conversion boundary between your components and MLX data types.
+**File 6 of 13.** This is the shared conversion boundary between your components and MLX data types.
 
 ### File: `src/custom_tracking/mlx_plugins/boundary.py`
 
@@ -194,7 +197,7 @@ def frame_result(index, snapshots):
     return TrackingFrameResult(frame_index=index, tracks=tuple(tracks))
 ```
 
-**File 7 of 11.** This component isolates Deep SORT and shares one appearance encoder across class-specific trackers.
+**File 7 of 13.** This component isolates Deep SORT and shares one appearance encoder across class-specific trackers.
 
 ### File: `src/custom_tracking/components/deep_sort.py`
 
@@ -298,7 +301,7 @@ class DeepSortBackend:
         return tuple(sorted(current.values(), key=lambda s: s.identity))
 ```
 
-**File 8 of 11.** This is the `DeepSortTracker` class MLX will import. Its constructor accepts the algorithm-specific settings in the JSON file.
+**File 8 of 13.** This is the `DeepSortTracker` class MLX will import. Its constructor accepts the algorithm-specific settings in the JSON file.
 
 ### File: `src/custom_tracking/mlx_plugins/deep_sort.py`
 
@@ -340,7 +343,7 @@ class DeepSortTracker:
         self.index = 0
 ```
 
-**File 9 of 11.** These keys are passed to your tracker constructor. Do not put detector paths or video paths here; those are MLX workflow arguments.
+**File 9 of 13.** These keys are passed to your tracker constructor. Do not put detector paths or video paths here; those are MLX workflow arguments.
 
 ### File: `configs/deep_sort.json`
 
@@ -354,7 +357,7 @@ class DeepSortTracker:
 }
 ```
 
-**File 10 of 11.** These synthetic tests exercise identities, missed observations, class isolation, and reset.
+**File 10 of 13.** These synthetic tests exercise identities, missed observations, class isolation, and reset.
 
 ### File: `tests/test_plugin.py`
 
@@ -459,9 +462,40 @@ def test_rejects_invalid_embeddings():
     with pytest.raises(MLXUserError, match="nonzero"):
         tracker.update(frame_index=1, detections=[detection()],
                        frame=np.zeros((32, 32, 3), dtype=np.uint8))
+
+def test_plugin_keyword_contract_and_frame_alignment():
+    from inspect import signature
+    from mlx.modes.object_detection.tracking import TrackingFrameResult
+    tracker = make_tracker()
+    frame = np.zeros((32, 32, 3), dtype=np.uint8)
+    for index, detections in ((1, [detection()]), (2, [])):
+        arguments = dict(frame_index=index, detections=detections, frame=frame)
+        signature(tracker.update).bind(**arguments)
+        result = tracker.update(**arguments)
+        assert isinstance(result, TrackingFrameResult)
+        assert result.frame_index == index
+        assert len({t.track_id for t in result.tracks}) == len(result.tracks)
+        assert all(type(t.track_id) is int and t.track_id > 0 for t in result.tracks)
+        assert all(t.last_seen_frame <= index for t in result.tracks)
+    signature(tracker.reset).bind()
+    tracker.reset()
+    assert tracker.update(frame_index=1, detections=[]).frame_index == 1
+
+def test_session_factory_creates_independent_trackers():
+    from examples.session_factory import make_session_factory
+    from mlx.modes.object_detection.tracking import TrackingRequest
+    factory = make_session_factory()
+    first = factory(TrackingRequest())
+    second = factory(TrackingRequest())
+    assert first.algorithm is not second.algorithm
+    # No detector/source is constructed until the session is executed.
+    first.algorithm.update(frame_index=1, detections=[])
+    assert second.algorithm.update(frame_index=1, detections=[]).frame_index == 1
+    first.algorithm.reset()
+    second.algorithm.reset()
 ```
 
-**File 11 of 11.** This complete script runs the plugin on synthetic observations without loading a detector. Run it in Step 7.
+**File 11 of 13.** This complete script runs the plugin on synthetic observations without loading a detector. Run it in Step 7.
 
 ### File: `examples/run_observations.py`
 
@@ -491,6 +525,34 @@ try:
     print(f"After an empty frame: {missing.tracks[0].status.value}")
 finally:
     command.reset()
+```
+
+**File 12 of 13.** This optional-use factory lets dataset benchmarks construct a fresh tracker per sequence. Save it now; it will be exercised by the tests even if you do not run a dataset benchmark.
+
+### File: `examples/session_factory.py`
+
+```python
+from mlx.modes.object_detection.tracking import RunTrackingVideo
+from custom_tracking.components.deep_sort import MobileNetEncoder
+from custom_tracking.mlx_plugins.deep_sort import DeepSortTracker
+
+def make_session_factory():
+    # Shared weights, but fresh identities and appearance history per sequence.
+    encoder = MobileNetEncoder(gpu=False)
+
+    def create_session(request, **collaborators):
+        algorithm = DeepSortTracker(encoder=encoder, n_init=3, nn_budget=100)
+        return RunTrackingVideo(request, algorithm=algorithm, **collaborators)
+
+    return create_session
+```
+
+**File 13 of 13.** This makes the example helpers importable from the project directory for the benchmark command and tests.
+
+### File: `examples/__init__.py`
+
+```python
+"""Runnable examples and composition helpers for this standalone project."""
 ```
 
 ## Step 4: Install MLX and your plugin into the same environment
@@ -531,7 +593,8 @@ PYTHON
 
 Expected output includes `DeepSortTracker`. This proves the class can be imported and
 constructed through MLX, rather than just imported by a script in your project.
-It does not run detection or load video. `--action ls-trackers` lists registered aliases;
+It does not run detection or load video. Construction alone does not validate method
+signatures or output semantics; Step 6 checks those contracts explicitly. `--action ls-trackers` lists registered aliases;
 your external plugin does not need to appear there.
 
 If you see `No module named custom_tracking`, activate this project's virtual environment
@@ -545,7 +608,7 @@ for installation and execution.
 python -m pytest -q tests
 ```
 
-Expected result: **7 passed**. These tests require no detector checkpoint, dataset,
+Expected result: **9 passed**. These tests require no detector checkpoint, dataset,
 GPU, or video. They inject deterministic features into the real pinned Deep SORT backend, so they do not load neural weights.
 Resolve any failures before continuing to a real video.
 
@@ -668,29 +731,138 @@ measurements. MLX persists only confirmed tracks observed in the current frame.
 If an update fails, stop and reset before reusing the session. Neither MLX's command frame
 counter nor arbitrary backend updates are transactional.
 
-## Refactor strategy: improve the boundary without replacing it
+## Working with the current MLX boundaries
 
-MLX already separates detection from tracking. Keep its existing protocol, data types,
-loader, and registry. The examples in this guide run against that API today; none of the
-following proposed runtime improvements is a prerequisite or implemented by this guide:
+The following points reflect the tracking structure reviewed for these guides. They are
+important when you move beyond the basic CLI example. They do not require a fork of MLX.
 
-1. Specify the plugin contract and exercise it with reusable synthetic contract tests.
-   Validate callable signatures and returned frame indices/IDs at the plugin boundary
-   if stronger diagnostics are needed; runtime protocol checks alone only check presence.
-2. Keep observation acquisition in commands and adapters. Keep motion estimation,
-   association, and lifecycle in focused components in the external project. Extract
-   shared components only when two implementations actually need the same behavior.
-3. Let an appearance-based plugin own an injected encoder and isolate its backend API.
-   Do not make detectors produce embeddings merely to support Deep SORT.
-4. Handle detector-confidence/tracker-threshold compatibility in composition/configuration.
-   For ByteTrack, preserve detections down to its low threshold: the current detector
-   default 0.25 otherwise discards some observations accepted by its 0.1 low threshold.
-5. Preserve existing imports and CLI behavior. Add timestamps or capability declarations
-   only when variable-rate sources or other concrete plugins require them. Keep this
-   tracking-by-detection API in object detection; point tracking and optical flow would
-   warrant their own contracts rather than an overloaded detection type.
+### Keep detector configuration separate from tracker configuration
 
-This is a strategy for later runtime changes, not a new plugin framework.
+`tracker_config` is passed only to the tracking algorithm. It cannot configure LibreYOLO.
+MLX currently reconstructs detector configuration from selected `TrackingRequest` fields;
+a separately supplied `adapter` is not forwarded through that path. Do not rely on adding
+`adapter` to tracking configuration or `extras`. This does not affect self-contained
+adapter detector checkpoints selected through `--model-path`.
+
+For a separate detector adapter, construct the detector with an explicit
+`ObjectDetectionRequest(adapter=...)`, then inject it through `RunTrackingVideo(detector=...)`
+or `RunObjectDetectionTrackingCommand(detection_model=...)`. Keep the provider, model path,
+confidence, image size, and device in the tracking request consistent with that detector:
+replay metadata currently comes from the tracking request, not the injected object.
+An `adapter` here is a detector feature adapter, not the tracking plugin class.
+
+### Verify the plugin contract, not just imports
+
+The current factory checks protocol membership, which does not validate full signatures.
+The frame command also does not reject a returned frame index that differs from its input.
+The tests in Step 6 therefore check keyword-call compatibility, result type, frame alignment,
+positive unique IDs, and reset. Retain these tests when replacing the example algorithm.
+Treat a successful Step 5 as a construction check, not a complete compatibility check.
+
+If a plugin rejects an input or fails mid-update, stop and reset the session. Do not retry
+that frame on the same command: its counter may already have advanced, and backend state
+may have changed. A wrapper cannot promise rollback of arbitrary algorithm internals.
+
+### Give each resource an explicit owner
+
+In `run_observations.py`, the caller owns the command and resets it in `finally`.
+The plugin owns track state; it does not open a camera, release caller frames, close a
+writer, or manage a detector. Repeated `reset()` calls on these examples are safe.
+Deep SORT reset discards session galleries while retaining reusable encoder weights.
+
+The current video session resets tracking and releases sources/sinks during frame-loop
+cleanup. Exceptions before that loop, such as an initial reporter failure, can bypass
+cleanup. Dataset benchmarking also attempts to release sources/sinks after the session
+has done so. When injecting resource-owning components today, make their `release()` /
+`close()` operations idempotent, arrange outer `try/finally` cleanup for resources you
+create, and preserve the original error if cleanup also fails. Do not assume reset frees
+all model weights, or attach camera/storage ownership to the tracking algorithm.
+
+### Choose the per-frame command for custom storage
+
+`RunTrackingVideo` currently expects file artifacts and always exports replay. Its writer
+parameter is not a general database/in-memory sink interface. For a database, queue, or
+in-memory consumer, use the per-frame loop from Step 7 and pass each `TrackingFrameResult`
+to your own storage component. Keep serialization out of the algorithm. If matching MLX's
+saved-observation behavior, store only confirmed tracks whose `last_seen_frame` equals
+`result.frame_index`; a lost prediction is not a new observation.
+
+### Use a session factory for dataset benchmarks today
+
+There is currently no `algorithm_factory` argument on `BenchmarkTrackingDataset`.
+Use the `examples/session_factory.py` file from Step 3 through its existing `session_factory`
+argument. It constructs a new tracker for each sequence. The Deep SORT version shares one
+lazy encoder within a sequential benchmark while keeping track IDs and appearance galleries
+separate. Do not share that encoder across concurrent workers without establishing its
+thread safety; independent workers can each construct their own factory.
+
+From the project directory, after installing MLX's `tracking` extra, the following is a
+complete optional command. Replace the prepared dataset and detector checkpoint paths.
+The dataset must already follow MLX's tracking-sequence manifest format. A directory of
+arbitrary images is not sufficient. Select a fresh output directory.
+
+```bash
+python -m pip install -e '../mlx[tracking]'
+python - <<'BENCHMARK'
+from examples.session_factory import make_session_factory
+from mlx.modes.object_detection.tracking.benchmark import BenchmarkTrackingDataset
+from mlx.modes.object_detection.tracking.requests import TrackingBenchmarkRequest, TrackingRequest
+
+request = TrackingBenchmarkRequest(
+    dataset_path="/path/to/prepared-tracking-dataset",
+    tracking=TrackingRequest(
+        provider="libreyolo",
+        model_path="/path/to/detector.pt",
+        output_path="./benchmark-output",
+        display=False,
+    ),
+    real_time_results=False,
+)
+result = BenchmarkTrackingDataset(
+    request, session_factory=make_session_factory(),
+).execute()
+print(result.output_path)
+BENCHMARK
+```
+
+The factory explicitly injects an algorithm, so it replaces the normal tracker/config
+selection for those sessions. Change its constructor arguments to configure the benchmark;
+`TrackingRequest.tracker_config` is not applied to an already constructed algorithm.
+For a separately adapted detector, pass the explicitly constructed detector to
+`BenchmarkTrackingDataset(detector=...)` as well. `real_time_results=False` avoids video
+compilation/rendering but still writes the normal tracking, evaluation, and replay files.
+
+### Compose replaceable algorithm components
+
+The Kalman example accepts `filter_factory` in Python. The factory receives an initial
+`xyxy` box and returns an object implementing `predict()` and `update(box)`, each returning
+an `xyxy` box. This lets motion estimation change without rewriting association or track
+lifecycle. JSON cannot contain this callable; inject it from Python or wrap your selected
+factory in another external plugin class for CLI use.
+
+The Deep SORT example already accepts an encoder and backend factory. Keep these integration
+details behind `components/`; only `mlx_plugins/` should translate MLX types. Extract shared
+lifecycle operations when two local algorithms need them, rather than introducing a common
+tracker base class or duplicating the whole implementation.
+
+## Refactor backlog for MLX maintainers
+
+These are proposed MLX runtime changes, **not APIs implemented by this guide**. The files
+above work with the current API and apply the improvements possible in an external plugin.
+
+| Priority | Proposed change | Why it helps |
+| --- | --- | --- |
+| 1 | Compose a typed detector request instead of copying selected fields | Prevent supported detector options, including `adapter`, from being lost. |
+| 2 | Give each resource one owner and protect initialization with a cleanup scope | Cover early failures and eliminate duplicate cleanup between session and benchmark. |
+| 3 | Validate plugin callable compatibility and execution results at the boundary | Report invalid signatures/results with contextual `MLXUserError` messages. |
+| 4 | Introduce a narrow result-sink contract and optional artifact post-processing | Support other storage destinations without forcing MOT files and replay. |
+| 5 | Add an optional per-sequence tracker factory to benchmarking | Allow composed trackers without replacing session construction. |
+| 6 | Inject motion filters and extract proven shared lifecycle operations in built-ins | Make motion replaceable while preserving distinct association algorithms. |
+
+Preserve current CLI behavior, public imports, the existing registry, and default output
+artifacts while making these changes. Add portable regression tests for each boundary.
+Do not introduce a second generic `Track` dispatcher or force external plugins to inherit
+MLX's internal tracking classes.
 
 ## Limits and troubleshooting
 

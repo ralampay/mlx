@@ -1,5 +1,15 @@
 # Adding a tracker
 
+For complete externally installed projects, see the
+[Kalman filter plugin guide](../../guides/tracking-plugin-kalman-filter.md) and
+[Deep SORT plugin guide](../../guides/tracking-plugin-deep-sort.md).
+They include packaging, runnable classes, JSON configuration, synthetic tests, and
+CLI execution through an import reference without modifying MLX or LibreYOLO.
+Create the plugin in a separate project, install it into the same Python environment
+with `python -m pip install -e /path/to/your-plugin`, and pass its import reference to
+`--tracker`. The guides list every file to create and the commands to run in order;
+you do not need your own fork or modified installation of MLX.
+
 ## Responsibility and contract
 
 A tracker receives externally computed detections through

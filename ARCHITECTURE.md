@@ -453,12 +453,27 @@ The `track` CLI mode routes to the nested tracking runner because tracking-by-de
 owned by object detection. `RunTrackingVideo` composes the selected provider's `DetectionAdapter`,
 an OpenCV frame source, a registry-selected `TrackingAlgorithm`, composed streaming class-aware
 JSONL and MOT output, optional MOT evaluation, portable replay export, and an optional injected
-frame sink/renderer pair. Trackers receive only normalized
-`TrackingDetection` values and may be selected by
+frame sink/renderer pair. Trackers receive normalized
+`TrackingDetection` values and an optional original frame (BGR in the OpenCV video
+workflow), allowing appearance encoders to live inside external tracking plugins rather
+than detection providers. `RunTrackByDetectionCommand` also accepts observations directly
+without constructing a detector. Trackers may be selected by
 built-in alias or an external `package.module:ClassName`; constructor keyword arguments come from
 an optional JSON configuration. The built-in registry is immutable, and applications extend it by
 creating and injecting a new `TrackerRegistry` rather than changing process-wide state. SORT and
 ByteTrack are the built-in reference implementations.
+
+External plugins implement `update(*, frame_index, detections, frame=None)` and `reset()`;
+no inheritance or built-in registration is required for an import reference. Commands
+load these classes from separately installed Python packages in the same environment;
+plugin authors do not add source files to MLX or LibreYOLO. Commands
+advance frame indices from 1, including empty-detection frames, and reset session state
+during cleanup. Plugins own their motion, association, identity lifecycle, and optional
+appearance components; they return immutable public snapshots and do not own frame
+decoding or output serialization. Standalone examples are documented in the
+[Kalman filter guide](guides/tracking-plugin-kalman-filter.md) and
+[Deep SORT guide](guides/tracking-plugin-deep-sort.md). These examples introduce no new
+runtime interface or dependencies into MLX.
 
 Tracking output has two synchronized projections with 1-based frame and track IDs.
 `tracks.jsonl` is the versioned, provider-neutral source that retains class ID, optional label,
